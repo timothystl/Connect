@@ -708,7 +708,7 @@ describe('Finance alpha staging shell', () => {
     expect(html).toContain('$300,000');
     expect(html).toContain('$100,000');
     expect(html).toContain('$200,000');
-    expect(html).toContain('Equation difference $0');
+    expect(html).toContain('✓ Adds up: what we own − what we owe = net assets');
     expect(statements).toHaveLength(2);
     expect(statements.every((sql) => /^SELECT\b/i.test(sql))).toBe(true);
 
