@@ -135,57 +135,13 @@ function renderYearControls(page, selection, fiscalYear, { extraHidden = '' } = 
 
 // ── Lay position (own − owe = net assets; usable money vs. property) ───────────────────────────
 // See buildLayPosition in balance-sheet-service.js for how each figure is drawn from the account
-// tree. Plain names for QuickBooks' short-term liability groups; anything unrecognized keeps its
-// own label.
-const SHORT_TERM_LABELS = [
-  [/accounts payable/i, 'Bills not yet paid'],
-  [/credit card/i, 'Credit cards'],
-  [/other current|payroll/i, 'Payroll withholdings not yet sent'],
-];
-function plainShortTermLabel(label) {
-  const hit = SHORT_TERM_LABELS.find(([re]) => re.test(String(label || '')));
-  return hit ? hit[1] : label;
-}
+// tree.
 function layRows(lines) {
   return lines.filter(Boolean).map(([label, cents, opts = {}]) => `<tr${opts.total ? ' class="bs-group-row"' : ''}><td${opts.indent ? ' style="padding-left:30px"' : ''}>${label}</td><td class="num">${cents === null ? '—' : formatCents(cents)}</td></tr>`).join('');
 }
 function layTable(lines) {
   return `<div class="table-wrap"><table class="bs-table bs-lay"><tbody>${layRows(lines)}</tbody></table></div>`;
 }
-function minus(cents) { return -cents; }
-
-function renderLayOwnOwe(lay) {
-  const own = layTable([
-    ['Cash (checking and petty cash)', lay.own.cashCents],
-    ['Investments (endowment and bequest funds)', lay.own.investmentsCents],
-    lay.own.otherAssetsCents ? ['Other (prepaid expenses, tax holding)', lay.own.otherAssetsCents] : null,
-    ['Commercial property <small>(loan amount on the books, not market value)</small>', lay.own.propertyCents],
-    ['<b>Total we own</b>', lay.own.totalCents, { total: true }],
-  ]);
-  const owe = layTable([
-    ...lay.owe.shortTermLines.map((line) => [escapeHtml(plainShortTermLabel(line.label)), line.cents]),
-    ['Mortgage (LCEF)', lay.owe.longTermCents],
-    ['<b>Total we owe</b>', lay.owe.totalCents, { total: true }],
-  ]);
-  return `<div class="bs-panel" aria-label="What we own">${panelHeading('What we own')}${own}</div>
-    <div class="bs-panel" aria-label="What we owe">${panelHeading('What we owe')}${owe}</div>`;
-}
-
-function renderLayMoney(lay) {
-  const m = lay.money;
-  return `<div class="bs-panel" aria-label="Money we can use">
-      ${panelHeading('1. Money we can actually use', 'Cash and investments only. The property is shown separately below because it cannot easily be sold.')}
-      ${layTable([
-        ['Cash + investments', m.cashAndInvestmentsCents],
-        ['− Bills, cards and payroll owed now', minus(lay.owe.shortTermCents), { indent: true }],
-        ['<b>= Money on hand after paying what’s due</b>', m.afterShortTermCents, { total: true }],
-        ['− Already promised: designated funds <small>(Memorial, Food Pantry, missions…)</small>', minus(m.designatedCents), { indent: true }],
-        ['− Already promised: endowment principal <small>(can never be spent)</small>', minus(m.endowmentCents), { indent: true }],
-        ['<b>= Free to direct</b>', m.freeCents, { total: true }],
-      ])}
-    </div>`;
-}
-
 // The LCEF loan began in spring 2013, before the books tracked it. No 2013 note is on hand, so this
 // is an estimate (Andrew, September 27, 2026): the 2018 payments fit a 20-year loan at 4.5% with a
 // $3,827.38 payment and exactly 180 payments left in March 2018, which amortizes back to $604,977
@@ -216,7 +172,7 @@ function renderLayProperty(lay, valuation, history) {
     ? `<ul class="bs-meters"><li><span>Loan paid down${original ? ` <small>(from the original loan, ${escapeHtml(original.label)})</small>` : ''}</span><span class="bs-meter" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, paidPct)).toFixed(1)}%"></i></span><span class="num">${formatCents(paidCents)} of ${formatCents(startCents)} · ${paidPct.toFixed(0)}%</span></li></ul>`
     : '';
   return `<div class="bs-panel" aria-label="Property">
-      ${panelHeading('2. Property (not spendable)', 'The commercial property. The books carry it at the loan amount, not its market value.')}
+      ${panelHeading('Property (not spendable)', 'The commercial property. The books carry it at the loan amount, not its market value.')}
       ${layTable(rows)}
       ${valueNote}
       ${meter}
@@ -246,11 +202,110 @@ export function renderMortgageHistory(bookCents, history, original = null) {
     ${renderPlainTable(['Year', ['Mortgage left', true], ['Paid that year', true], [original ? 'Paid down from original loan' : 'Paid down since recorded', true]], rows)}`;
 }
 
-function renderLayCheck(lay) {
-  const parts = `${formatCents(lay.money.freeCents)} free + ${formatCents(lay.money.designatedCents + lay.money.endowmentCents)} promised${lay.own.otherAssetsCents ? ` + ${formatCents(lay.own.otherAssetsCents)} other` : ''} + ${formatCents(lay.property.equityCents)} property = ${formatCents(lay.netAssetsCents)} net assets`;
-  return Math.abs(lay.checkCents) < 1
-    ? `<p class="bs-check is-ok">✓ ${parts}</p>`
-    : `<p class="bs-check is-off">⚠ The pieces are off by ${formatExactCents(lay.checkCents)} — check the import for a misclassified account.</p>`;
+// ── Council view (Andrew, September 27, 2026) ─────────────────────────────────────────────────
+// The council reads finances the way a household does: what money do we have, what do we owe,
+// how much of it is already promised, and are we ahead or behind since last year. So Position
+// shows those questions in plain words with a "last year-end" column beside each, and leaves the
+// bookkeeping vocabulary (net assets, equity, the balancing check) to Account detail and the
+// bookkeeper's own reports. Designated funds are shown one by one, like envelopes in one wallet,
+// with how many times over the church's money covers them.
+
+// Known reasons behind an investment change, by the year being viewed. The balance sheet alone
+// cannot tell a withdrawal from a market move, so a recorded withdrawal is shown beside the change.
+export const INVESTMENT_YEAR_NOTES = {
+  2026: { withdrawnCents: 3000000, reason: 'to cover expenses' },
+};
+
+function findMatch(list, item) {
+  if (!list) return null;
+  return (item.code && list.find((x) => x.code === item.code)) || list.find((x) => x.label.toLowerCase() === item.label.toLowerCase()) || null;
+}
+// Green means good news: more money, or less owed. A debt row inverts the color; a set-aside
+// subtraction is neither good nor bad news on its own, so it stays neutral.
+function changeCell(now, before, tone) {
+  if (before === null || before === undefined) return '<td class="num">—</td>';
+  const delta = now - before;
+  const cls = tone === 'neutral' ? 'bs-flat' : toneClass(tone === 'debt' ? -delta : delta);
+  return `<td class="num ${cls}">${signedChange(delta)}</td>`;
+}
+function compareRow(label, now, before, { total = false, indent = false, tone = 'asset' } = {}) {
+  return `<tr${total ? ' class="bs-group-row"' : ''}><td${indent ? ' style="padding-left:30px"' : ''}>${label}</td><td class="num">${formatCents(now)}</td><td class="num">${before === null || before === undefined ? '—' : formatCents(before)}</td>${changeCell(now, before, tone)}</tr>`;
+}
+function compareTable(priorLabel, rows) {
+  return renderPlainTable(['', ['Now', true], [priorLabel, true], ['Change', true]], rows.filter(Boolean).join(''));
+}
+function upDown(delta) { return `${delta < 0 ? 'down' : 'up'} ${formatCents(Math.abs(delta))}`; }
+
+function renderCouncilPosition({ lay, prior, priorLabel, fiscalYear, valuation, history, equityReclass }) {
+  const p = prior;
+  const money = lay.money.cashAndInvestmentsCents;
+  const priorMoney = p ? p.money.cashAndInvestmentsCents : null;
+  const groupsOf = (l) => (l.investmentGroups.length ? l.investmentGroups : [{ label: 'Investments', code: null, cents: l.own.investmentsCents }]);
+  const groups = groupsOf(lay);
+  const priorGroups = p ? groupsOf(p) : null;
+  const value = valuation && valuation.capitalizedValueCents > 0 ? valuation.capitalizedValueCents : null;
+
+  const have = compareTable(priorLabel, [
+    compareRow('Cash in checking', lay.own.cashCents, p ? p.own.cashCents : null),
+    ...groups.map((g) => compareRow(`Investments: ${escapeHtml(g.label.toLowerCase())}`, g.cents, priorGroups ? (findMatch(priorGroups, g)?.cents ?? 0) : null)),
+    compareRow('<b>Total money</b>', money, priorMoney, { total: true }),
+  ]) + `<p class="bs-note">Also owned: the commercial property${value ? `, worth about ${formatCents(value)}` : ''} (see Property below)${lay.own.otherAssetsCents ? `, and ${formatCents(lay.own.otherAssetsCents)} of prepaid bills and tax holding that is not spendable` : ''}.</p>`;
+
+  const mortgageDelta = p ? p.owe.longTermCents - lay.owe.longTermCents : null;
+  const owe = compareTable(priorLabel, [
+    compareRow('Bills and payroll due now', lay.owe.shortTermCents, p ? p.owe.shortTermCents : null, { tone: 'debt' }),
+    compareRow(`Mortgage on the commercial property${mortgageDelta > 0 ? ` <small>(${formatCents(mortgageDelta)} paid down)</small>` : ''}`, lay.owe.longTermCents, p ? p.owe.longTermCents : null, { tone: 'debt' }),
+  ]);
+
+  const setAside = compareTable(priorLabel, [
+    compareRow('Total money', money, priorMoney),
+    compareRow('− Bills due now', -lay.owe.shortTermCents, p ? -p.owe.shortTermCents : null, { indent: true, tone: 'neutral' }),
+    compareRow('− Designated funds <small>(listed below)</small>', -lay.money.designatedCents, p ? -p.money.designatedCents : null, { indent: true, tone: 'neutral' }),
+    compareRow('− Endowment principal <small>(can never be spent)</small>', -lay.money.endowmentCents, p ? -p.money.endowmentCents : null, { indent: true, tone: 'neutral' }),
+    compareRow('<b>= Free for the council to direct</b>', lay.money.freeCents, p ? p.money.freeCents : null, { total: true }),
+  ]);
+
+  // Every fund with a balance now or at last year-end; a fund closed since then reads $0 now.
+  const funds = [...lay.designatedFunds];
+  if (p) for (const f of p.designatedFunds) if (!findMatch(funds, f) && f.cents !== 0) funds.push({ ...f, cents: 0 });
+  const priorFund = (f) => (p ? (findMatch(p.designatedFunds, f)?.cents ?? 0) : null);
+  const fundRows = funds.filter((f) => f.cents !== 0 || (priorFund(f) || 0) !== 0)
+    .sort((a, b) => b.cents - a.cents)
+    .map((f) => compareRow(escapeHtml(f.label), f.cents, priorFund(f), { tone: 'neutral' }));
+  const coverage = lay.money.designatedCents > 0 ? money / lay.money.designatedCents : null;
+  const coverageNote = coverage === null ? ''
+    : coverage >= 1
+      ? ` Checking and investments hold ${formatCents(money)}, enough to cover every fund ${coverage >= 2 ? `${coverage.toFixed(1)} times over` : 'in full'}.`
+      : ` Checking and investments hold ${formatCents(money)}, less than the funds’ total.`;
+
+  const bullets = [];
+  if (p) {
+    const invDelta = lay.own.investmentsCents - p.own.investmentsCents;
+    const note = INVESTMENT_YEAR_NOTES[fiscalYear];
+    const market = note ? invDelta + note.withdrawnCents : null;
+    const invText = note
+      ? `investments are ${upDown(invDelta)}, including ${formatCents(note.withdrawnCents)} taken out ${escapeHtml(note.reason)}${market ? `; the market is ${upDown(market)}` : ''}`
+      : `investments are ${upDown(invDelta)}`;
+    bullets.push(`<li><b>Money:</b> ${upDown(money - priorMoney)} since ${escapeHtml(priorLabel.toLowerCase())}. Checking is ${upDown(lay.own.cashCents - p.own.cashCents)}; ${invText}.</li>`);
+    const paidOff = ORIGINAL_PROPERTY_LOAN && ORIGINAL_PROPERTY_LOAN.cents > 0
+      ? ` ${((ORIGINAL_PROPERTY_LOAN.cents - lay.owe.longTermCents) / ORIGINAL_PROPERTY_LOAN.cents * 100).toFixed(0)}% paid off since the loan began.` : '';
+    bullets.push(`<li><b>Mortgage:</b> ${mortgageDelta >= 0 ? `${formatCents(mortgageDelta)} paid down` : `up ${formatCents(-mortgageDelta)}`} since ${escapeHtml(priorLabel.toLowerCase())}.${paidOff}</li>`);
+    const freeDelta = lay.money.freeCents - p.money.freeCents;
+    bullets.push(`<li><b>Free to direct:</b> ${Math.abs(freeDelta) < 500000 ? `about the same (${signedChange(freeDelta)})` : upDown(freeDelta)}.</li>`);
+  }
+
+  return `${renderKpiCards([
+      { label: 'Total money', value: formatCents(money), hint: 'Checking and investments' },
+      { label: 'Free for the council to direct', value: formatCents(lay.money.freeCents), hint: 'After bills, designated funds and endowment principal' },
+      { label: 'Mortgage left', value: formatCents(lay.owe.longTermCents), hint: 'Commercial property' },
+    ])}
+    <div class="bs-panel" aria-label="What we have">${panelHeading('What we have')}${have}</div>
+    <div class="bs-panel" aria-label="What we owe">${panelHeading('What we owe')}${owe}</div>
+    <div class="bs-panel" aria-label="How the money is set aside">${panelHeading('How the money is set aside')}${setAside}</div>
+    ${fundRows.length ? `<div class="bs-panel" aria-label="Designated funds">${panelHeading('Designated funds', `Each fund is tracked to the penny, like envelopes in one wallet. The money is kept together in the church’s checking and investment accounts.${coverageNote}`)}${compareTable(priorLabel, [...fundRows, compareRow('<b>Total</b>', lay.money.designatedCents, p ? p.money.designatedCents : null, { total: true, tone: 'neutral' })])}</div>` : ''}
+    ${bullets.length ? `<div class="bs-panel" aria-label="Are we ahead or behind">${panelHeading('Are we ahead or behind?')}<ul class="bs-plain">${bullets.join('')}</ul></div>` : ''}
+    ${renderLayProperty(lay, valuation, history)}
+    ${renderUnclassifiedWarning(equityReclass)}`;
 }
 
 function renderUnclassifiedWarning(equityReclass) {
@@ -518,6 +573,7 @@ export const BALANCE_STYLES = `
     .bs-h { margin:22px 0 4px; font-size:17px; }
     .bs-note { margin:4px 0 8px; font-size:13px; }
     .bs-panel { margin-top:18px; }
+    .bs-plain { margin:6px 0 0; padding-left:20px; line-height:1.6; }
     .bs-check { margin:12px 0 4px; font-size:14px; font-weight:600; }
     .bs-check.is-ok, .bs-up { color:#2F7D5B; }
     .bs-check.is-off, .bs-down { color:#B4412F; }
@@ -621,24 +677,24 @@ export function renderBalancePage(pageId, {
       ${emptyYear ? emptyNote : `${renderBalanceCheck(report.totals.equationDifferenceCents)}
       ${renderZeroToggle(selection, fiscalYear, detail.hiddenCount)}
       ${detail.html}
-      ${renderFoldedEquityNote(balanceSheet.accounts)}`}
+      ${renderFoldedEquityNote(balanceSheet.accounts)}
+      ${renderYearOverYear(balanceSheet.accounts, fiscalYear, balancePriorYear)}`}
     </section>`;
   }
 
   // 'position' (default)
   const lay = isLive && !emptyYear ? buildLayPosition(balanceSheet.accounts, balanceSheet.equityReclass) : null;
-  const positionBody = emptyYear ? emptyNote : `${renderKpiCards([
+  const priorLay = lay && balancePriorYear?.ok && balancePriorYear.accounts.length
+    ? buildLayPosition(balancePriorYear.accounts, balancePriorYear.equityReclass) : null;
+  const positionBody = emptyYear ? emptyNote : `${lay
+    ? `${Math.abs(report.totals.equationDifferenceCents) >= 1 ? renderBalanceCheck(report.totals.equationDifferenceCents) : ''}
+    ${renderCouncilPosition({ lay, prior: priorLay, priorLabel: `End of ${fiscalYear - 1}`, fiscalYear, valuation: balancePropertyValue, history: balanceMortgageHistory, equityReclass: report.equityReclass })}`
+    : `${renderKpiCards([
       { label: 'What we own', value: formatCents(report.totals.assetsCents) },
-      { label: 'What we owe', value: formatCents(report.totals.liabilitiesCents), hint: 'Mortgage, bills and payroll not yet paid' },
+      { label: 'What we owe', value: formatCents(report.totals.liabilitiesCents) },
       { label: 'Net assets', value: formatCents(report.totals.equityCents), hint: 'What we own minus what we owe' },
     ])}
-    ${renderBalanceCheck(report.totals.equationDifferenceCents)}
-    ${lay ? `${renderLayOwnOwe(lay)}
-    ${renderLayMoney(lay)}
-    ${renderLayProperty(lay, balancePropertyValue, balanceMortgageHistory)}
-    ${renderLayCheck(lay)}
-    ${renderUnclassifiedWarning(report.equityReclass)}` : ''}
-    ${isLive ? renderYearOverYear(balanceSheet.accounts, fiscalYear, balancePriorYear) : ''}
+    ${renderBalanceCheck(report.totals.equationDifferenceCents)}`}
     ${isLive && printMode ? `${panelHeading('Full account detail', hideZero ? 'Zero-balance lines are hidden.' : '')}${renderBalanceDetailTree(balanceSheet.accounts, { hideZero }).html}` : ''}
     <p class="no-print">See <a href="${escapeHtml(balanceHref('account-detail', isLive ? { fiscal_year: fiscalYear } : {}))}">Account detail</a> and <a href="${escapeHtml(balanceHref('multi-year'))}">Multi-year position</a> for the full breakdown behind these totals.</p>`;
   return `<section class="report" aria-label="Balance Sheet position">

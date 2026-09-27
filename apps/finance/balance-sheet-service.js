@@ -66,7 +66,7 @@ export async function resolveBalanceSheet(env, db, { fiscalYear = defaultLiveBal
 export async function resolveBalanceSheetPriorYear(env, fiscalYear) {
   const result = await fetchLiveFinanceBalanceSheet(env, fiscalYear - 1);
   if (!result.ok) return { ok: false, fiscalYear: fiscalYear - 1, reason: result.reason };
-  return { ok: true, fiscalYear: result.balanceSheet.fiscalYear, accounts: result.balanceSheet.accounts };
+  return { ok: true, fiscalYear: result.balanceSheet.fiscalYear, asOfDate: result.balanceSheet.asOfDate, accounts: result.balanceSheet.accounts, equityReclass: result.balanceSheet.equityReclass || null };
 }
 
 // Reads the Balance Sheet pages' GET controls: `fiscal_year` (the snapshot year; defaults to the
@@ -417,7 +417,24 @@ export function buildLayPosition(accounts, equityReclass) {
     .filter((a) => a.classification === 'Liabilities' && a.depth === 2 && /current/i.test(topSegment(a.categoryPath)))
     .map((a) => ({ label: a.accountName, cents: sumOwn(accounts, (b) => under(b.categoryPath, a.categoryPath)) }))
     .filter((line) => line.cents !== 0);
+  // The investment groups one level under the investment root (endowment funds, bequest funds),
+  // and each designated fund (every net-assets line that is not a QuickBooks equity line), both
+  // with their account-code prefix dropped for reading.
+  const plainLabel = (label) => String(label || '').replace(/^\d{4,6}[a-z]{0,2}\s+/i, '').trim();
+  const invRootAccount = (accounts || []).find((a) => a.categoryPath === invRoot);
+  const investmentGroups = invRootAccount
+    ? (accounts || []).filter((a) => a.classification === 'Assets' && a.depth === invRootAccount.depth + 1 && under(a.categoryPath, invRoot))
+      .map((a) => ({ label: plainLabel(a.accountName), code: accountCodeOf(a.accountName), cents: sumOwn(accounts, (b) => under(b.categoryPath, a.categoryPath)) }))
+      .filter((g) => g.cents !== 0)
+    : [];
+  const shown = presentNetAssets(accounts).accounts;
+  const shownPaths = new Set(shown.map((a) => a.categoryPath));
+  const designatedFunds = shown
+    .filter((a) => a.classification === 'Equity' && a.depth > 0 && a.categoryPath !== NET_ASSETS_PRIOR_PATH && a.categoryPath !== NET_ASSETS_CURRENT_PATH
+      && !shown.some((b) => b !== a && String(b.categoryPath).startsWith(`${a.categoryPath}:`) && shownPaths.has(b.categoryPath)))
+    .map((a) => ({ label: plainLabel(a.accountName), code: accountCodeOf(a.accountName), cents: a.ownBalanceCents || 0 }));
   return {
+    investmentGroups, designatedFunds,
     own: { cashCents, investmentsCents, otherAssetsCents, propertyCents, totalCents: assetsCents },
     owe: { shortTermCents, shortTermLines, longTermCents, totalCents: liabilitiesCents },
     netAssetsCents: assetsCents - liabilitiesCents,

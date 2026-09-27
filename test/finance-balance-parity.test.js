@@ -271,20 +271,29 @@ describe('Balance Sheet pages render Connect’s sections', () => {
   });
   const prior = { ok: true, fiscalYear: 2025, accounts: ACCOUNTS.filter((a) => a.accountName !== '15000 Building') };
 
-  it('Position: year picker, balance check, own/owe, usable money, property, unclassified names, and year over year', () => {
+  it('Position: the council view with last year-end beside each figure, property, and unclassified names', () => {
     const html = renderBalancePage('position', { balanceSheet: liveSheet(), balanceTrends: { source: 'live', rows: [] }, balancePriorYear: prior, selection: parseBalanceSelection(new URLSearchParams('fiscal_year=2026')) });
     expect(html).toContain('name="fiscal_year"');
-    expect(html).toContain('✓ Adds up: what we own − what we owe = net assets');
-    expect(html).toContain('What we own');
-    expect(html).toContain('1. Money we can actually use');
-    expect(html).toContain('2. Property (not spendable)');
-    expect(html).toContain('loan amount on the books, not market value');
+    expect(html).not.toContain('Adds up'); // a balanced sheet shows no bookkeeping check
+    expect(html).not.toContain('Net assets');
+    expect(html).toContain('What we have');
+    expect(html).toContain('How the money is set aside');
+    expect(html).toContain('Free for the council to direct');
+    expect(html).toContain('End of 2025');
+    expect(html).toContain('Are we ahead or behind?');
+    expect(html).toContain('Property (not spendable)');
+    expect(html).toContain('not its market value');
     expect(html).not.toContain('Current valuation'); // no live valuation passed
     expect(html).toContain('39000 New Fund');
     expect(html).toContain('$123');
+    expect(html).not.toContain('2026 vs. 2025'); // the account-by-account table is on Account detail
+    expect(html).not.toContain('Full account detail'); // only the print sheet adds it
+  });
+
+  it('Account detail carries the account-by-account comparison with last year', () => {
+    const html = renderBalancePage('account-detail', { balanceSheet: liveSheet(), balanceTrends: { source: 'live', rows: [] }, balancePriorYear: prior, selection: parseBalanceSelection(new URLSearchParams('fiscal_year=2026')) });
     expect(html).toContain('2026 vs. 2025');
     expect(html).toContain('new this year'); // the building has no 2025 line
-    expect(html).not.toContain('Full account detail'); // only the print sheet adds it
   });
 
   it('Position print adds the filtered account detail; an unbalanced sheet reports the difference', () => {
@@ -299,8 +308,11 @@ describe('Balance Sheet pages render Connect’s sections', () => {
   it('Position says so when the chosen year has no balance sheet, and when last year is missing', () => {
     const empty = renderBalancePage('position', { balanceSheet: { ...liveSheet([]), asOfDate: '' }, balanceTrends: { source: 'live', rows: [] } });
     expect(empty).toContain('No balance sheet imported yet for 2026');
-    const noPrior = renderBalancePage('position', { balanceSheet: liveSheet(), balanceTrends: { source: 'live', rows: [] }, balancePriorYear: { ok: true, fiscalYear: 2025, accounts: [] } });
+    const noPrior = renderBalancePage('account-detail', { balanceSheet: liveSheet(), balanceTrends: { source: 'live', rows: [] }, balancePriorYear: { ok: true, fiscalYear: 2025, accounts: [] } });
     expect(noPrior).toContain('No 2025 balance sheet on file yet');
+    const positionNoPrior = renderBalancePage('position', { balanceSheet: liveSheet(), balanceTrends: { source: 'live', rows: [] }, balancePriorYear: { ok: true, fiscalYear: 2025, accounts: [] } });
+    expect(positionNoPrior).toContain('What we have');
+    expect(positionNoPrior).not.toContain('Are we ahead or behind?'); // nothing to compare against
   });
 
   it('Account detail: indented tree, zero lines hidden by default with a toggle to show them', () => {
@@ -379,8 +391,10 @@ describe('Finance shell serves the parity pages from its own database', () => {
     const position = await (await get('/?section=balance&page=position&fiscal_year=2025')).text();
     expect(position).toContain('Financial position as of FY2025');
     expect(position).toContain('Live from Connect');
-    expect(position).toContain('2025 vs. 2024');
-    expect(position).toContain('$370,000');
+    expect(position).toContain('End of 2024');
+    const detailPage = await (await get('/?section=balance&page=account-detail&fiscal_year=2025')).text();
+    expect(detailPage).toContain('2025 vs. 2024');
+    expect(detailPage).toContain('$370,000');
 
     const trend = await (await get('/?section=balance&page=multi-year&from_year=2025&to_year=2026')).text();
     expect(trend).toContain('Net worth growth by year');
@@ -461,8 +475,8 @@ describe('net assets read as what we own minus what we owe', () => {
     expect(tree).not.toContain('31000 Retained Earnings');
     expect(detail.slice(detail.indexOf('<details'))).toContain('31000 Retained Earnings');
     const position = renderBalancePage('position', { balanceSheet: sheet, balanceTrends: { source: 'live', rows: [] }, balancePriorYear: { ok: true, fiscalYear: 2025, accounts } });
-    expect(position).toContain('Total we own');
-    expect(position).toContain('Total we owe');
+    expect(position).toContain('Total money');
+    expect(position).toContain('What we owe');
     expect(position).not.toContain('Retained Earnings');
   });
 });
@@ -476,6 +490,8 @@ describe('lay position from the September 2026 balance sheet', () => {
     A('Assets', 'Assets:Current Assets:Bank Accounts:11000 Cash:11025 Petty Cash', 200),
     A('Assets', 'Assets:Current Assets:Bank Accounts:11000 Cash:11027 Lindell Checking', 82126),
     A('Assets', 'Assets:Current Assets:Bank Accounts:12000 Investment Accounts', 0),
+    A('Assets', 'Assets:Current Assets:Bank Accounts:12000 Investment Accounts:120001 Endowment Funds', 0),
+    A('Assets', 'Assets:Current Assets:Bank Accounts:12000 Investment Accounts:120002 Bequest Funds', 0),
     A('Assets', 'Assets:Current Assets:Bank Accounts:12000 Investment Accounts:120001 Endowment Funds:12010 Thrivent', 209658),
     A('Assets', 'Assets:Current Assets:Bank Accounts:12000 Investment Accounts:120002 Bequest Funds:12020 Edward Jones', 357905),
     A('Assets', 'Assets:Current Assets:Other Current Assets', 0),
@@ -502,6 +518,27 @@ describe('lay position from the September 2026 balance sheet', () => {
     expect(lay.checkCents).toBe(0);
   });
 
+  it('compares with last year-end, lists each designated fund, and explains the investment withdrawal', () => {
+    const now = { source: 'live', fiscalYear: 2026, asOfDate: 'August 31, 2026', accounts, equityReclass,
+      totals: { assetsCents: 115733900, liabilitiesCents: 29346500, equityCents: 86387400, balancedCents: 0 } };
+    const priorAccounts = accounts.map((a) => ({ ...a, ownBalanceCents: ({
+      'Assets:Current Assets:Bank Accounts:11000 Cash:11027 Lindell Checking': 5458100,
+      'Assets:Current Assets:Bank Accounts:12000 Investment Accounts:120001 Endowment Funds:12010 Thrivent': 22347500,
+      'Assets:Current Assets:Bank Accounts:12000 Investment Accounts:120002 Bequest Funds:12020 Edward Jones': 37980400,
+      'Liabilities:Long-Term Liabilities:26002 LCEF Mortgage 1': 29519500,
+      'Equity:25000 Funds': 13211500,
+    })[a.categoryPath] ?? a.ownBalanceCents }));
+    const html = renderBalancePage('position', { balanceSheet: now, balanceTrends: { source: 'live', rows: [] },
+      balancePriorYear: { ok: true, fiscalYear: 2025, accounts: priorAccounts, equityReclass: { ...equityReclass, breakdown: { perpetual: { cents: 22347500 } } } } });
+    expect(html).toContain('End of 2025');
+    expect(html).toContain('+$27,545'); // checking
+    expect(html).toContain('$17,801 paid down');
+    expect(html).toContain('including $30,000 taken out to cover expenses; the market is down $5,716');
+    expect(html).toContain('Designated funds');
+    expect(html).toContain('like envelopes in one wallet');
+    expect(html).toContain('4.8 times over');
+  });
+
   it('shows the valuation and the mortgage progress by year', () => {
     const sheet = { source: 'live', fiscalYear: 2026, asOfDate: 'August 31, 2026', accounts, equityReclass,
       totals: { assetsCents: 115733900, liabilitiesCents: 29346500, equityCents: 86387400, balancedCents: 0 } };
@@ -510,9 +547,9 @@ describe('lay position from the September 2026 balance sheet', () => {
       balanceMortgageHistory: [
         { fiscalYear: 2024, mortgageCents: 32117548 }, { fiscalYear: 2025, mortgageCents: 29519489 }, { fiscalYear: 2026, mortgageCents: 27739400 },
       ] });
-    expect(html).toContain('Bills not yet paid');
-    expect(html).toContain('Payroll withholdings not yet sent');
-    expect(html).toContain('$288,207'); // free to direct
+    expect(html).toContain('Bills and payroll due now');
+    expect(html).toContain('Investments: endowment funds');
+    expect(html).toContain('Investments: bequest funds');
     expect(html).toContain('$686,315'); // current valuation
     expect(html).toContain('8.0% cap rate');
     expect(html).toContain('$408,921'); // owned free of debt at valuation
@@ -523,6 +560,6 @@ describe('lay position from the September 2026 balance sheet', () => {
     expect(html).toContain('$327,606 of $605,000 · 54%'); // paid down from the estimated original
     expect(html).toContain('Paid down from original loan');
     expect(html).not.toContain('Retained Earnings');
-    expect(html).toContain('✓ $288,207 free');
+    expect(html).toContain('$288,207'); // free for the council to direct
   });
 });

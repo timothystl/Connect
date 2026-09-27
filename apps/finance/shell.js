@@ -3687,7 +3687,7 @@ export default {
           ? safeSyntheticRead(() => resolveBalanceSheet(env, env.FINANCE_DB, balanceSelection ? { fiscalYear: balanceSelection.fiscalYear } : {})) : null;
         // Position's this-year-vs-last-year table reads the prior year too, like Connect's tab.
         // Live-only and never throws; started now so it runs alongside every other read.
-        const balancePriorYearLoad = section.id === 'balance' && effectivePageId === 'position'
+        const balancePriorYearLoad = section.id === 'balance' && ['position', 'account-detail'].includes(effectivePageId)
           ? resolveBalanceSheetPriorYear(env, balanceSelection.fiscalYear) : null;
         // Position's Property panel: the commercial property's current valuation (the same
         // capitalized value Commercial Property → Valuation shows; live only, never the synthetic
