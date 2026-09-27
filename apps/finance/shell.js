@@ -156,6 +156,7 @@ import { renderBalancePage, buildBalanceTrendCsv, BALANCE_STYLES } from './balan
 import { renderDaycarePage } from './daycare-pages.js';
 import { renderPropertyPage } from './property-pages.js';
 import { ACQUISITION_STYLES, renderAcquisitionPage } from './property-acquisition-pages.js';
+import { PROPERTY_CHART_STYLES } from './property-charts.js';
 import { renderCompensationPage } from './compensation-pages.js';
 import { renderPlanningPage } from './planning-pages.js';
 import { renderAccountsPage } from './accounts-pages.js';
@@ -1535,7 +1536,7 @@ function renderShell(ctx) {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Timothy Finance${production ? '' : ' — Staging'}</title>
   <link rel="icon" href="/assets/finance-mark.png"><link rel="apple-touch-icon" href="/assets/finance-icon.png">
-  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${BALANCE_STYLES}</style>
+  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}</style>
 </head>
 <body${councilPreview ? ' class="council-preview"' : ''}>
   <header class="app-header">
