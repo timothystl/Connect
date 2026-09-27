@@ -229,7 +229,7 @@ function renderLayProperty(lay, valuation, history) {
 // paydown is measured from the amount recorded; any other first year has no prior to compare.
 // A year whose sheet is not a December 31 close is marked "so far".
 // "Paid down" is measured from the original loan when one is set, else from the amount recorded.
-function renderMortgageHistory(bookCents, history, original = null) {
+export function renderMortgageHistory(bookCents, history, original = null) {
   if (!history || !history.length) return '';
   const startCents = original ? original.cents : bookCents;
   let prior = history[0].fiscalYear === MORTGAGE_HISTORY_FROM_YEAR ? bookCents : null;
