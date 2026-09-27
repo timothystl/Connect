@@ -7103,6 +7103,57 @@ function finComputeMortgageRemainingCents(loan, monthly) {
   applicable.forEach(function(m) { cents -= (m.loan_payment_cents - m.interest_expense_cents); });
   return { cents: cents, asOf: applicable.length ? applicable[applicable.length - 1].period : loan.balance_as_of_date, monthsApplied: applicable.map(function(m) { return m.period; }) };
 }
+// Pure — no DOM. The valuation from what the property ACTUALLY earned: the trailing twelve months
+// of AHRA reports (the latest report and the eleven calendar months before it), NOI ÷ the
+// worksheet's cap rate. Same formula as AHRA's worksheet (finComputePropertyValuation), with the
+// reports' real NOI in place of the worksheet's rent-roll-and-budget NOI, so every imported
+// report moves the figure without anyone re-keying the worksheet.
+// NOI per month: AHRA's own NOI line where the report carries one (2026 onward). Older reports
+// only give net income, which is AFTER mortgage interest, so interest is added back — the month's
+// own reported interest when present, otherwise the average interest the window's reports show
+// (NOI − net income), otherwise the loan's rate × balance. Those months are counted as estimated.
+// A full calendar window is required to call it "trailing twelve": a partial window is annualized
+// and flagged, because December carries the property-tax bill and a window missing it overstates
+// NOI badly.
+function finComputePropertyActualValuation(d) {
+  var meta = (d && d.meta) || {};
+  var capRate = Number((meta.valuation || {}).cap_rate) || 0;
+  var loan = meta.loan || {};
+  var all = ((d && d.monthly) || []).filter(function(m) {
+    return m.net_operating_income_cents != null || m.net_income_cents != null
+      || (m.total_revenue_cents != null && m.total_expenses_cents != null);
+  }).sort(function(a, b) { return a.period < b.period ? -1 : 1; });
+  if (!all.length) return null;
+  var toPeriod = all[all.length - 1].period;
+  var y = Number(toPeriod.slice(0, 4)), mo = Number(toPeriod.slice(5, 7)) - 11;
+  if (mo < 1) { mo += 12; y -= 1; }
+  var fromPeriod = y + '-' + (mo < 10 ? '0' : '') + mo;
+  var win = all.filter(function(m) { return m.period >= fromPeriod; });
+  function net(m) { return m.net_income_cents != null ? m.net_income_cents : m.total_revenue_cents - m.total_expenses_cents; }
+  var observed = win.filter(function(m) { return m.net_operating_income_cents != null && (m.net_income_cents != null || m.total_expenses_cents != null); })
+    .map(function(m) { return m.net_operating_income_cents - net(m); });
+  var fallbackInterest = observed.length
+    ? observed.reduce(function(s, c) { return s + c; }, 0) / observed.length
+    : (loan.balance_cents != null && loan.interest_rate_pct ? loan.balance_cents * loan.interest_rate_pct / 12 : 0);
+  var estimated = [];
+  var sum = win.reduce(function(s, m) {
+    if (m.net_operating_income_cents != null) return s + m.net_operating_income_cents;
+    if (m.interest_expense_cents != null) return s + net(m) + m.interest_expense_cents;
+    estimated.push(m.period);
+    return s + net(m) + fallbackInterest;
+  }, 0);
+  var noiCents = Math.round(win.length === 12 ? sum : sum / win.length * 12);
+  return {
+    noiCents: noiCents,
+    capRate: capRate,
+    valueCents: capRate ? Math.round(noiCents / capRate) : null,
+    months: win.length,
+    complete: win.length === 12,
+    fromPeriod: win[0].period,
+    toPeriod: toPeriod,
+    estimatedInterestPeriods: estimated,
+  };
+}
 // Two questions, in this order: does it fund itself, and what can we take. Everything else on
 // this page is reference and is collapsed. The admin controls that used to be interleaved here
 // (budget import, CSV paste, +Add Month, base-minimum and reserve editing, the valuation
@@ -7252,7 +7303,11 @@ function finRenderPropertyValuationCard(d) {
   var val = meta.valuation || {};
   var loan = meta.loan || {};
   var mortgage = finComputeMortgageRemainingCents(loan, d.monthly || []);
-  var valueCents = val.capitalized_value_cents || 0;
+  // The reports drive the figure; the saved worksheet is the fallback and the comparison.
+  var worksheetCents = val.capitalized_value_cents || 0;
+  var actual = finComputePropertyActualValuation(d);
+  var useActual = !!(actual && actual.valueCents != null && actual.noiCents > 0);
+  var valueCents = useActual ? actual.valueCents : worksheetCents;
   var equityCents = mortgage.cents != null ? (valueCents - mortgage.cents) : null;
   var ltvPct = (valueCents && mortgage.cents != null) ? (mortgage.cents / valueCents) : null;
   function tile(label, value, positive) {
@@ -7269,6 +7324,18 @@ function finRenderPropertyValuationCard(d) {
     + tile('Mortgage left', mortgage.cents != null ? '$' + finFmtMoney(mortgage.cents / 100) : '—', false)
     + tile('Equity', equityCents != null ? '$' + finFmtMoney(equityCents / 100) : '—', true)
     + tile('Loan-to-value', ltvPct != null ? (ltvPct * 100).toFixed(1) + '%' : '—', false)
+    + '</div>'
+    + '<div style="font-size:11.5px;color:var(--warm-gray);margin-top:10px;line-height:1.5;">'
+    + (useActual
+      ? 'Valuation = net operating income from AHRA&rsquo;s reports, ' + esc(actual.fromPeriod) + ' through ' + esc(actual.toPeriod)
+        + (actual.complete ? '' : ' (' + actual.months + ' month' + (actual.months === 1 ? '' : 's') + ', annualized &mdash; a window short of twelve months can miss December&rsquo;s property-tax bill and read high)')
+        + ', <b>' + finMoney0(actual.noiCents) + '</b> &divide; the worksheet&rsquo;s ' + (actual.capRate * 100).toFixed(2).replace(/\.?0+$/, '') + '% cap rate. It updates with each imported report. '
+        + (actual.estimatedInterestPeriods.length
+          ? actual.estimatedInterestPeriods.length + ' older report' + (actual.estimatedInterestPeriods.length === 1 ? '' : 's') + ' gave net income only, so mortgage interest was estimated and added back. '
+          : '')
+        + 'Actual NOI includes one-time repairs, so it moves more than a budget would. '
+        + 'The saved worksheet (budgeted rents and costs) gives ' + finMoney0(worksheetCents) + '.'
+      : 'Valuation from the saved worksheet' + (actual && actual.valueCents == null ? ' &mdash; set a cap rate on it to value the property from the imported reports.' : ' &mdash; no imported reports with a positive net operating income yet.'))
     + '</div></div>';
 }
 function finRenderProperty(d) {
