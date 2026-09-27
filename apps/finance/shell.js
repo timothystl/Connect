@@ -29,6 +29,7 @@ import { fetchFinancePropertyPolicy } from './finance-property-policy-client.js'
 import { resolvePageRole } from './role-cache.js';
 import { PROPERTY_BOOKS_WRITERS, canEditPropertyBooks, readPropertyBooks } from './property-books-service.js';
 import { PROPERTY_BOOKS_STYLES, renderBankRecPage, renderReceivablesPage } from './property-books-pages.js';
+import { seedPropertyBooksFromReports } from './property-books-seed.js';
 import { renderClassificationEditors } from './classification-pages.js';
 import { renderDataPage } from './data-pages.js';
 import { readQuickbooksSnapshot } from './quickbooks-snapshot-service.js';
@@ -3725,6 +3726,7 @@ export default {
         let propertyBooks = ['receivables', 'bank-rec'].includes(propertyPageId)
           ? safeSyntheticRead(async () => {
             await ensureFinanceOwnedSchema(env.FINANCE_DB, 'propertyBooks');
+            await seedPropertyBooksFromReports(env);
             return readPropertyBooks(env.FINANCE_DB);
           }) : null;
         let propertyDebt = section.id === 'property' && resolveFinancePage(section, pageId).id === 'debt'
