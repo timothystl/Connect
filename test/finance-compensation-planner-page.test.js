@@ -48,39 +48,51 @@ function makeEnv({ role = 'admin', compensation = 'edit', username = 'tester' } 
 const call = (env, path, init = {}) => worker.fetch(new Request(`https://finance.test${path}`, { ...init, headers: { 'Cf-Access-Jwt-Assertion': 'jwt', ...(init.headers || {}) } }), env);
 const save = (env, body, site = 'same-origin') => call(env, '/api/v1/connect-planner/salary-save', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': site }, body: JSON.stringify(body) });
 
-describe('Connect planner inside Finance', () => {
-  it('shows the planner as a Compensation tab, framed from Finance itself', async () => {
-    const html = await (await call(makeEnv().env, '/?section=compensation&page=connect')).text();
-    expect(html).toContain('<iframe src="/connect-planner"');
-    const page = await call(makeEnv().env, '/connect-planner');
-    expect(page.status).toBe(200);
-    expect(page.headers.get('x-frame-options')).toBe('SAMEORIGIN');
-    expect(page.headers.get('content-security-policy')).toContain("frame-ancestors 'self'");
-    expect(page.headers.get('content-security-policy')).toContain("connect-src 'self'");
-    const text = await page.text();
-    expect(text).toContain('/connect-planner/app.js?v=sha1');
-    expect(text).toContain('"role":"admin"');
-  });
-
-  it('opens Compensation on the planner by default, with the newer Plan page still a tab', async () => {
-    const html = await (await call(makeEnv().env, '/?section=compensation')).text();
-    expect(html).toContain('<iframe src="/connect-planner"');
+describe('Compensation Planner in Finance', () => {
+  it('opens Compensation on the Planner, Finance’s own page, with its script allowed and nothing inline', async () => {
+    const res = await call(makeEnv().env, '/?section=compensation');
+    const html = await res.text();
+    expect(html).toContain('<div id="cp-root" class="cp">');
+    expect(html).toContain('<script src="/compensation-planner/app.js?v=sha1" defer></script>');
+    expect(html).not.toContain('<iframe');
     expect(html).toContain('page=plan');
+    const config = JSON.parse(html.match(/<script type="application\/json" id="cp-config">([^<]*)<\/script>/)[1]);
+    expect(config).toMatchObject({ role: 'admin', permissions: { compensation: 'edit' }, preview: false });
+    expect(config.targetYear).toBe(config.baseYear + 1);
+    const csp = res.headers.get('content-security-policy');
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).not.toContain('unsafe-inline\'; script');
+    expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/);
+    expect(res.headers.get('x-frame-options')).toBe('DENY');
+    // Every other page still runs no script at all.
+    const plan = await call(makeEnv().env, '/?section=compensation&page=plan');
+    expect(plan.headers.get('content-security-policy')).not.toContain('script-src');
   });
 
-  it('serves Connect’s own planner code and stylesheet', async () => {
-    const js = await call(makeEnv().env, '/connect-planner/app.js');
+  it('serves the bundled planner script, which carries no inline handlers', async () => {
+    const js = await call(makeEnv().env, '/compensation-planner/app.js');
+    expect(js.status).toBe(200);
     expect(js.headers.get('content-type')).toContain('text/javascript');
     const code = await js.text();
-    expect(code).toContain('function finRenderCompensation(');
-    expect(code).toContain('function finCompRenderFairness(');
-    expect((await (await call(makeEnv().env, '/connect-planner/app.css')).text()).length).toBeGreaterThan(1000);
+    expect(code).toContain('cp-root');
+    expect(code).toContain('/api/v1/connect-planner/salary-save');
+    expect(code).not.toMatch(/onclick=|oninput=|onchange=/);
+    expect((await call(makeEnv().env, '/connect-planner')).status).toBe(404);
+  });
+
+  it('sends the printable version to the Council report', async () => {
+    const res = await call(makeEnv().env, '/?section=compensation&page=planner&print=1');
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe('/?section=compensation&page=council&print=1');
   });
 
   it('is only for admin, compensation and council accounts', async () => {
-    expect((await call(makeEnv({ role: 'volunteer' }).env, '/connect-planner')).status).toBe(403);
     expect((await call(makeEnv({ role: 'volunteer' }).env, '/api/v1/connect-planner/salary')).status).toBe(403);
     expect(plannerViewer({ ok: true, role: 'council', permissions: { compensation: 'view' } })).toEqual({ role: 'council', permissions: { compensation: 'view' } });
+    const council = await (await call(makeEnv({ role: 'council', compensation: 'view' }).env, '/?section=compensation')).text();
+    const config = JSON.parse(council.match(/<script type="application\/json" id="cp-config">([^<]*)<\/script>/)[1]);
+    expect(config).toMatchObject({ role: 'council', permissions: { compensation: 'view' } });
   });
 
   it('reads the plan, the base-year ledger rows and the chart of accounts settings through Connect', async () => {
