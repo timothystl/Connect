@@ -1368,6 +1368,79 @@ async function seedIvanhoePropertyJuly2026(db) {
   await db.batch(ops);
 }
 
+// The August 2026 AHRA report, plus a backfill from the Dec 2025 – Jul 2026 reports (Feb/Mar/May/
+// Jun/Jul/Aug 2026 and Dec 2025/Jan 2026 re-read 2026-09-27; there is no April report on hand).
+// August is a new row (total_expenses = operating $5,430.73 + non-operating $936.96, so revenue
+// − expenses = net income exactly; loan payment/interest from the 8/20/2026 GL entry, which
+// postdates the 2026-07-20 confirmed-balance anchor, so the mortgage rollforward picks it up).
+// reserve_balance is AHRA's own "Total Property Reserve — September" ($17,500), which from this
+// report on also carries the $4,925 security deposit reserve alongside the tax reserve and base
+// minimum. The reserve row is report_month '2026-09', same one-month-ahead convention as the
+// June/July seeds. The $6,584.44 distribution (check #5194, 8/21/2026) is the July report's
+// "available to distribute", so it is recorded as period '2026-07', matching how the $4,000 paid
+// 5/22 against the April report is stored as '2026-04' — and skipped if either July or August
+// already has a distribution entered by hand. Earlier months only fill fields that are still
+// NULL (COALESCE), so nothing an admin already entered is overwritten.
+// [period, total_expenses_cents, net_operating_income_cents, available_for_distribution_cents, reserve_balance_cents]
+const FINANCE_PROPERTY_IVANHOE_GAP_FILL = [
+  ['2025-12', null, -320641, 100740, 595000], // NOI = $10,413.55 − ($14,631.43 − $1,011.47 mortgage interest); owner statement net funds; $950 tax + $5,000 minimum checking
+  ['2026-01', 422727, null, -92092, null],     // $3,225.56 operating + $1,001.71 interest
+  ['2026-02', 412187, null, null, null],       // $3,130.06 operating + $991.81 interest
+  ['2026-03', null, null, null, 830000],       // Total Property Reserve for April (the March report's reserve section)
+  ['2026-05', 478449, null, 451066, 925000],   // $3,817.45 operating + $967.04 non-operating
+];
+async function seedIvanhoePropertyAugust2026(db) {
+  const marker = await db.prepare("SELECT value FROM finance_settings WHERE key='finance_property_ivanhoe_2026_08_seeded'").first();
+  if (marker) return;
+  const ops = [];
+  ops.push(db.prepare(
+    `INSERT INTO finance_property_monthly
+       (property_key,period,occupancy_pct,total_revenue_cents,total_expenses_cents,net_income_cents,net_operating_income_cents,available_for_distribution_cents,reserve_balance_cents,loan_payment_cents,interest_expense_cents,source_report)
+     VALUES ('ivanhoe','2026-08',1.0,976276,636769,339507,433203,-231184,1750000,378303,93196,'2026-08 - 3277 Ivanhoe Property Management Report.pdf')
+     ON CONFLICT(property_key,period) DO UPDATE SET
+       occupancy_pct=excluded.occupancy_pct, total_revenue_cents=excluded.total_revenue_cents, total_expenses_cents=excluded.total_expenses_cents,
+       net_income_cents=excluded.net_income_cents, net_operating_income_cents=excluded.net_operating_income_cents,
+       available_for_distribution_cents=excluded.available_for_distribution_cents, reserve_balance_cents=excluded.reserve_balance_cents,
+       loan_payment_cents=excluded.loan_payment_cents, interest_expense_cents=excluded.interest_expense_cents,
+       source_report=excluded.source_report`
+  ));
+  ops.push(db.prepare(
+    `INSERT INTO finance_property_reserves (property_key,reserve_key,report_month,tax_year,target_estimate_cents,reserve_before_cents,contribution_cents,reserve_after_cents,note)
+     VALUES ('ivanhoe','property_tax','2026-09',2026,1140000,696667,110833,807500,?)
+     ON CONFLICT(property_key,reserve_key,report_month) DO NOTHING`
+  ).bind('From the August 2026 report (generated 9/20/2026); its reserve section computes September’s contribution. 4 months remain until the property tax is due.'));
+  ops.push(db.prepare(
+    `INSERT INTO finance_property_distributions (property_key,period,amount_cents)
+     SELECT 'ivanhoe','2026-07',658444
+     WHERE NOT EXISTS (SELECT 1 FROM finance_property_distributions WHERE property_key='ivanhoe' AND period IN ('2026-07','2026-08'))`
+  ));
+  for (const [period, expenses, noi, afd, reserve] of FINANCE_PROPERTY_IVANHOE_GAP_FILL) {
+    ops.push(db.prepare(
+      `UPDATE finance_property_monthly SET
+         total_expenses_cents=COALESCE(total_expenses_cents, ?),
+         net_operating_income_cents=COALESCE(net_operating_income_cents, ?),
+         available_for_distribution_cents=COALESCE(available_for_distribution_cents, ?),
+         reserve_balance_cents=COALESCE(reserve_balance_cents, ?)
+       WHERE property_key='ivanhoe' AND period=?`
+    ).bind(expenses, noi, afd, reserve, period));
+  }
+  const metaRow = await db.prepare("SELECT value FROM finance_settings WHERE key='finance_property_ivanhoe_meta'").first();
+  let meta = {};
+  if (metaRow) { try { meta = JSON.parse(metaRow.value) || {}; } catch { meta = {}; } }
+  meta.open_items_2026_08 = [
+    'The December 2025 report (the last one on the old system) lists a $1,075.00 security deposit for the 1st-floor apartment (3277); from January 2026 on, the new MRI ledger shows no deposit for that unit, and the deposit total drops from $6,525.00 to $5,450.00 by exactly that amount. Confirm with AHRA that the deposit carried over.',
+    'Security deposit ledger ($4,925.00) still does not tie to the balance sheet liability ($4,450.00) as of August 2026 — the same $475 gap first flagged in June.',
+    'August management fee: the fee calculation page shows $586.06 (6% of $9,767.76 collected), but $584.31 was booked to the GL.',
+  ];
+  ops.push(db.prepare(
+    `INSERT INTO finance_settings (key,value) VALUES ('finance_property_ivanhoe_meta',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`
+  ).bind(JSON.stringify(meta)));
+  ops.push(db.prepare(
+    `INSERT INTO finance_settings (key,value) VALUES ('finance_property_ivanhoe_2026_08_seeded','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value`
+  ));
+  await db.batch(ops);
+}
+
 // ── Schema fingerprint ───────────────────────────────────────────────────────
 // _doInitDb applies ~220 statements serially, each its own D1 round trip: every CREATE TABLE
 // / CREATE INDEX in DB_INIT, then ~84 ALTER TABLE migrations (each of which *throws*
@@ -1390,7 +1463,7 @@ function _schemaFingerprint() {
     _doInitDb, migrateFinanceSettingsFromConfig, migrateNonFinanceSettingsFromConfig,
     seedChmsDefaults, seedEvents, seedIvanhoeProperty,
     seedIvanhoePropertyBaseMinimumReserve, seedIvanhoePropertyJune2026,
-    seedIvanhoePropertyJune2026Notes, seedIvanhoePropertyJuly2026,
+    seedIvanhoePropertyJune2026Notes, seedIvanhoePropertyJuly2026, seedIvanhoePropertyAugust2026,
     seedIvanhoePropertyReservesV2,
     seedIvanhoePropertyValuationV3, seedMinistryRolesFromStatic,
     seedStudentTuitionHistory, seedTuitionAid, seedTuitionYearRates,
@@ -2341,6 +2414,7 @@ async function _doInitDb(db) {
   await seedIvanhoePropertyJune2026Notes(db);
   await seedIvanhoePropertyBaseMinimumReserve(db);
   await seedIvanhoePropertyJuly2026(db);
+  await seedIvanhoePropertyAugust2026(db);
   await scrubServerManagedSchedulerSecrets(db);
 
   // Recorded LAST, and only on success. If anything above threw, initDb's own catch clears
