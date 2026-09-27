@@ -106,4 +106,15 @@ describe('Connect planner inside Finance', () => {
     expect((await save(makeEnv({ role: 'council', compensation: 'view' }).env, PLAN)).status).toBe(403);
     expect(councilDraftFromPlan({ compBaselineRosterOnly: 1 })).toEqual({ compBaselineRosterOnly: true });
   });
+
+  it('shows Connect’s Budget Planner and Chart of Accounts as tabs beside Finance’s own pages', async () => {
+    const budget = await (await call(makeEnv().env, '/?section=planning&page=connect')).text();
+    expect(budget).toContain('<iframe src="/accounting?section=planning"');
+    expect(budget).toContain('Connect budget planner');
+    const coa = await (await call(makeEnv().env, '/?section=accounts&page=connect')).text();
+    expect(coa).toContain('<iframe src="/accounting?section=accounts"');
+    const workspace = await call(makeEnv().env, '/accounting?section=planning');
+    expect(workspace.headers.get('x-frame-options')).toBe('SAMEORIGIN');
+    expect(await workspace.text()).toContain('<a href="/" target="_top">New Finance pages</a>');
+  });
 });
