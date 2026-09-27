@@ -29,7 +29,9 @@ function percentField(form, name) {
   const raw = String(form.get(name) ?? '').trim();
   if (raw === '') return { value: undefined };
   const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0 || value > 100) return { error: `${name === 'comp_custom_pct' ? 'Custom raise' : 'Share of District Scale'} must be between 0 and 100` };
+  // A custom adjustment may be negative (a pay cut); a share of the District Scale may not.
+  const min = name === 'comp_custom_pct' ? -100 : 0;
+  if (!Number.isFinite(value) || value < min || value > 100) return { error: `${name === 'comp_custom_pct' ? 'Custom raise' : 'Share of District Scale'} must be between ${min} and 100` };
   return { value };
 }
 

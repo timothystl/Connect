@@ -65,7 +65,7 @@ export function renderRaiseMethodsEditor(plan, projection, { planYear } = {}) {
       <input type="hidden" name="action" value="methods">${returnFields('plan', { planYear })}
       <div class="grid form-grid">
         <div class="field"><label for="rm-method">Plan-wide raise method</label><select id="rm-method" name="comp_method">${COMP_METHOD_KEYS.map((k) => option(k, METHOD_NAMES[k], k === planMethod)).join('')}</select></div>
-        <div class="field"><label for="rm-custom">Custom raise (%)</label><input id="rm-custom" type="number" name="comp_custom_pct" min="0" max="100" step="0.1" value="${num(plan && plan.compCustomPct)}" placeholder="3.5"></div>
+        <div class="field"><label for="rm-custom">Custom raise (%, negative for a pay cut)</label><input id="rm-custom" type="number" name="comp_custom_pct" min="-100" max="100" step="0.1" value="${num(plan && plan.compCustomPct)}" placeholder="3.5"></div>
         <div class="field"><label for="rm-scale">Share of District Scale (%)</label><input id="rm-scale" type="number" name="comp_scale_pct" min="0" max="200" step="1" value="${num(plan && plan.compScalePct)}" placeholder="95"></div>
         <div class="field"><label for="rm-basis">Compare the plan against</label><select id="rm-basis" name="comp_base_year_basis">
           ${option('roster', 'The same roster at last year’s rates', (plan && plan.compBaseYearBasis) !== 'ledger')}

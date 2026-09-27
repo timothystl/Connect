@@ -84,7 +84,9 @@ describe('buildCouncilOverlayFromForm', () => {
   it('rejects unknown methods and out-of-range percentages', () => {
     expect(buildCouncilOverlayFromForm(form([['comp_method', 'bonus']]), 1).error).toMatch(/raise method/);
     expect(buildCouncilOverlayFromForm(form([['comp_method', 'cola'], ['worker_method_0', 'bonus']]), 1).error).toMatch(/Unknown/);
-    expect(buildCouncilOverlayFromForm(form([['comp_method', 'custom'], ['comp_custom_pct', '150']]), 1).error).toMatch(/between 0 and 100/);
+    expect(buildCouncilOverlayFromForm(form([['comp_method', 'custom'], ['comp_custom_pct', '150']]), 1).error).toMatch(/between -100 and 100/);
+    expect(buildCouncilOverlayFromForm(form([['comp_method', 'custom'], ['comp_custom_pct', '-3']]), 1).overlay.compCustomPct).toBe(-3);
+    expect(buildCouncilOverlayFromForm(form([['comp_method', 'scalepct'], ['comp_scale_pct', '-5']]), 1).error).toMatch(/between 0 and 100/);
   });
 });
 
@@ -107,7 +109,7 @@ describe('Compensation plan page', () => {
     expect(html).toContain('Your raise-plan draft');
     expect(html).toContain('action="/api/v1/compensation-council-overlay-save"');
     expect(html).toContain('<option value="custom" selected>Custom %</option>');
-    expect(html).toContain('name="comp_custom_pct" min="0" max="100" step="0.1" value="3.5"');
+    expect(html).toContain('name="comp_custom_pct" min="-100" max="100" step="0.1" value="3.5"');
     expect(html).toContain('name="worker_method_1"');
     expect(html).toMatch(/name="worker_method_1"[^]*?<option value="worksheet" selected>/);
   });
