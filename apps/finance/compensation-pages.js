@@ -79,7 +79,7 @@ export function renderCouncilOverlayEditor(plan, entryStatus, entryMessage) {
     <form method="POST" action="/api/v1/compensation-council-overlay-save">
       <div class="grid form-grid">
         <div class="field"><label for="cc-method">Plan-wide raise method</label><select id="cc-method" name="comp_method">${methodOptions(planMethod)}</select></div>
-        <div class="field"><label for="cc-custom">Custom raise (%)</label><input id="cc-custom" type="number" name="comp_custom_pct" min="0" max="100" step="0.1" value="${num(plan && plan.compCustomPct)}"></div>
+        <div class="field"><label for="cc-custom">Custom raise (%, negative for a pay cut)</label><input id="cc-custom" type="number" name="comp_custom_pct" min="-100" max="100" step="0.1" value="${num(plan && plan.compCustomPct)}"></div>
         <div class="field"><label for="cc-scale">Share of District Scale (%)</label><input id="cc-scale" type="number" name="comp_scale_pct" min="0" max="100" step="1" value="${num(plan && plan.compScalePct)}"></div>
         <div class="field"><label><input type="checkbox" name="comp_baseline_roster_only" value="1"${plan && plan.compBaselineRosterOnly ? ' checked' : ''}> Compare against the roster baseline only</label></div>
       </div>

@@ -33,6 +33,11 @@ describe('Compensation plan settings forms', () => {
     expect(PLAN.compPerWorkerMethod).toEqual({ 1: 'none' });
   });
 
+  it('keeps a negative custom adjustment so a pay cut can be planned', () => {
+    const next = applyRaiseMethodsForm(PLAN, form({ comp_method: 'custom', comp_custom_pct: '-2.5' }));
+    expect(next.compCustomPct).toBe(-2.5);
+  });
+
   it('applies one method to everyone the way legacy did, clearing per-worker choices', () => {
     const next = applyRaiseMethodsForm(PLAN, form({ comp_method: 'scalepct', apply_to_all: '1', worker_method_1: 'cola' }));
     expect(next.compPerWorkerMethod).toEqual({});
