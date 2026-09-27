@@ -3,6 +3,7 @@ import { buildPropertyForecastView, buildLivePropertyForecastView } from './prop
 import { buildPropertyDistributionsView } from './property-distributions-service.js';
 import { escapeHtml, formatCents, formatSignedCents, renderKpiCards, renderSectionHeading, renderTable } from './render-helpers.js';
 import { amortize, byYear } from './property-books-service.js';
+import { CHART_COLORS, renderColumnChart, renderLedgerByYearChart, renderLineChart, renderOperatingCharts, shortPeriod } from './property-charts.js';
 
 // A per-row Remove action (admin only, matching the legacy DELETE finance/property/ivanhoe/
 // monthly/:period route's own gate) is appended as a last column when `canManage` -- relayed live
@@ -323,6 +324,58 @@ const nextPeriod = (ym) => {
   return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
 };
 
+// ── Charts (property-charts.js) ──────────────────────────────────────────────────────────────
+
+// The property tax reserve against its target. Live rows can carry more than one reserve bucket;
+// the chart follows property_tax when it is present, and the table below still lists every row.
+function renderReserveChart(reserveRows) {
+  const taxRows = reserveRows.filter((r) => r.reserve_key === 'property_tax');
+  const rows = (taxRows.length ? taxRows : reserveRows).slice().sort((a, b) => (a.report_month < b.report_month ? -1 : 1)).slice(-24);
+  return renderLineChart({
+    title: 'Property tax reserve against its target',
+    caption: 'The gap between the lines is what is still to be set aside before the tax bill',
+    series: [{ label: 'On reserve', color: CHART_COLORS.primary, area: true }, { label: 'Target', color: CHART_COLORS.secondary, dashed: true }],
+    rows: rows.map((r) => ({ label: shortPeriod(r.report_month), values: [r.reserve_after_cents ?? null, r.target_estimate_cents ?? null] })),
+  });
+}
+
+function renderDistributionChart(rows) {
+  const sorted = rows.slice().sort((a, b) => (a.period < b.period ? -1 : 1)).slice(-24);
+  return renderColumnChart({
+    title: 'Distributions to the church',
+    caption: sorted.length > 1 ? `${shortPeriod(sorted[0].period)} – ${shortPeriod(sorted.at(-1).period)}` : '',
+    series: [{ label: 'Distributed', color: CHART_COLORS.primary }],
+    rows: sorted.map((r) => ({ label: shortPeriod(r.period), values: [r.amount_cents ?? null] })),
+    height: 190,
+  });
+}
+
+function renderForecastChart(rows) {
+  return renderColumnChart({
+    title: 'Planned revenue and expenses by month',
+    series: [{ label: 'Revenue', color: CHART_COLORS.primary }, { label: 'Expenses', color: CHART_COLORS.secondary }],
+    rows: rows.map((r) => ({ label: shortPeriod(r.period), values: [r.revenue ?? null, r.expenses ?? null] })),
+  });
+}
+
+// Mortgage balance at each year end, starting from today's balance; with an extra-principal
+// amount entered, a second line shows the faster payoff on the same axis.
+function renderDebtChart(projection, years, extra) {
+  if (!years.length) return '';
+  const startLabel = String(projection.currentBalanceAsOf || '').slice(0, 4) || 'Now';
+  const labels = [startLabel === years[0].year ? 'Now' : startLabel, ...years.map((y) => y.year)];
+  const fasterByYear = new Map((extra?.years || []).map((y) => [y.year, y.balanceCents]));
+  const series = [{ label: 'On the current payment', color: CHART_COLORS.primary, area: !extra }];
+  if (extra) series.push({ label: `With ${formatCents(extra.extraCents)} extra a month`, color: CHART_COLORS.secondary });
+  const rows = labels.map((label, i) => {
+    const base = i === 0 ? projection.currentBalanceCents : years[i - 1].balanceCents;
+    if (!extra) return { label, values: [base] };
+    const faster = i === 0 ? projection.currentBalanceCents : (fasterByYear.has(years[i - 1].year) ? fasterByYear.get(years[i - 1].year) : 0);
+    return { label, values: [base, faster] };
+  });
+  return renderLineChart({ title: 'Mortgage balance at each year end', caption: 'Projection from the saved rate and payment, not a lender statement', series, rows });
+}
+
 function renderDebtOutlook(debt, searchParams) {
   const { loan, activity, projection } = debt;
   const lastPayment = activity.at(-1);
@@ -335,15 +388,18 @@ function renderDebtOutlook(debt, searchParams) {
   const years = byYear(base.months);
   const extraRaw = Number(String(searchParams?.get?.('extra') || '').replace(/[$,\s]/g, ''));
   const extraCents = Number.isFinite(extraRaw) && extraRaw > 0 && extraRaw <= 100000 ? Math.round(extraRaw * 100) : 0;
+  let extraYears = null;
   let extraLine = '<p><small>Enter an amount to see how much sooner the loan is paid off and the interest it saves. Nothing is saved.</small></p>';
   if (extraCents) {
     const faster = amortize({ ...terms, extraCents });
+    extraYears = { extraCents, years: byYear(faster.months) };
     const interest = (a) => a.months.reduce((sum, mo) => sum + mo.interestCents, 0);
     const saved = base.months.length - faster.months.length;
     extraLine = `<p>${formatCents(extraCents)} more each month pays the loan off in <b>${escapeHtml(faster.months.at(-1)?.period || '')}</b>, ${saved} month${saved === 1 ? '' : 's'} sooner, and saves <b>${formatCents(interest(base) - interest(faster))}</b> in interest.</p>`;
   }
   return `${mismatch}
     ${renderSectionHeading({ eyebrow: 'Projection', heading: 'Payoff by year' })}
+    ${renderDebtChart(projection, years, extraYears)}
     ${renderTable({ head: ['Year', 'Payments', 'Interest', 'Principal', 'Balance at year end'], rows: years.map((y) => `<tr><td>${y.year}${y.count < 12 ? ` <small>(${y.count} payment${y.count === 1 ? '' : 's'})</small>` : ''}</td><td>${formatCents(y.paymentCents)}</td><td>${formatCents(y.interestCents)}</td><td>${formatCents(y.principalCents)}</td><td>${formatCents(y.balanceCents)}</td></tr>`).join('') })}
     <p><small>After payoff, the ${formatCents(loan.monthlyPaymentCents)} monthly payment (${formatCents(loan.monthlyPaymentCents * 12)} a year) stays with the property.</small></p>
     ${renderSectionHeading({ eyebrow: 'What if', heading: 'Paying extra principal' })}
@@ -471,6 +527,7 @@ export function renderPropertyPage(pageId, {
     return `<section class="report" aria-label="${isLive ? 'Commercial Property operating results' : 'Synthetic Commercial Property operating results'}">
       ${renderSectionHeading({ eyebrow: 'Commercial Property', heading: periodEnd ? `Operating results through ${escapeHtml(periodEnd)}` : 'No operating periods on file', badge: isLive ? 'Live from Connect' : 'Synthetic staging' })}
       ${canManagePropertyMonthly ? renderRemoveStatus(propertyMonthlyRemoveStatus, propertyMonthlyRemoveMessage) : ''}
+      ${rows.length ? renderOperatingCharts(rows, { limit: 24 }) : ''}
       ${rows.length ? renderTable({ head: ['Period', 'Occupancy', 'Revenue', 'Expenses', 'Net income', ...(canManagePropertyMonthly ? [''] : [])], rows: renderPropertyRows(rows, canManagePropertyMonthly) }) : '<p>Connect has no Commercial Property monthly results on file yet.</p>'}
       ${fallbackNote}
     </section>${canManagePropertyMonthly ? renderPropertyMonthlyForm(propertyMonthlyEntryStatus, propertyMonthlyEntryMessage) : ''}${canManagePropertyMonthly ? renderPropertyMonthlyImportCsvForm(propertyMonthlyImportCsvStatus, propertyMonthlyImportCsvMessage) : ''}`;
@@ -496,6 +553,7 @@ export function renderPropertyPage(pageId, {
       ${renderSectionHeading({ eyebrow: 'Commercial Property', heading: 'Repairs & maintenance ledger', badge: isLive ? 'Live from Connect' : `${ledgers.repairs.length} synthetic ledger item${ledgers.repairs.length === 1 ? '' : 's'}` })}
       <p>This is the repairs ledger only -- there is no work-order number or open/closed status tracked yet, so this page shows completed ledger entries rather than a work-order queue.</p>
       ${renderKpiCards([{ label: 'Repairs & maintenance', value: formatCents(ledgers.totals.repairs_cents) }])}
+      ${renderLedgerByYearChart(ledgers.repairs, 'Repairs and maintenance by year')}
       ${canManagePropertyRepairs && isLive ? renderRemoveStatus(propertyRepairRemoveStatus, propertyRepairRemoveMessage) : ''}
       ${renderTable({ head: ['Date', 'Repair category', 'Description', 'Payee', 'Amount', ...(canManagePropertyRepairs && isLive ? [''] : [])], rows: renderPropertyRepairRows(ledgers.repairs, canManagePropertyRepairs && isLive) })}
       ${fallbackNote}
@@ -516,6 +574,7 @@ export function renderPropertyPage(pageId, {
     return `<section class="report" aria-label="${isLive ? 'Commercial Property reserve and distribution' : 'Synthetic Commercial Property reserve and distribution'}">
       ${renderSectionHeading({ eyebrow: 'Property tax reserve', heading: 'Monthly reserve schedule', badge: isLive ? 'Live from Connect' : 'Synthetic staging' })}
       <p><small>${latestReserve.funded_pct.toFixed(1)}% funded${isLive ? ` as of ${escapeHtml(latestReserve.report_month)}` : ''}</small></p>
+      ${renderReserveChart(reserveRows)}
       ${canManagePropertyLedgers ? renderRemoveStatus(propertyReserveMonthlyRemoveStatus, propertyReserveMonthlyRemoveMessage) : ''}
       ${renderTable({ head: ['Report month', 'Tax year', 'Target', 'Before', 'Contribution', 'After', 'Funded', ...(canManagePropertyLedgers ? [''] : [])], rows: renderPropertyReserveRows(reserveRows, canManagePropertyLedgers) })}
       ${isLive ? `${renderSectionHeading({ eyebrow: 'Reserve disbursements', heading: 'Paid from reserves', badge: `${propertyReservesLive.disbursements.length} recorded` })}
@@ -528,6 +587,7 @@ export function renderPropertyPage(pageId, {
         { label: 'Total distributed', value: formatCents(distributions.totals.distributionCents) },
         { label: 'Average per period', value: formatCents(distributions.totals.averageCents) },
       ])}
+      ${renderDistributionChart(distributions.rows)}
       ${canManagePropertyLedgers ? renderRemoveStatus(propertyDistributionRemoveStatus, propertyDistributionRemoveMessage) : ''}
       ${renderTable({ head: ['Period', 'Amount distributed', ...(canManagePropertyLedgers ? [''] : [])], rows: renderPropertyDistributionRows(distributions.rows, canManagePropertyLedgers) })}
       ${fallbackNote}
@@ -542,6 +602,7 @@ export function renderPropertyPage(pageId, {
     return `<section class="report" aria-label="${isLive ? 'Commercial Property capital improvements' : 'Synthetic Commercial Property capital improvements'}">
       ${renderSectionHeading({ eyebrow: 'Commercial Property', heading: 'Capital improvements', badge: isLive ? 'Live from Connect' : `${ledgers.capital.length} synthetic ledger item${ledgers.capital.length === 1 ? '' : 's'}` })}
       ${renderKpiCards([{ label: 'Capital projects', value: formatCents(ledgers.totals.capital_cents) }])}
+      ${renderLedgerByYearChart(ledgers.capital, 'Capital improvements by year')}
       ${canManagePropertyLedgers && isLive ? renderRemoveStatus(propertyCapitalLedgerRemoveStatus, propertyCapitalLedgerRemoveMessage) : ''}
       ${renderTable({ head: ['Date', 'Project', 'Description', 'Payee', 'Amount', ...(canManagePropertyLedgers && isLive ? [''] : [])], rows: renderPropertyCapitalRows(ledgers.capital, canManagePropertyLedgers && isLive) })}
       ${fallbackNote}
@@ -580,6 +641,7 @@ export function renderPropertyPage(pageId, {
           { label: 'Forecast expenses', value: formatCents(forecast.totals.expenseCents) },
           { label: 'Forecast net income', value: formatSignedCents(forecast.totals.netIncomeCents), hint: 'Read-only synthetic plan' },
         ])}
+        ${renderForecastChart(forecast.rows.map((r) => ({ period: r.period, revenue: r.revenue_cents, expenses: r.expenses_cents })))}
         ${renderTable({ head: ['Month', 'Revenue', 'Expenses', 'Net income'], rows: renderPropertyForecastRows(forecast.rows) })}
         ${fallbackNote}
       </section>${canManagePropertyLedgers ? renderPropertyBudgetImportForm(propertyBudgetImportStatus, propertyBudgetImportMessage) : ''}`;
@@ -598,6 +660,7 @@ export function renderPropertyPage(pageId, {
         { label: 'Forecast expenses', value: formatCents(forecast.totals.expensesCents) },
         { label: 'Forecast net income', value: formatSignedCents(forecast.totals.netIncomeCents), hint: forecast.totals.reconciled ? 'Reconciles to the cent' : 'Does not reconcile exactly -- review the source import' },
       ])}
+      ${renderForecastChart(forecast.rows.map((r) => ({ period: r.period, revenue: r.revenueCents, expenses: r.expensesCents })))}
       ${renderTable({ head: ['Month', 'Revenue', 'Expenses', 'Net income'], rows: renderLivePropertyForecastRows(forecast.rows) })}
     </section>${canManagePropertyLedgers ? renderPropertyBudgetImportForm(propertyBudgetImportStatus, propertyBudgetImportMessage) : ''}`;
   }
@@ -619,6 +682,7 @@ export function renderPropertyPage(pageId, {
         { label: 'Average per period', value: formatCents(distributions.totals.averageCents) },
         { label: 'Periods recorded', value: String(distributions.totals.distributionCount) },
       ])}
+      ${renderDistributionChart(distributions.rows)}
       ${canManagePropertyLedgers ? renderRemoveStatus(propertyDistributionRemoveStatus, propertyDistributionRemoveMessage) : ''}
       ${renderTable({ head: ['Period', 'Amount distributed', ...(canManagePropertyLedgers ? [''] : [])], rows: renderPropertyDistributionRows(distributions.rows, canManagePropertyLedgers) })}
       ${fallbackNote}
@@ -646,6 +710,7 @@ export function renderPropertyPage(pageId, {
         { label: 'Expenses', value: formatCents(annual.totalExpensesCents), hint: `Confirmed distributions ${formatCents(annual.confirmedDistributionsCents)}` },
         { label: 'Net income', value: formatSignedCents(annual.netIncomeCents), hint: `${annual.expenseMonthsDerived} expense month${annual.expenseMonthsDerived === 1 ? '' : 's'} represented` },
       ])}
+      ${renderOperatingCharts(propertyReportLive.rows || [])}
       <p>See Operating results, Rent roll, Reserve &amp; distribution, Capital improvements, Valuation, Run-rate forecast, and Distributions for the full picture.</p>
     </section>`;
   }
@@ -659,6 +724,7 @@ export function renderPropertyPage(pageId, {
       { label: 'Expenses', value: formatCents(report.totals.expenseCents), hint: `Reserve balance ${formatCents(report.totals.latestReserveCents)}` },
       { label: 'Net income', value: formatSignedCents(report.totals.netIncomeCents), hint: `Available for distribution ${formatCents(report.totals.distributableCents)}` },
     ])}
+    ${renderOperatingCharts(report.rows)}
     <p>See Operating results, Rent roll, Reserve &amp; distribution, Capital improvements, Valuation, Run-rate forecast, and Distributions for the full picture.</p>
   </section>`;
 }

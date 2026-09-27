@@ -1,6 +1,7 @@
 // Commercial Property → Receivables & deposits and Position & bank rec (v3 design). Data and rules live in property-books-service.js.
 import { escapeHtml as e, formatCents } from './render-helpers.js';
 import { AGING, receivableMonths, reconcile, rowBalance, summarizeReceivables } from './property-books-service.js';
+import { CHART_COLORS, renderColumnChart, renderWaterfallChart, shortPeriod } from './property-charts.js';
 
 const money = (c) => (c < 0 ? `−${formatCents(-c)}` : formatCents(c));
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -50,7 +51,14 @@ export function renderReceivablesPage({ books, params, canEdit, status }) {
     <p class="muted-line">From the manager’s aged receivables and security deposit reports. A negative balance is a tenant credit, such as prepaid rent.</p></div>`
     : `<div class="panel"><h2>No receivables recorded yet</h2><p class="muted-line">Enter the aged receivables and security deposits from the manager’s monthly report${canEdit ? ' below' : ''}. An admin records them.</p></div>`;
 
-  const trend = months.length > 1 ? `<div class="panel panel-spaced list-panel"><h2>Month by month</h2><div class="table-scroll"><table class="pm-table rb-num"><thead><tr><th>Report</th><th>Owed</th><th>Past 30 days</th><th>Over 90</th><th>Deposits held</th></tr></thead><tbody>
+  const trendChart = months.length > 1 ? renderColumnChart({
+    title: 'Owed by tenants, month by month',
+    caption: 'All ages together, and the part more than 30 days old. Below zero is a tenant credit.',
+    series: [{ label: 'Owed', color: CHART_COLORS.primary }, { label: 'Past 30 days', color: CHART_COLORS.secondary }],
+    rows: months.slice(0, 12).reverse().map((m) => { const s = summarizeReceivables(books.receivables.filter((r) => r.report_month === m)); return { label: shortPeriod(m), values: [s.owedCents, s.pastDueCents] }; }),
+    height: 200,
+  }) : '';
+  const trend = months.length > 1 ? `${trendChart}<div class="panel panel-spaced list-panel"><h2>Month by month</h2><div class="table-scroll"><table class="pm-table rb-num"><thead><tr><th>Report</th><th>Owed</th><th>Past 30 days</th><th>Over 90</th><th>Deposits held</th></tr></thead><tbody>
       ${months.slice(0, 12).map((m) => { const s = summarizeReceivables(books.receivables.filter((r) => r.report_month === m)); return `<tr><td><a href="${href('receivables', { month: m })}">${monthLabel(m)}</a></td><td>${money(s.owedCents)}</td><td>${money(s.pastDueCents)}</td><td>${money(s.totals.over_90_cents)}</td><td>${money(s.depositsCents)}</td></tr>`; }).join('')}
     </tbody></table></div></div>` : '';
 
@@ -75,6 +83,16 @@ export function renderReceivablesPage({ books, params, canEdit, status }) {
 }
 
 // ── Position & bank rec ───────────────────────────────────────────────────────────────────────
+
+// Short axis labels for the position walk, by label text (rows are optional, so not by index).
+function positionShort(label) {
+  if (/^Cash in/.test(label)) return 'Cash';
+  if (/^Rent owed/.test(label)) return 'Rent owed';
+  if (/^Security deposits/.test(label)) return 'Deposits';
+  if (/tax reserve/i.test(label)) return 'Tax reserve';
+  if (/Base minimum/.test(label)) return 'Base min.';
+  return label;
+}
 
 export function renderBankRecPage({ books, reserveAfterCents = null, reserveMonth = null, baseMinimumCents = null, canEdit, status, params }) {
   if (!books) return unavailable('The bank reconciliation records could not be read. Please try again.');
@@ -103,6 +121,12 @@ export function renderBankRecPage({ books, reserveAfterCents = null, reserveMont
       ['Reserves set aside', reserveAfterCents === null && !baseMinimumCents ? '—' : money(reserves), reserveAfterCents === null ? 'Reserve schedule not available' : 'Tax reserve and base minimum'],
       ['Available after obligations', money(available), 'Cash plus rent owed, less deposits and reserves', available >= 0 ? '' : 'warn'],
     ])}
+    ${renderWaterfallChart({
+      title: 'Where the cash goes',
+      caption: 'Start with the reconciled cash, add rent still owed, then take out what the cash has to cover',
+      steps: rows.map(([label, c]) => ({ label: positionShort(label), cents: c })),
+      totalLabel: 'Available',
+    })}
     <div class="panel panel-spaced list-panel"><h2>Property position</h2><div class="table-scroll"><table class="pm-table rb-num"><tbody>
       ${rows.map(([label, c, note]) => `<tr><td>${e(label)}<small>${e(note)}</small></td><td>${money(c)}</td></tr>`).join('')}
       <tr class="total-row"><td>Available after obligations</td><td>${money(available)}</td></tr>
@@ -112,7 +136,14 @@ export function renderBankRecPage({ books, reserveAfterCents = null, reserveMont
     position = `<div class="panel"><h2>No reconciliation recorded yet</h2><p class="muted-line">Each month, compare the property account’s bank statement with the cash on the manager’s report${canEdit ? ' and record it below' : ''}.</p></div>`;
   }
 
-  const history = recs.length ? `<div class="panel panel-spaced list-panel"><h2>Monthly reconciliations</h2><div class="table-scroll"><table class="pm-table rb-num"><thead><tr><th>Month</th><th>Bank</th><th>+ In transit</th><th>− Checks out</th><th>Adjusted</th><th>Manager</th><th>Difference</th>${canEdit ? '<th></th>' : ''}</tr></thead><tbody>
+  const cashChart = recs.length > 1 ? renderColumnChart({
+    title: 'Cash in the property account, month by month',
+    caption: 'Bank statement adjusted for deposits in transit and outstanding checks',
+    series: [{ label: 'Adjusted cash', color: CHART_COLORS.primary }],
+    rows: recs.slice(0, 24).reverse().map((rec) => ({ label: shortPeriod(rec.statement_month), values: [reconcile(rec).adjustedCents] })),
+    height: 190,
+  }) : '';
+  const history = recs.length ? `${cashChart}<div class="panel panel-spaced list-panel"><h2>Monthly reconciliations</h2><div class="table-scroll"><table class="pm-table rb-num"><thead><tr><th>Month</th><th>Bank</th><th>+ In transit</th><th>− Checks out</th><th>Adjusted</th><th>Manager</th><th>Difference</th>${canEdit ? '<th></th>' : ''}</tr></thead><tbody>
       ${recs.map((rec) => { const r = reconcile(rec); return `<tr${r.reconciled ? '' : ' class="row-alert"'}><td>${monthLabel(rec.statement_month)}${rec.note ? `<small>${e(rec.note)}</small>` : ''}</td><td>${money(rec.statement_balance_cents)}</td><td>${money(rec.deposits_in_transit_cents)}</td><td>${money(rec.outstanding_checks_cents)}</td><td>${money(r.adjustedCents)}</td><td>${money(rec.book_balance_cents)}</td><td>${r.reconciled ? '<span class="tone-good">Balanced</span>' : `<b class="tone-warn">${money(r.differenceCents)}</b>`}</td>${canEdit ? `<td class="actions"><a class="edit-link" href="${href('bank-rec', { edit: rec.statement_month })}">Edit</a> <form method="POST" action="/api/v1/property/bank-rec-remove" class="inline-form"><input type="hidden" name="statement_month" value="${rec.statement_month}"><button type="submit" class="link-button">Remove</button></form></td>` : ''}</tr>`; }).join('')}
     </tbody></table></div>
     <p class="muted-line">Adjusted = bank statement balance, plus deposits in transit, less outstanding checks. It should equal the cash on the manager’s report.</p></div>` : '';
