@@ -110,6 +110,7 @@ import {
 } from './property-report-service.js';
 import { buildPropertyValuationMetaFromForm } from './property-valuation-form.js';
 import { fetchLiveFinancePropertyValuation } from './finance-property-valuation-client.js';
+import { defaultLiveBalanceSheetFiscalYear } from './finance-balance-sheet-client.js';
 import { resolveBudgetReport } from './budget-report-service.js';
 import {
   postConnectFinanceBudgetWrite, postConnectFinanceBudgetGenerate, postConnectFinanceBudgetGenerateAll,
@@ -1004,7 +1005,7 @@ function renderSectionBody(ctx) {
     propertyRepairRemoveStatus, propertyRepairRemoveMessage,
     propertyMetaEntryStatus, propertyMetaEntryMessage,
     propertyReservePolicyStatus, propertyReservePolicyMessage, propertyCapitalPolicyStatus, propertyCapitalPolicyMessage,
-    propertyDebtStatus, propertyDebtMessage,
+    propertyDebtStatus, propertyDebtMessage, propertyMortgageHistory,
     propertyBudgetImportStatus, propertyBudgetImportMessage,
     propertyMonthlyImportCsvStatus, propertyMonthlyImportCsvMessage,
     classificationRevenueStatus, classificationRevenueMessage, classificationExpenseStatus, classificationExpenseMessage,
@@ -1331,7 +1332,7 @@ function renderSectionBody(ctx) {
       propertyRepairRemoveStatus, propertyRepairRemoveMessage,
       propertyMetaEntryStatus, propertyMetaEntryMessage,
       propertyReservePolicyStatus, propertyReservePolicyMessage, propertyCapitalPolicyStatus, propertyCapitalPolicyMessage,
-      propertyDebtStatus, propertyDebtMessage, searchParams: ctx.searchParams,
+      propertyDebtStatus, propertyDebtMessage, searchParams: ctx.searchParams, propertyMortgageHistory,
       propertyBudgetImportStatus, propertyBudgetImportMessage,
       propertyMonthlyImportCsvStatus, propertyMonthlyImportCsvMessage,
     });
@@ -3742,6 +3743,10 @@ export default {
           }) : null;
         let propertyDebt = section.id === 'property' && resolveFinancePage(section, pageId).id === 'debt'
           ? fetchFinancePropertyDebt(env) : null;
+        // The Debt page's "Paid down so far": year-end mortgage from each balance sheet on file, the
+        // same history the Balance Sheet's Property section shows. Never throws.
+        const propertyMortgageHistoryLoad = section.id === 'property' && resolveFinancePage(section, pageId).id === 'debt'
+          ? resolveMortgageHistory(env, defaultLiveBalanceSheetFiscalYear()).catch(() => null) : null;
         // Property Operating results/Reserves & distribution/Capital & repairs ledgers each try
         // their own real connect.finance-property-*.v1 endpoint first and fall back to the same
         // synthetic fixtures read just above, labeled -- same live-first pattern as Property
@@ -4129,7 +4134,7 @@ export default {
         // costs its own timeout once, not once per section read in turn.
         [summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, payrollBundle, financeHealth] = await Promise.all([summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, payrollBundle, financeHealth]);
         const balancePriorYear = await balancePriorYearLoad;
-        const [balancePropertyValue, balanceMortgageHistory] = await Promise.all([balancePropertyValueLoad, balanceMortgageHistoryLoad]);
+        const [balancePropertyValue, balanceMortgageHistory, propertyMortgageHistory] = await Promise.all([balancePropertyValueLoad, balanceMortgageHistoryLoad, propertyMortgageHistoryLoad]);
         const printMode = url.searchParams.get('print') === '1';
         // The Planner is the one Finance page that runs script (its own, from this Worker only).
         const plannerPage = section.id === 'compensation' && effectivePageId === 'planner';
@@ -4173,7 +4178,7 @@ export default {
           propertyRepairRemoveStatus, propertyRepairRemoveMessage,
           propertyMetaEntryStatus, propertyMetaEntryMessage,
           propertyReservePolicyStatus, propertyReservePolicyMessage, propertyCapitalPolicyStatus, propertyCapitalPolicyMessage,
-          propertyDebtStatus, propertyDebtMessage,
+          propertyDebtStatus, propertyDebtMessage, propertyMortgageHistory,
           propertyBudgetImportStatus, propertyBudgetImportMessage,
           propertyMonthlyImportCsvStatus, propertyMonthlyImportCsvMessage,
         }), {

@@ -278,6 +278,14 @@ describe('Commercial Property debt payoff', () => {
     expect(html).toContain('Review the saved annual debt service');
   });
 
+  it('shows how much of the estimated original loan is paid down so far', async () => {
+    const html = await page(roleEnv('admin'), 'section=property&page=debt');
+    expect(html).toContain('Paid down so far');
+    expect(html).toContain('$605,000');
+    expect(html).toContain('2013, estimated');
+    expect(html).toContain('$328,650 of $605,000 · 54%'); // $605,000 − the $276,350 current balance
+  });
+
   it('adds payoff by year and an extra-principal what-if to the projection', async () => {
     const html = await page(roleEnv('admin'), 'section=property&page=debt&extra=500');
     expect(html).toContain('Payoff by year');

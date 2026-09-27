@@ -3,6 +3,7 @@ import { buildPropertyForecastView, buildLivePropertyForecastView } from './prop
 import { buildPropertyDistributionsView } from './property-distributions-service.js';
 import { escapeHtml, formatCents, formatSignedCents, renderKpiCards, renderSectionHeading, renderTable } from './render-helpers.js';
 import { amortize, byYear } from './property-books-service.js';
+import { ORIGINAL_PROPERTY_LOAN, renderMortgageHistory } from './balance-pages.js';
 import { CHART_COLORS, renderColumnChart, renderLedgerByYearChart, renderLineChart, renderOperatingCharts, shortPeriod } from './property-charts.js';
 
 // A per-row Remove action (admin only, matching the legacy DELETE finance/property/ivanhoe/
@@ -408,7 +409,29 @@ function renderDebtOutlook(debt, searchParams) {
     ${extraLine}`;
 }
 
-function renderPropertyDebt(debtResult, canManage, status, message, searchParams) {
+// "Paid down so far": the life of the loan up to today, beside the payoff projection below it --
+// the estimated 2013 original loan (ORIGINAL_PROPERTY_LOAN, shared with the Balance Sheet), the
+// current balance this page already shows, and the year-end mortgage from each balance sheet on
+// file (resolveMortgageHistory; the book amount recorded in 2018 comes from that year's sheet).
+function renderDebtPaidSoFar(currentBalanceCents, history) {
+  const original = ORIGINAL_PROPERTY_LOAN && ORIGINAL_PROPERTY_LOAN.cents > 0 ? ORIGINAL_PROPERTY_LOAN : null;
+  if (!original || currentBalanceCents == null) return '';
+  const paidCents = original.cents - currentBalanceCents;
+  const paidPct = paidCents / original.cents * 100;
+  const bookCents = history?.[0]?.propertyCents || null;
+  return `<section aria-label="Paid down so far">
+      ${renderSectionHeading({ eyebrow: 'Commercial Property', heading: 'Paid down so far' })}
+      ${renderKpiCards([
+        { label: 'Original loan', value: formatCents(original.cents), hint: escapeHtml(original.label) },
+        { label: 'Balance now', value: formatCents(currentBalanceCents), hint: 'Same as the current balance above' },
+        { label: 'Paid down', value: formatCents(paidCents), hint: `${paidPct.toFixed(0)}% of the original loan` },
+      ])}
+      <ul class="bs-meters"><li><span>Loan paid down</span><span class="bs-meter" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, paidPct)).toFixed(1)}%"></i></span><span class="num">${formatCents(paidCents)} of ${formatCents(original.cents)} · ${paidPct.toFixed(0)}%</span></li></ul>
+      ${bookCents ? renderMortgageHistory(bookCents, history, original) : ''}
+    </section>`;
+}
+
+function renderPropertyDebt(debtResult, canManage, status, message, searchParams, mortgageHistory = null) {
   if (!debtResult?.ok) return `<section aria-label="Property debt unavailable">${renderSectionHeading({ eyebrow: 'Commercial Property', heading: 'Debt payoff & future', badge: 'Unavailable' })}<p class="status status-pending">The saved loan record could not be read. Existing property and loan records are unaffected.</p></section>`;
   const { loan, activity, projection } = debtResult.debt;
   const dollars = (cents) => cents == null ? '' : (cents / 100).toFixed(2);
@@ -427,6 +450,7 @@ function renderPropertyDebt(debtResult, canManage, status, message, searchParams
       { label: 'Projected payoff', value: projection.payoffPeriod || 'Unavailable', hint: payoffHint },
       { label: 'Remaining interest', value: projection.totalInterestRemainingCents == null ? 'Unavailable' : formatCents(projection.totalInterestRemainingCents), hint: 'Projection, not a lender statement' },
     ])}
+    ${renderDebtPaidSoFar(projection.currentBalanceCents ?? loan.balanceCents, mortgageHistory)}
     ${annualMismatch ? `<p class="status status-error">Review the saved annual debt service (${formatCents(loan.storedAnnualDebtServiceCents)}): it does not match 12 monthly payments (${formatCents(projection.derivedAnnualDebtServiceCents)}).</p>` : ''}
     ${activity.length ? renderTable({ head: ['Month', 'Payment', 'Interest', 'Principal', 'Balance after'], rows: activity.map((row) => `<tr><td>${escapeHtml(row.period)}</td><td>${formatCents(row.paymentCents)}</td><td>${formatCents(row.interestCents)}</td><td>${formatCents(row.principalCents)}</td><td>${formatCents(row.balanceAfterCents)}</td></tr>`).join('') }) : '<p><small>No complete monthly principal/interest rows occur after the saved balance date.</small></p>'}
     ${renderDebtOutlook(debtResult.debt, searchParams)}
@@ -508,7 +532,7 @@ export function renderPropertyPage(pageId, {
   propertyRepairRemoveStatus, propertyRepairRemoveMessage,
   propertyMetaEntryStatus, propertyMetaEntryMessage, propertyPolicy, propertyDebt,
   propertyReservePolicyStatus, propertyReservePolicyMessage, propertyCapitalPolicyStatus, propertyCapitalPolicyMessage,
-  propertyDebtStatus, propertyDebtMessage, searchParams,
+  propertyDebtStatus, propertyDebtMessage, searchParams, propertyMortgageHistory = null,
   propertyBudgetImportStatus, propertyBudgetImportMessage,
   propertyMonthlyImportCsvStatus, propertyMonthlyImportCsvMessage,
 }) {
@@ -688,7 +712,7 @@ export function renderPropertyPage(pageId, {
       ${fallbackNote}
     </section>${canManagePropertyLedgers ? renderPropertyDistributionForm(propertyDistributionEntryStatus, propertyDistributionEntryMessage) : ''}`;
   }
-  if (pageId === 'debt') return renderPropertyDebt(propertyDebt, canManagePropertyLedgers, propertyDebtStatus, propertyDebtMessage, searchParams);
+  if (pageId === 'debt') return renderPropertyDebt(propertyDebt, canManagePropertyLedgers, propertyDebtStatus, propertyDebtMessage, searchParams, propertyMortgageHistory);
 
   // 'overview' (default) -- use the reconciled annual summary from the same live contract as
   // Operating results. Monthly live rows legitimately contain null expense/reserve fields, so
