@@ -1,8 +1,8 @@
 import {
   buildBalanceSheetView, buildLiveBalanceSheetView, buildBalanceTree, filterZeroBalanceTree, flattenBalanceTree,
-  buildPriorBalanceLookup, buildAssetComposition,
+  buildPriorBalanceLookup, buildAssetComposition, presentNetAssets,
 } from './balance-sheet-service.js';
-import { escapeHtml, formatCents, formatSignedCents, renderKpiCards, renderSectionHeading, renderTable } from './render-helpers.js';
+import { escapeHtml, formatCents, renderKpiCards, renderSectionHeading, renderTable } from './render-helpers.js';
 import { csvText } from './payroll-report-render.js';
 
 // Admin-only Balance Sheet / Statement of Financial Position .xlsx import -- relayed live to
@@ -116,10 +116,10 @@ function renderPlainTable(head, rows, className = '') {
   }).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
-// The Assets = Liabilities + Net assets check Connect prints under its totals.
+// The Assets = Liabilities + Net assets check, worded as the subtraction a lay reader follows.
 export function renderBalanceCheck(balancedCents) {
   return Math.abs(balancedCents) < 1
-    ? '<p class="bs-check is-ok">✓ Balances (Assets = Liabilities + Net assets)</p>'
+    ? '<p class="bs-check is-ok">✓ Adds up: what we own − what we owe = net assets</p>'
     : `<p class="bs-check is-off">⚠ Off by ${formatExactCents(balancedCents)} — check the import for a missing or misclassified account.</p>`;
 }
 
@@ -149,7 +149,7 @@ function renderEquityReclassPanel(equityReclass) {
       </div>`
     : '';
   return `<div class="bs-panel" aria-label="Donor-restricted net assets">
-      ${panelHeading('Net assets — donor-restricted vs. without donor restrictions', 'Replaces QuickBooks’ four-way equity split; computed bottom-up from real fund and endowment balances, not the drifted legacy equity lines.')}
+      ${panelHeading('Net assets — donor-restricted vs. without donor restrictions', 'Of our net assets, how much donors gave for a set purpose (funds and endowments), and how much the congregation can direct. Computed from the actual fund and endowment balances.')}
       ${renderKpiCards([
         { label: 'Donor-restricted', value: formatCents(equityReclass.donorRestrictedCents) },
         { label: 'Without donor restrictions', value: formatCents(equityReclass.unrestrictedCents) },
@@ -181,8 +181,9 @@ function renderYearOverYear(accounts, fiscalYear, prior) {
       : `No ${priorYear} balance sheet on file yet &mdash; import one to see a year-over-year comparison here.`;
     return `<div class="bs-panel" aria-label="Year over year">${heading}<p class="bs-note">${why}</p></div>`;
   }
-  const priorOf = buildPriorBalanceLookup(prior.accounts, accounts);
-  const rows = flattenBalanceTree(buildBalanceTree(accounts)).map((node) => {
+  const current = presentNetAssets(accounts).accounts;
+  const priorOf = buildPriorBalanceLookup(presentNetAssets(prior.accounts).accounts, current);
+  const rows = flattenBalanceTree(buildBalanceTree(current)).map((node) => {
     const group = node.children.length > 0;
     const indent = `style="padding-left:${14 + node.depth * 16}px"`;
     const cls = group ? ' class="bs-group-row"' : '';
@@ -206,12 +207,23 @@ function renderYearOverYear(accounts, fiscalYear, prior) {
 // Connect's "Full account detail": the indented tree with rolled-up subtotals, zero-balance lines
 // hidden by default. Returns the table plus how many zero lines were left out.
 export function renderBalanceDetailTree(accounts, { hideZero = true } = {}) {
-  const full = buildBalanceTree(accounts);
+  const full = buildBalanceTree(presentNetAssets(accounts).accounts);
   const shown = filterZeroBalanceTree(full, { hideZero });
   const shownCount = flattenBalanceTree(shown).length;
   const hiddenCount = flattenBalanceTree(full).length - shownCount;
   const rows = flattenBalanceTree(shown).map((node) => `<tr${node.children.length ? ' class="bs-group-row"' : ''}><td style="padding-left:${14 + node.depth * 16}px">${escapeHtml(node.label)}</td><td class="num">${formatCents(node.totalBalanceCents)}</td></tr>`).join('');
   return { html: renderPlainTable(['Account', ['Balance', true]], rows, 'bs-tree'), hiddenCount };
+}
+
+// Account detail still accounts for every QuickBooks equity line the lay presentation combined.
+function renderFoldedEquityNote(accounts) {
+  const { folded } = presentNetAssets(accounts);
+  if (!folded.length) return '';
+  const into = { prior: 'Built up in prior years', current: 'This year so far' };
+  return `<details class="bs-note"><summary>Which QuickBooks lines make up “Built up in prior years” and “This year so far”</summary>
+      <p>QuickBooks keeps business-style equity accounts. They are combined here so the sheet reads as what we own minus what we owe; the total is unchanged.</p>
+      ${renderPlainTable(['QuickBooks line', 'Shown as', ['Balance', true]], folded.map((f) => `<tr><td>${escapeHtml(f.accountName)}</td><td>${into[f.into]}</td><td class="num">${formatCents(f.ownBalanceCents)}</td></tr>`).join(''))}
+    </details>`;
 }
 
 function renderZeroToggle(selection, fiscalYear, hiddenCount) {
@@ -514,15 +526,16 @@ export function renderBalancePage(pageId, {
       ${renderYearControls('account-detail', selection, fiscalYear, { extraHidden: zeroHidden })}
       ${emptyYear ? emptyNote : `${renderBalanceCheck(report.totals.equationDifferenceCents)}
       ${renderZeroToggle(selection, fiscalYear, detail.hiddenCount)}
-      ${detail.html}`}
+      ${detail.html}
+      ${renderFoldedEquityNote(balanceSheet.accounts)}`}
     </section>`;
   }
 
   // 'position' (default)
   const positionBody = emptyYear ? emptyNote : `${renderKpiCards([
-      { label: 'Assets', value: formatCents(report.totals.assetsCents) },
-      { label: 'Liabilities', value: formatCents(report.totals.liabilitiesCents) },
-      { label: 'Net assets', value: formatCents(report.totals.equityCents), hint: `Equation difference ${formatSignedCents(report.totals.equationDifferenceCents)}` },
+      { label: 'What we own (assets)', value: formatCents(report.totals.assetsCents) },
+      { label: 'What we owe (liabilities)', value: formatCents(report.totals.liabilitiesCents), hint: 'Loans and bills not yet paid' },
+      { label: 'Net assets', value: formatCents(report.totals.equityCents), hint: 'What we own minus what we owe' },
     ])}
     ${renderBalanceCheck(report.totals.equationDifferenceCents)}
     ${isLive ? DESIGNATED_FUNDS_NOTE : ''}

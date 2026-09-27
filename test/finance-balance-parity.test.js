@@ -6,7 +6,7 @@ import { buildFinanceBalanceSheetTrendV1, respondWithFinanceBalanceSheetTrendV1 
 import { validateFinanceBalanceSheetTrendV1, acceptFinanceBalanceSheetTrendV1 } from '../contracts/validators/finance-balance-sheet-trend-consumer.js';
 import {
   buildBalanceTree, filterZeroBalanceTree, flattenBalanceTree, buildAssetComposition, parseBalanceSelection,
-  buildPriorBalanceLookup,
+  buildPriorBalanceLookup, presentNetAssets,
 } from '../apps/finance/balance-sheet-service.js';
 import { renderBalancePage, buildBalanceTrendCsv, renderBalanceCheck } from '../apps/finance/balance-pages.js';
 import worker from '../apps/finance/shell.js';
@@ -274,7 +274,7 @@ describe('Balance Sheet pages render Connect’s sections', () => {
   it('Position: year picker, balance check, designated note, restricted buckets, unclassified names, composition, and year over year', () => {
     const html = renderBalancePage('position', { balanceSheet: liveSheet(), balanceTrends: { source: 'live', rows: [] }, balancePriorYear: prior, selection: parseBalanceSelection(new URLSearchParams('fiscal_year=2026')) });
     expect(html).toContain('name="fiscal_year"');
-    expect(html).toContain('✓ Balances (Assets = Liabilities + Net assets)');
+    expect(html).toContain('✓ Adds up: what we own − what we owe = net assets');
     expect(html).toContain('shown here as net assets, not as a liability');
     expect(html).toContain('Designated ministry/purpose funds');
     expect(html).not.toContain('Perpetual endowments'); // empty buckets are left out, like Connect
@@ -424,5 +424,45 @@ describe('this year vs. last year prior-balance lookup', () => {
     const priorOf = buildPriorBalanceLookup(prior, current);
     expect(priorOf(node('Liabilities:Long-Term Liabilities:Unnumbered Note'))).toBe(60000);
     expect(priorOf(node('Liabilities:Long-Term Liabilities:26002 LCEF Mortgage 1 (xx53206)'))).toBeUndefined();
+  });
+});
+
+describe('net assets read as what we own minus what we owe', () => {
+  const eq = (path, cents, extra = {}) => ({ classification: 'Equity', categoryPath: path, accountName: path.split(':').pop(), depth: path.split(':').length - 1, hasChildren: false, ownBalanceCents: cents, ...extra });
+  const accounts = [
+    { classification: 'Assets', categoryPath: 'Assets', accountName: 'Assets', depth: 0, hasChildren: false, ownBalanceCents: 100000000 },
+    eq('Equity', 0, { hasChildren: true }),
+    eq('Equity:25000 Funds', 0, { hasChildren: true }), eq('Equity:25000 Funds:25004 Building Fund', 1200000),
+    eq('Equity:30000 Opening Balance Equity', 0), eq('Equity:31000 Retained Earnings', 73908619),
+    eq('Equity:32000 Permanently Restricted', 22382847), eq('Equity:Net Revenue', 2508534),
+  ];
+
+  it('folds QuickBooks equity lines into two plain lines without changing the total', () => {
+    const { accounts: shown, folded } = presentNetAssets(accounts);
+    const names = shown.map((a) => a.accountName);
+    expect(names).toContain('Net assets');
+    expect(names).toContain('25004 Building Fund');
+    expect(names).not.toContain('31000 Retained Earnings');
+    const tree = buildBalanceTree(shown);
+    const byPath = new Map(flattenBalanceTree(tree).map((n) => [n.path, n.totalBalanceCents]));
+    expect(byPath.get('Equity:Built up in prior years')).toBe(73908619 + 22382847);
+    expect(byPath.get('Equity:This year so far')).toBe(2508534);
+    expect(byPath.get('Equity')).toBe(1200000 + 73908619 + 22382847 + 2508534);
+    expect(folded.map((f) => f.accountName)).toEqual(['30000 Opening Balance Equity', '31000 Retained Earnings', '32000 Permanently Restricted', 'Net Revenue']);
+  });
+
+  it('account detail lists what was combined; the year over year never shows Retained Earnings', () => {
+    const sheet = { source: 'live', fiscalYear: 2026, asOfDate: 'December 31, 2026', accounts,
+      totals: { assetsCents: 100000000, liabilitiesCents: 0, equityCents: 100000000, balancedCents: 0 },
+      equityReclass: { donorRestrictedCents: 0, unrestrictedCents: 0, totalEquityCents: 0, breakdown: {}, unclassified: [] } };
+    const detail = renderBalancePage('account-detail', { balanceSheet: sheet, balanceTrends: { source: 'live', rows: [] } });
+    const tree = detail.slice(0, detail.indexOf('<details'));
+    expect(tree).toContain('Built up in prior years');
+    expect(tree).not.toContain('31000 Retained Earnings');
+    expect(detail.slice(detail.indexOf('<details'))).toContain('31000 Retained Earnings');
+    const position = renderBalancePage('position', { balanceSheet: sheet, balanceTrends: { source: 'live', rows: [] }, balancePriorYear: { ok: true, fiscalYear: 2025, accounts } });
+    expect(position).toContain('What we own (assets)');
+    expect(position).toContain('What we owe (liabilities)');
+    expect(position).not.toContain('Retained Earnings');
   });
 });

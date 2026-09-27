@@ -202,6 +202,44 @@ export function buildBalanceSheetView(rows) {
 // account hangs under its nearest existing ancestor path, and a node's total is its own balance
 // plus every descendant's -- own balances are never subtotals (see the contract's header comment),
 // so the root totals still sum to the contract's classification totals.
+// ── Lay presentation of net assets ──────────────────────────────────────────────────────────────
+// The Balance Sheet reads as "what we own - what we owe = net assets" for council members, not as
+// QuickBooks' debits-and-equity vocabulary. QuickBooks' own equity lines (Opening Balance Equity,
+// Retained Earnings, and the drifted Board/Permanently/Temporarily Restricted lines -- the same
+// codes computeEquityReclassification in src/api-finance.js never uses as inputs) mean nothing to a
+// lay reader, so every account list folds them into one "Built up in prior years" line, and the
+// current-period plug ("Net Revenue"/"Net Income") into "This year so far". The Equity root reads
+// "Net assets". Designated funds, already moved under net assets by Connect, stay as they are.
+// Display only: every total is unchanged, and `folded` names each QuickBooks line and its cents so
+// the Account detail page can still show exactly what went into the two combined lines. The
+// synthetic paths are fixed, so this year vs. last year compares them like any other line.
+export const NET_ASSETS_PRIOR_PATH = 'Equity:Built up in prior years';
+export const NET_ASSETS_CURRENT_PATH = 'Equity:This year so far';
+const QUICKBOOKS_EQUITY_CODES = new Set(['30000', '31000', '31500', '32000', '33000']);
+const QUICKBOOKS_CURRENT_LABELS = new Set(['net revenue', 'net income']);
+export function presentNetAssets(accounts) {
+  const out = [];
+  const folded = [];
+  const sums = { prior: 0, current: 0 };
+  const seen = { prior: false, current: false };
+  for (const account of accounts || []) {
+    if (account.classification !== 'Equity') { out.push(account); continue; }
+    if (account.depth === 0) { out.push({ ...account, accountName: 'Net assets' }); continue; }
+    const label = String(account.accountName || '').trim();
+    const code = (/^(\d{4,6})\b/.exec(label) || [])[1];
+    const kind = code && QUICKBOOKS_EQUITY_CODES.has(code) ? 'prior'
+      : QUICKBOOKS_CURRENT_LABELS.has(label.toLowerCase()) ? 'current' : null;
+    if (!kind || account.hasChildren) { out.push(account); continue; }
+    sums[kind] += account.ownBalanceCents || 0;
+    seen[kind] = true;
+    folded.push({ accountName: label, ownBalanceCents: account.ownBalanceCents || 0, into: kind });
+  }
+  const line = (path, name, cents) => ({ classification: 'Equity', categoryPath: path, accountName: name, depth: 1, hasChildren: false, ownBalanceCents: cents });
+  if (seen.prior) out.push(line(NET_ASSETS_PRIOR_PATH, 'Built up in prior years', sums.prior));
+  if (seen.current) out.push(line(NET_ASSETS_CURRENT_PATH, 'This year so far', sums.current));
+  return { accounts: out, folded };
+}
+
 export function buildBalanceTree(accounts) {
   const nodeByPath = new Map();
   const roots = [];
