@@ -1478,7 +1478,7 @@ describe('Finance alpha staging shell', () => {
 
   it('renders a synthetic role-level Compensation plan, its sub-pages, and its own read budget', async () => {
     statements.length = 0;
-    const res = await worker.fetch(new Request('https://finance.test/?section=compensation'), env);
+    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan'), env);
     const html = await res.text();
     expect(res.status).toBe(200);
     expect(html).toContain('Synthetic Compensation Report');

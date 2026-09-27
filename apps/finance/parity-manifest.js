@@ -141,8 +141,8 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     id: 'compensation', label: 'Compensation', group: 'Compensation', permission: 'compensation',
     capabilities: ['salary planning', 'benefits', 'district comparisons', 'council report'],
     pages: [
-      { id: 'plan', label: 'Plan', status: 'live' },
-      { id: 'connect', label: 'Connect planner', status: 'live' },
+      { id: 'connect', label: 'Planner', status: 'live' },
+      { id: 'plan', label: 'Plan (new view)', status: 'live' },
       { id: 'benefits', label: 'Benefits & taxes', status: 'live' },
       { id: 'benchmarks', label: 'Benchmarks', status: 'live' },
       { id: 'rates', label: 'Rates & ranges', status: 'live' },

@@ -57,7 +57,7 @@ describe('Finance Compensation Plan — roster editor and relay route', () => {
   });
 
   it('does not show the roster editor when the viewer role is not verified', async () => {
-    const res = await worker.fetch(new Request('https://finance.test/?section=compensation'), baseEnv);
+    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan'), baseEnv);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).not.toContain('/api/v1/connect-compensation-plan-write');
@@ -65,7 +65,7 @@ describe('Finance Compensation Plan — roster editor and relay route', () => {
 
   it('does not show the roster editor for a council viewer -- council keeps its own narrower overlay, not this route', async () => {
     const env = roleEnv('council', async () => new Response('not found', { status: 404 }));
-    const res = await worker.fetch(new Request('https://finance.test/?section=compensation', {
+    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), env);
     const html = await res.text();
@@ -74,7 +74,7 @@ describe('Finance Compensation Plan — roster editor and relay route', () => {
 
   it('shows the roster editor for a verified admin viewer, with the current worker listed', async () => {
     const env = roleEnv('admin', async () => new Response('not found', { status: 404 }));
-    const res = await worker.fetch(new Request('https://finance.test/?section=compensation', {
+    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), env);
     const html = await res.text();
@@ -85,7 +85,7 @@ describe('Finance Compensation Plan — roster editor and relay route', () => {
 
   it('shows the roster editor for a verified compensation-role viewer too', async () => {
     const env = roleEnv('compensation', async () => new Response('not found', { status: 404 }));
-    const res = await worker.fetch(new Request('https://finance.test/?section=compensation', {
+    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), env);
     const html = await res.text();

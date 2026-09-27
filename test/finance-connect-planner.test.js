@@ -62,6 +62,12 @@ describe('Connect planner inside Finance', () => {
     expect(text).toContain('"role":"admin"');
   });
 
+  it('opens Compensation on the planner by default, with the newer Plan page still a tab', async () => {
+    const html = await (await call(makeEnv().env, '/?section=compensation')).text();
+    expect(html).toContain('<iframe src="/connect-planner"');
+    expect(html).toContain('page=plan');
+  });
+
   it('serves Connect’s own planner code and stylesheet', async () => {
     const js = await call(makeEnv().env, '/connect-planner/app.js');
     expect(js.headers.get('content-type')).toContain('text/javascript');
