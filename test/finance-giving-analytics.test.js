@@ -95,9 +95,19 @@ describe('Giving analytics pages (Finance v3)', () => {
   it('lets every totals page switch between all funds, the General Fund, and one fund', async () => {
     const scoped = (fund) => ({
       ...TOTALS,
-      fund: fund === 'general' ? { key: 'general', label: 'General Fund', fund_count: 3 } : fund ? { key: fund, label: 'Building Fund', fund_count: 1 } : { key: 'all', label: 'All funds', fund_count: 9 },
-      fund_options: [{ key: 'all', label: 'All funds' }, { key: 'general', label: 'General Fund' }, { key: '8', label: 'Building Fund' }, { key: '7', label: '40085 General Fund' }],
-      funds: [{ fund_id: 7, fund_name: '40085 General Fund', cents: 51200000 }, { fund_id: 8, fund_name: 'Building Fund', cents: 5800000 }],
+      fund: fund === 'general' ? { key: 'general', label: 'General Fund', fund_count: 3 }
+        : fund === 'donor' ? { key: 'donor', label: 'Donor giving', fund_count: 5 }
+          : fund === 'revenue' ? { key: 'revenue', label: 'All revenue except MDO', fund_count: 8 }
+            : fund && fund !== 'all' ? { key: fund, label: 'Building Fund', fund_count: 1 } : { key: 'all', label: 'All funds', fund_count: 9 },
+      fund_options: [{ key: 'general', label: 'General Fund' }, { key: 'donor', label: 'Donor giving' }, { key: 'revenue', label: 'All revenue except MDO' }, { key: 'all', label: 'All funds' }, { key: '8', label: 'Building Fund' }, { key: '7', label: '40085 General Fund' }],
+      funds: [{ fund_id: 7, fund_name: '40085 General Fund', category: 'general', cents: 51200000 }, { fund_id: 8, fund_name: 'Building Fund', category: 'restricted', cents: 5800000 }],
+      categories: [
+        { key: 'general', label: 'General Fund', cents: 51200000, prior_cents: 50000000, fund_count: 3 },
+        { key: 'restricted', label: 'Restricted & designated', cents: 5800000, prior_cents: 0, fund_count: 2 },
+        { key: 'earned', label: 'Earned income', cents: 2000000, prior_cents: 1000000, fund_count: 2 },
+        { key: 'passive', label: 'Passive income', cents: 1000000, prior_cents: 1000000, fund_count: 1 },
+        { key: 'mdo', label: 'MDO income', cents: 0, prior_cents: 0, fund_count: 0 },
+      ],
     });
     const { env, calls } = makeEnv();
     const inner = env.CONNECT_SERVICE.fetch;
@@ -118,9 +128,31 @@ describe('Giving analytics pages (Finance v3)', () => {
     expect(gf).toContain('General Fund gifts only (3 funds');
     expect(gf).toContain('href="/?section=giving-analytics&amp;page=trends"');
 
+    // General Fund, donor giving and all revenue except MDO are the three tabs.
+    expect(gf).toContain('<a href="/?section=giving-analytics&amp;page=year-over-year&amp;fund=donor">Donor giving</a>');
+    expect(gf).toContain('<a href="/?section=giving-analytics&amp;page=year-over-year&amp;fund=revenue">All revenue (no MDO)</a>');
+    const donor = await (await get(env, '&page=trends&fund=donor')).text();
+    expect(calls.at(-1).query).toBe('?fund=donor');
+    expect(donor).toContain('class="is-on" aria-current="true">Donor giving</a>');
+    expect(donor).toContain('Every donor gift: the General Fund plus restricted and designated funds (5 funds)');
+    expect(donor).toContain('Giving year to date');
+    const revenue = await (await get(env, '&page=trends&fund=revenue')).text();
+    expect(calls.at(-1).query).toBe('?fund=revenue');
+    expect(revenue).toContain('class="is-on" aria-current="true">All revenue (no MDO)</a>');
+    expect(revenue).toContain('All revenue entered in Connect except MDO');
+    expect(revenue).toContain('Revenue year to date');
+    // The revenue mix: donations split unrestricted and restricted, then earned, passive and MDO.
+    expect(revenue).toContain('Where the money comes from, year to date');
+    for (const text of ['Donations', 'Unrestricted (General Fund)', 'Restricted &amp; designated', 'Earned income', 'Passive income', 'MDO income', '$570,000', '$600,000', '+100.0% vs. last year']) {
+      expect(revenue).toContain(text);
+    }
+    expect(revenue).toContain('<a href="/?section=giving-analytics&amp;page=trends&amp;fund=revenue" aria-current="true">All revenue (no MDO)</a> $600,000');
+    const pledges = await (await get(env, '&page=pledges&fund=revenue')).text();
+    expect(pledges).toContain('2026 gifts to all revenue except MDO only');
+
     const all = await (await get(env, '&page=year-over-year&fund=all')).text();
     expect(calls.at(-1).query).toBe('?fund=all');
-    expect(all).toContain('<a href="/?section=giving-analytics&amp;page=year-over-year&amp;fund=all" class="is-on" aria-current="true">All funds</a>');
+    expect(all).toContain('<option value="all" selected>All funds</option>');
     expect(all).toContain('Every gift entered in Connect counts');
     // The sidebar keeps a non-default choice while moving between Giving pages.
     expect(all).toContain('href="/?section=giving-analytics&amp;page=trends&amp;fund=all"');
@@ -138,7 +170,7 @@ describe('Giving analytics pages (Finance v3)', () => {
     expect(trends).toContain('<a href="/?section=giving-analytics&amp;page=trends&amp;fund=8">Building Fund</a>');
     const concentration = await (await worker.fetch(new Request('https://finance.test/?section=charts&page=concentration', { headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }), env)).text();
     expect(calls.at(-1).query).toBe('?fund=general');
-    expect(concentration).toContain('Showing General Fund only.');
+    expect(concentration).toContain('Showing the General Fund only.');
     expect(concentration).toContain('href="/?section=charts&amp;page=concentration" class="is-on"');
   });
 

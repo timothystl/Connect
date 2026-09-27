@@ -47,8 +47,10 @@ function href(page, params = {}, section = 'giving-analytics') {
 }
 
 // ── Fund scope ────────────────────────────────────────────────────────────────────────────────
-// Connect answers every totals page for one slice of giving: all funds, the General Fund family,
-// or one fund. The General Fund is the default (the council's usual question, as on Connect's
+// Connect answers every totals page for one slice of giving: the General Fund family, donor
+// giving (General Fund plus restricted and designated funds), all revenue except MDO (gifts plus
+// earned and passive income), all funds, or one fund. Connect's fund categories decide which
+// fund is which. The General Fund is the default (the council's usual question, as on Connect's
 // board report); the choice rides on ?fund= so it survives moving between pages.
 
 function fundOf(data) {
@@ -60,36 +62,54 @@ function fundKey(data) {
   return fundOf(data).key;
 }
 
+const SCOPE_TABS = [['general', 'General Fund'], ['donor', 'Donor giving'], ['revenue', 'All revenue (no MDO)']];
+
+function fundCount(n) {
+  return `${n} fund${n === 1 ? '' : 's'}`;
+}
+
 function scopeSentence(data) {
   const f = fundOf(data);
   if (f.key === 'all') return 'Every gift entered in Connect counts, including loose plate cash.';
-  if (f.key === 'general') return `General Fund gifts only (${f.fund_count} fund${f.fund_count === 1 ? '' : 's'} Connect counts as the General Fund), including loose plate cash given there.`;
+  if (f.key === 'general') return `General Fund gifts only (${fundCount(f.fund_count)} Connect counts as the General Fund), including loose plate cash given there.`;
+  if (f.key === 'donor') return `Every donor gift: the General Fund plus restricted and designated funds (${fundCount(f.fund_count)}), including loose plate cash. Earned income, passive income and MDO are left out.`;
+  if (f.key === 'revenue') return `All revenue entered in Connect except MDO: donor gifts plus earned and passive income (${fundCount(f.fund_count)}). Income booked only in QuickBooks is not here.`;
   return `Gifts to ${f.label} only.`;
+}
+
+// "the General Fund", "donor giving", or the fund's name, for use inside a sentence.
+function scopePhrase(data) {
+  const f = fundOf(data);
+  return { general: 'the General Fund', donor: 'donor giving', revenue: 'all revenue except MDO', all: 'all funds' }[f.key] || f.label;
 }
 
 // A short "which funds" clause for pages about households, where plate cash never appears.
 function scopeShort(data) {
   const f = fundOf(data);
   if (f.key === 'all') return '';
-  return f.key === 'general' ? 'General Fund gifts only. ' : `Gifts to ${f.label} only. `;
+  if (f.key === 'general') return 'General Fund gifts only. ';
+  if (f.key === 'donor') return 'Donor gifts to any fund except earned and passive income and MDO. ';
+  if (f.key === 'revenue') return 'All revenue in Connect except MDO. ';
+  return `Gifts to ${f.label} only. `;
 }
 
-// General Fund and All funds are one click; a specific fund is picked from the funds given to in
-// the years compared. A plain GET form, because Finance's CSP allows no script.
+// General Fund, donor giving and all revenue except MDO are one click; all funds or a specific
+// fund is picked from the list. A plain GET form, because Finance's CSP allows no script.
 export function fundPicker(data, { section = 'giving-analytics', page, hidden = {} } = {}) {
   const current = fundKey(data);
   const options = data?.fund_options || [];
-  const specific = options.filter((o) => o.key !== 'all' && o.key !== 'general');
+  const tabKeys = new Set(SCOPE_TABS.map(([key]) => key));
+  const specific = options.filter((o) => !tabKeys.has(o.key));
   const tab = (key, label) => `<a href="${href(page, { ...hidden, fund: key }, section)}"${current === key ? ' class="is-on" aria-current="true"' : ''}>${e(label)}</a>`;
-  const isSpecific = current !== 'all' && current !== 'general';
+  const isSpecific = !tabKeys.has(current);
   return `<div class="ga-fund" role="group" aria-label="Which giving to show">
       <span class="ga-fund-label">Showing</span>
-      <div class="ga-fund-tabs">${tab('general', 'General Fund')}${tab('all', 'All funds')}</div>
+      <div class="ga-fund-tabs">${SCOPE_TABS.map(([key, label]) => tab(key, label)).join('')}</div>
       ${specific.length ? `<form method="GET" action="/" class="ga-fund-form${isSpecific ? ' is-on' : ''}">
         <input type="hidden" name="section" value="${e(section)}"><input type="hidden" name="page" value="${e(page)}">
         ${Object.entries(hidden).map(([k, v]) => `<input type="hidden" name="${e(k)}" value="${e(v)}">`).join('')}
         <label><span class="sr-only">Specific fund</span><select name="fund">
-          <option value=""${isSpecific ? '' : ' selected'} disabled>Specific fund…</option>
+          <option value=""${isSpecific ? '' : ' selected'} disabled>All funds or one fund…</option>
           ${specific.map((o) => `<option value="${e(o.key)}"${o.key === current ? ' selected' : ''}>${e(o.label)}</option>`).join('')}
         </select></label>
         <button type="submit" class="button-outline">Show</button>
@@ -131,10 +151,11 @@ export function renderTrendsPage({ result, keep = {} }) {
   const mtd = changeNote(t.mtd_cents, t.prior_mtd_cents, `${monthLabel} ${a.year - 1}`);
   const share = t.ytd_cents ? t.ytd_online_cents / t.ytd_cents : 0;
   const priorShare = t.prior_ytd_cents ? t.prior_ytd_online_cents / t.prior_ytd_cents : null;
+  const isRevenue = fundKey(a) === 'revenue';
   const top = kpis([
-    ['Giving year to date', money(t.ytd_cents), ytd.text, ytd.tone],
+    [isRevenue ? 'Revenue year to date' : 'Giving year to date', money(t.ytd_cents), ytd.text, ytd.tone],
     [`${monthLabel} so far`, money(t.mtd_cents), mtd.text, mtd.tone],
-    ['Giving households', String(a.households.ytd_households), `${t.first_time_givers} first-time giver${t.first_time_givers === 1 ? '' : 's'} this year`],
+    [isRevenue ? 'Giving and paying households' : 'Giving households', String(a.households.ytd_households), `${t.first_time_givers} first-time giver${t.first_time_givers === 1 ? '' : 's'} this year`],
     ['Online share', pct(share), priorShare === null ? 'Online, card and bank transfer' : `${share >= priorShare ? 'Up' : 'Down'} from ${pct(priorShare)} last year`, priorShare !== null && share >= priorShare ? 'good' : ''],
   ]);
   const max = Math.max(1, ...a.weeks.map((w) => w.cents));
@@ -157,7 +178,47 @@ export function renderTrendsPage({ result, keep = {} }) {
     <div class="ga-two">
       <div class="panel"><h2>${e(fundOf(a).label)}, last 13 weeks</h2><p class="muted-line">Each bar is a week ending on Sunday.</p>${weekBars}</div>
       <div class="panel"><h2>By fund, year to date</h2><p class="muted-line">Every fund, whichever is shown above. Choose a fund to see it alone.</p>${funds}</div>
-    </div>`;
+    </div>
+    ${revenueMix(a, keep)}`;
+}
+
+// Where the money entered in Connect comes from this year, in the four revenue categories, with
+// donations split into unrestricted (General Fund) and restricted. Each fund's category is set in
+// Connect under Giving → Settings → Fund categories. Hidden when Connect sends no categories.
+const MIX_GROUPS = [
+  { title: 'Donations', keys: ['general', 'restricted'], names: { general: 'Unrestricted (General Fund)', restricted: 'Restricted & designated' } },
+  { title: 'Earned income', keys: ['earned'], names: { earned: 'Rentals, fees, fundraisers' } },
+  { title: 'Passive income', keys: ['passive'], names: { passive: 'Interest, dividends, property income' } },
+  { title: 'MDO income', keys: ['mdo'], names: { mdo: 'MDO tuition and fees' } },
+];
+
+function revenueMix(a, keep) {
+  const cats = new Map((a.categories || []).map((c) => [c.key, c]));
+  if (!cats.size) return '';
+  const total = [...cats.values()].reduce((s, c) => s + c.cents, 0);
+  const max = Math.max(1, ...[...cats.values()].map((c) => c.cents));
+  const delta = (c) => {
+    const note = changeNote(c.cents, c.prior_cents, 'last year');
+    return c.prior_cents ? `<span class="tone-${note.tone}">${note.text}</span>` : '<span class="tone-muted">—</span>';
+  };
+  const row = (c, name) => `<tr class="ga-mix-sub"><td>${e(name)}<small>${c.fund_count ? fundCount(c.fund_count) : 'No gifts this year'}</small></td>
+      <td><span class="ga-meter"><span style="width:${Math.max(0, c.cents / max * 100).toFixed(1)}%"></span></span></td>
+      <td>${money(c.cents)}</td><td>${total ? pct(c.cents / total) : '—'}</td><td>${delta(c)}</td></tr>`;
+  const body = MIX_GROUPS.map((g) => {
+    const members = g.keys.map((k) => cats.get(k)).filter(Boolean);
+    if (!members.length) return '';
+    const sum = { cents: members.reduce((s, c) => s + c.cents, 0), prior_cents: members.reduce((s, c) => s + c.prior_cents, 0) };
+    const head = `<tr class="ga-mix-group"><th scope="rowgroup">${e(g.title)}</th><td></td><td>${money(sum.cents)}</td><td>${total ? pct(sum.cents / total) : '—'}</td><td>${delta(sum)}</td></tr>`;
+    return head + (members.length > 1 ? members.map((c) => row(c, g.names[c.key])).join('') : '');
+  }).join('');
+  const donations = (cats.get('general')?.cents || 0) + (cats.get('restricted')?.cents || 0);
+  const noMdo = total - (cats.get('mdo')?.cents || 0);
+  const tabs = [['general', cats.get('general')?.cents || 0], ['donor', donations], ['revenue', noMdo]];
+  const current = fundKey(a);
+  return `<div class="panel panel-spaced list-panel"><div class="panel-head"><h2>Where the money comes from, year to date</h2><span class="muted">Everything entered in Connect, whichever view is shown above</span></div>
+      <div class="table-scroll"><table class="pm-table ga-num ga-mix"><thead><tr><th>Category</th><th><span class="sr-only">Share bar</span></th><th>${a.year} to date</th><th>Share</th><th>vs. same days ${a.year - 1}</th></tr></thead>
+      <tbody>${body}<tr class="total-row"><td>Everything in Connect</td><td></td><td>${money(total)}</td><td>100%</td><td>${delta({ cents: total, prior_cents: [...cats.values()].reduce((s, c) => s + c.prior_cents, 0) })}</td></tr></tbody></table></div>
+      <p class="muted-line">The three views above: ${tabs.map(([key, cents]) => `<a href="${href('trends', { ...keep, fund: key })}"${key === current ? ' aria-current="true"' : ''}>${e(SCOPE_TABS.find(([k]) => k === key)[1])}</a> ${money(cents)}`).join(' · ')}. Each fund’s category is set in Connect under Giving settings, Fund categories.</p></div>`;
 }
 
 // ── Year over year ────────────────────────────────────────────────────────────────────────────
@@ -239,7 +300,7 @@ export function renderConcentrationPage({ result, keep = {} }) {
   if (!result.ok) return unavailable('Giving concentration', result.message);
   const c = result.data.households.concentration;
   const picker = fundPicker(result.data, { section: 'charts', page: 'concentration', hidden: keep });
-  const scope = fundKey(result.data) === 'all' ? '' : ` Showing ${fundOf(result.data).label} only.`;
+  const scope = fundKey(result.data) === 'all' ? '' : ` Showing ${scopePhrase(result.data)} only.`;
   if (!c || c.households < 10) {
     return `${picker}<p class="lede">How much of the church’s giving depends on a few households. Totals only.${e(scope)}</p>
       <div class="panel"><h2>Not enough households yet</h2><p class="muted-line">Concentration needs at least ten giving households in the last 12 months.</p></div>`;
@@ -283,7 +344,7 @@ export function renderPledgesPage({ result, keep = {} }) {
     ['Behind', p.behind, 'Giving, but more than 10% behind pace', 'warn'],
     ['Not started', p.not_started, `No gift yet in ${a.year}`, 'warn'],
   ];
-  const receivedFrom = fundKey(a) === 'all' ? `${a.year} gifts to any fund` : `${a.year} gifts to ${fundOf(a).label} only`;
+  const receivedFrom = fundKey(a) === 'all' ? `${a.year} gifts to any fund` : `${a.year} gifts to ${scopePhrase(a)} only`;
   return `${picker}<p class="lede">Pledges are recorded on each person’s Giving record in Connect as one annual amount, not by fund. Received counts each pledger’s ${e(receivedFrom)}, up to their pledge.</p>
     ${kpis([
       [`${a.year} pledges`, money(p.pledged_cents), `${p.pledgers} pledger${p.pledgers === 1 ? '' : 's'}`],
@@ -339,7 +400,7 @@ export function renderWhatIfPage({ result, params, keep = {} }) {
   const nextYear = a.year + 1;
   const vsLast = p.totalCents - a.households.t12_cents;
   const fund = fundKey(a);
-  const scope = fund === 'all' ? '' : ` for ${fundOf(a).label}`;
+  const scope = fund === 'all' ? '' : ` for ${scopePhrase(a)}`;
   const field = (key, label, note, suffix = '') => `<label class="ga-assume"><span><b>${label}</b><small>${note}</small></span>
       <span class="ga-input">${suffix === '$' ? '<i>$</i>' : ''}<input type="number" name="${key}" value="${p.inputs[key]}" min="0"${key === 'retention' ? ' max="100"' : ''} step="1" inputmode="numeric">${suffix === '%' ? '<i>%</i>' : ''}</span></label>`;
   return `${fundPicker(a, { page: 'what-if', hidden: keep })}
@@ -510,6 +571,12 @@ export const GIVING_ANALYTICS_STYLES = `
     .ga-fund-form.is-on select { border-color:var(--navy); font-weight:600; }
     .ga-fund-form button { margin-top:0; }
     @media print { .ga-fund { display:none; } }
+    .ga-mix td small { display:block; color:#6B7280; font-size:12px; }
+    .ga-mix td:nth-child(2) { width:28%; }
+    .ga-mix .ga-meter { display:block; }
+    .ga-mix .ga-mix-group th, .ga-mix .ga-mix-group td { font-weight:700; text-align:left; border-top:1px solid #D5DAE3; }
+    .ga-mix .ga-mix-group td:not(:nth-child(2)) { text-align:right; }
+    .ga-mix-sub td:first-child { padding-left:18px; }
     .ga-meters a { color:inherit; }
     .ga-meters a.is-on { font-weight:700; color:var(--navy); }
     .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }

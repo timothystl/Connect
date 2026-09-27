@@ -645,6 +645,8 @@ export const FUND_CATEGORIES = [
   { key: 'earned',     label: 'Earned income',           hh_label: 'Paying households' },
   { key: 'passive',    label: 'Passive income',          hh_label: 'Income sources' },
   { key: 'restricted', label: 'Restricted & designated', hh_label: 'Giving households' },
+  // MDO tuition and fees, if any reach Connect: kept apart so "all revenue except MDO" can mean it.
+  { key: 'mdo',        label: 'MDO income',              hh_label: 'Paying households' },
 ];
 const FUND_CATEGORY_KEYS = new Set(FUND_CATEGORIES.map(c => c.key));
 

@@ -4,7 +4,7 @@
 // Finance stores nothing. Never throws.
 import { callConnectContract } from './connect-giving-batch-client.js';
 
-// fund: 'all', 'general', or a Connect fund id. Connect validates it; anything it does not
+// fund: 'general', 'donor', 'revenue' (all but MDO), 'all', or a Connect fund id. Connect validates it; anything it does not
 // recognize comes back as all funds. Finance's pages ask for 'general' unless told otherwise.
 export function fetchGivingAnalytics(env, accessJwt, { asOf, fund } = {}) {
   const query = {};

@@ -1724,7 +1724,7 @@ async function _doInitDb(db) {
     // funds: per-fund annual budget (cents) for the Board Report YTD-budget/variance columns
     'ALTER TABLE funds ADD COLUMN budget_annual_cents INTEGER NOT NULL DEFAULT 0',
     // funds: category backing the Reports fund lens (migration 0033) — general | earned |
-    // passive | restricted. Backfilled for the General Fund family below.
+    // passive | restricted | mdo. Backfilled for the General Fund family below.
     "ALTER TABLE funds ADD COLUMN category TEXT NOT NULL DEFAULT 'restricted'",
     // people: deceased flag and death date
     'ALTER TABLE people ADD COLUMN deceased INTEGER NOT NULL DEFAULT 0',
