@@ -358,3 +358,88 @@ export function buildAssetComposition(tree) {
   const shownCents = groups.reduce((total, node) => total + node.totalBalanceCents, 0);
   return groups.map((node) => ({ label: node.label, cents: node.totalBalanceCents, sharePct: shownCents ? node.totalBalanceCents / shownCents * 100 : 0 }));
 }
+
+// ── Lay position: own − owe = net assets, split into usable money and property ─────────────────
+// Andrew, September 27: council members read the Balance Sheet as what we own (cash, investments,
+// property) minus what we owe, and then need to see how much of the money is already promised and
+// how much is free to direct -- with the property kept apart, because it cannot easily be sold.
+// Every figure comes from the balance sheet's own account tree (own balances, never subtotals),
+// so the pieces always add back to net assets exactly:
+//   free + promised (designated funds + endowment principal) + other assets + property equity
+//     = (cash + investments − short-term debt) + other assets + (property − long-term debt)
+//     = assets − liabilities.
+// Cash is the 11xxx cash family (or a bank-account name) outside the investment group; investments
+// are the topmost Assets group named "Investment…" (endowment and bequest funds); property is the
+// Fixed Assets group (assetGroupOf in src/api-finance.js); anything else in Assets (prepaid
+// expense, tax holding, an old Employee Retention Credit) is "other". Short-term debt is the
+// "Current Liabilities" group; everything else owed is long-term (the mortgage). Designated funds
+// are whatever sits under net assets besides QuickBooks' own equity lines (see presentNetAssets);
+// endowment principal is Connect's perpetual-endowment bucket (computeEquityReclassification).
+const CASH_NAME_RE = /checking|saving|money\s*market|petty\s*cash|cash\s*on\s*hand|^cash\b/i;
+function topSegment(path) { return String(path || '').split(':')[1] || ''; }
+function sumOwn(accounts, predicate) {
+  return (accounts || []).reduce((total, account) => total + (predicate(account) ? (account.ownBalanceCents || 0) : 0), 0);
+}
+function investmentRootPath(accounts) {
+  const candidates = (accounts || []).filter((a) => a.classification === 'Assets' && /investment/i.test(String(a.accountName || '')));
+  candidates.sort((a, b) => a.depth - b.depth);
+  return candidates.length ? candidates[0].categoryPath : null;
+}
+const under = (path, root) => root !== null && (path === root || String(path).startsWith(`${root}:`));
+
+export function longTermDebtCents(accounts) {
+  return sumOwn(accounts, (a) => a.classification === 'Liabilities' && a.depth > 0 && !/current/i.test(topSegment(a.categoryPath)));
+}
+
+export function buildLayPosition(accounts, equityReclass) {
+  const invRoot = investmentRootPath(accounts);
+  const isAsset = (a) => a.classification === 'Assets';
+  const isFixed = (a) => isAsset(a) && /fixed/i.test(topSegment(a.categoryPath));
+  const investmentsCents = sumOwn(accounts, (a) => isAsset(a) && under(a.categoryPath, invRoot));
+  const cashCents = sumOwn(accounts, (a) => isAsset(a) && !isFixed(a) && !under(a.categoryPath, invRoot)
+    && (/^11\d{2,4}\b/.test(String(a.accountName || '').trim()) || CASH_NAME_RE.test(String(a.accountName || ''))));
+  const propertyCents = sumOwn(accounts, isFixed);
+  const assetsCents = sumOwn(accounts, isAsset);
+  const otherAssetsCents = assetsCents - cashCents - investmentsCents - propertyCents;
+  const liabilitiesCents = sumOwn(accounts, (a) => a.classification === 'Liabilities');
+  const longTermCents = longTermDebtCents(accounts);
+  const shortTermCents = liabilitiesCents - longTermCents;
+  const { folded } = presentNetAssets(accounts);
+  const equityCents = sumOwn(accounts, (a) => a.classification === 'Equity');
+  const designatedCents = equityCents - folded.reduce((total, f) => total + f.ownBalanceCents, 0);
+  const endowmentCents = equityReclass?.breakdown?.perpetual?.cents || 0;
+  const afterShortTermCents = cashCents + investmentsCents - shortTermCents;
+  const freeCents = afterShortTermCents - designatedCents - endowmentCents;
+  const propertyEquityCents = propertyCents - longTermCents;
+  // Short-term debt by its QuickBooks group (Accounts Payable, Credit Cards, payroll withholdings),
+  // so the reader sees what the bills are rather than one lump.
+  const shortTermLines = (accounts || [])
+    .filter((a) => a.classification === 'Liabilities' && a.depth === 2 && /current/i.test(topSegment(a.categoryPath)))
+    .map((a) => ({ label: a.accountName, cents: sumOwn(accounts, (b) => under(b.categoryPath, a.categoryPath)) }))
+    .filter((line) => line.cents !== 0);
+  return {
+    own: { cashCents, investmentsCents, otherAssetsCents, propertyCents, totalCents: assetsCents },
+    owe: { shortTermCents, shortTermLines, longTermCents, totalCents: liabilitiesCents },
+    netAssetsCents: assetsCents - liabilitiesCents,
+    money: { cashAndInvestmentsCents: cashCents + investmentsCents, afterShortTermCents, designatedCents, endowmentCents, freeCents },
+    property: { bookCents: propertyCents, mortgageCents: longTermCents, equityCents: propertyEquityCents },
+    checkCents: freeCents + designatedCents + endowmentCents + otherAssetsCents + propertyEquityCents - (assetsCents - liabilitiesCents),
+  };
+}
+
+// Year-end mortgage (long-term debt) for every fiscal year with a balance sheet on file, from the
+// first year the loan is in the books (it was recorded in March 2018; the loan itself began in
+// 2013) through the chosen year. One single-year read per year -- the same contract the Position
+// page already reads, answered from Finance's own database (local-contract-reads.js). Years with
+// no import, or whose read fails, are simply absent. Never throws.
+export const MORTGAGE_HISTORY_FROM_YEAR = 2018;
+export async function resolveMortgageHistory(env, toYear) {
+  const years = [];
+  for (let y = MORTGAGE_HISTORY_FROM_YEAR; y <= toYear; y++) years.push(y);
+  const results = await Promise.all(years.map((y) => fetchLiveFinanceBalanceSheet(env, y).catch(() => ({ ok: false }))));
+  return results
+    .map((r, i) => (r.ok && r.balanceSheet.accounts.length
+      ? { fiscalYear: years[i], asOfDate: r.balanceSheet.asOfDate, mortgageCents: longTermDebtCents(r.balanceSheet.accounts), propertyCents: sumOwn(r.balanceSheet.accounts, (a) => a.classification === 'Assets' && /fixed/i.test(topSegment(a.categoryPath))) }
+      : null))
+    .filter(Boolean);
+}

@@ -95,7 +95,7 @@ import {
   postConnectPropertyReserveMonthlyRemove, postConnectPropertyReserveDisbursementWrite,
   postConnectPropertyReserveDisbursementRemove,
 } from './finance-property-reserves-client.js';
-import { resolveBalanceSheet, resolveBalanceSheetTrend, resolveBalanceSheetPriorYear, parseBalanceSelection } from './balance-sheet-service.js';
+import { resolveBalanceSheet, resolveBalanceSheetTrend, resolveBalanceSheetPriorYear, parseBalanceSelection, resolveMortgageHistory } from './balance-sheet-service.js';
 import {
   postConnectChurchBalancesXlsxImport, postConnectChurchBalancesXlsxPreview,
   postConnectChurchBalancesXlsxCommit, postConnectChurchBalancesMultiYearXlsxImport,
@@ -108,6 +108,7 @@ import {
   resolvePropertyValuation, resolvePropertyReport, resolvePropertyReserves, resolvePropertyLedgers,
 } from './property-report-service.js';
 import { buildPropertyValuationMetaFromForm } from './property-valuation-form.js';
+import { fetchLiveFinancePropertyValuation } from './finance-property-valuation-client.js';
 import { resolveBudgetReport } from './budget-report-service.js';
 import {
   postConnectFinanceBudgetWrite, postConnectFinanceBudgetGenerate, postConnectFinanceBudgetGenerateAll,
@@ -964,7 +965,7 @@ function renderConnectWorkspaceFrame(workspaceSection) {
 function renderSectionBody(ctx) {
   const {
     section, pageId, summary, giving, givingSource, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends,
-    balancePriorYear, balanceSelection,
+    balancePriorYear, balancePropertyValue, balanceMortgageHistory, balanceSelection,
     daycareReport, daycareReportLive, daycareEntries, daycareEditId, propertyReport, propertyReportLive, propertyReserves, propertyReservesLive,
     propertyLedgers, propertyLedgersLive, propertyValuation, propertyPolicy, propertyDebt,
     propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, accountsReport, dataStatus, classification, compensationReport,
@@ -1238,7 +1239,7 @@ function renderSectionBody(ctx) {
     // Admin-only, like every import (see canImportChurchMultiYear above).
     const canImportBalanceMultiYear = roleResult.ok && roleResult.role === 'admin';
     return renderBalancePage(page.id, {
-      balanceSheet, balanceTrends, balancePriorYear, selection: balanceSelection,
+      balanceSheet, balanceTrends, balancePriorYear, balancePropertyValue, balanceMortgageHistory, selection: balanceSelection,
       printMode: ctx.searchParams?.get('print') === '1',
       canManageBalanceImport, balanceXlsxImportStatus, balanceXlsxImportMessage,
       canImportBalanceMultiYear, balanceMultiYearXlsxImportStatus, balanceMultiYearXlsxImportMessage,
@@ -3686,6 +3687,16 @@ export default {
         // Live-only and never throws; started now so it runs alongside every other read.
         const balancePriorYearLoad = section.id === 'balance' && effectivePageId === 'position'
           ? resolveBalanceSheetPriorYear(env, balanceSelection.fiscalYear) : null;
+        // Position's Property panel: the commercial property's current valuation (the same
+        // capitalized value Commercial Property → Valuation shows; live only, never the synthetic
+        // fixture) and the year-end mortgage for each year on file. Both never throw.
+        const positionPropertyLoads = section.id === 'balance' && effectivePageId === 'position';
+        const balancePropertyValueLoad = positionPropertyLoads
+          ? fetchLiveFinancePropertyValuation(env).then((r) => (r.ok && r.valuation.assumptions.capRate > 0
+            ? { capitalizedValueCents: r.valuation.totals.capitalizedValueCents, capRate: r.valuation.assumptions.capRate, asOfDate: r.valuation.asOfDate || '' }
+            : null)).catch(() => null) : null;
+        const balanceMortgageHistoryLoad = positionPropertyLoads
+          ? resolveMortgageHistory(env, balanceSelection.fiscalYear).catch(() => null) : null;
         // Multi-year position tries the real connect.finance-balance-sheet-trend.v1 endpoint first
         // and falls back to the same synthetic trend fixture, labeled, via resolveBalanceSheetTrend
         // -- same live-first pattern as resolveBalanceSheet just above. readSyntheticBalanceTrends
@@ -4116,6 +4127,7 @@ export default {
         // costs its own timeout once, not once per section read in turn.
         [summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, payrollBundle, financeHealth] = await Promise.all([summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, payrollBundle, financeHealth]);
         const balancePriorYear = await balancePriorYearLoad;
+        const [balancePropertyValue, balanceMortgageHistory] = await Promise.all([balancePropertyValueLoad, balanceMortgageHistoryLoad]);
         const printMode = url.searchParams.get('print') === '1';
         // The Planner is the one Finance page that runs script (its own, from this Worker only).
         const plannerPage = section.id === 'compensation' && effectivePageId === 'planner';
@@ -4123,7 +4135,7 @@ export default {
           printFragment: printMode && url.searchParams.get('fragment') === '1',
           healthView: url.searchParams.get('view'), healthAppeal: url.searchParams.get('appeal'), healthFlow: url.searchParams.get('flow'), financeHealth, facilities, hr, givingBatch, givingAnalytics, givingAnalyticsPeople, accessRoles, budgetBuilder, boardLayout, planningBasis, planningScenarios, planningRunway, propertyBooks, searchParams: url.searchParams,
           metadata, summary, giving, givingSource, section, pageId, councilPreview, roleResult, churchReport, churchReportLive, churchTrendLive,
-          balanceSheet, balanceTrends, balancePriorYear, balanceSelection, daycareReport, daycareReportLive, daycareEntries, daycareEditId, propertyReport, propertyReportLive, propertyReserves,
+          balanceSheet, balanceTrends, balancePriorYear, balancePropertyValue, balanceMortgageHistory, balanceSelection, daycareReport, daycareReportLive, daycareEntries, daycareEditId, propertyReport, propertyReportLive, propertyReserves,
           propertyReservesLive, propertyLedgers, propertyLedgersLive, propertyValuation, propertyPolicy, propertyDebt, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, accountsReport,
           dataStatus, classification, classificationRevenueStatus, classificationRevenueMessage, classificationExpenseStatus, classificationExpenseMessage,
           importStatus, quickbooksSnapshot, daycarePreviewYear, daycarePreview, dataDaycareImportStatus, dataDaycareImportMessage, quickbooksEnabled: qbEnabled(env),

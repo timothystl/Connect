@@ -1,6 +1,6 @@
 import {
   buildBalanceSheetView, buildLiveBalanceSheetView, buildBalanceTree, filterZeroBalanceTree, flattenBalanceTree,
-  buildPriorBalanceLookup, buildAssetComposition, presentNetAssets,
+  buildPriorBalanceLookup, presentNetAssets, buildLayPosition, MORTGAGE_HISTORY_FROM_YEAR,
 } from './balance-sheet-service.js';
 import { escapeHtml, formatCents, renderKpiCards, renderSectionHeading, renderTable } from './render-helpers.js';
 import { csvText } from './payroll-report-render.js';
@@ -123,8 +123,6 @@ export function renderBalanceCheck(balancedCents) {
     : `<p class="bs-check is-off">⚠ Off by ${formatExactCents(balancedCents)} — check the import for a missing or misclassified account.</p>`;
 }
 
-const DESIGNATED_FUNDS_NOTE = '<p class="bs-note">Designated &amp; restricted funds (Memorial, Food Pantry, missions, and similar) are shown here as net assets, not as a liability &mdash; the standard nonprofit presentation. They are gifts already given for a specific purpose, not a debt owed to an outside party. QuickBooks&rsquo; own chart of accounts still files them under Liabilities.</p>';
-
 function renderYearControls(page, selection, fiscalYear, { extraHidden = '' } = {}) {
   return `<form method="GET" action="/" class="bs-controls no-print" aria-label="Choose the balance sheet year">
       <input type="hidden" name="section" value="balance"><input type="hidden" name="page" value="${escapeHtml(page)}">${extraHidden}
@@ -135,36 +133,118 @@ function renderYearControls(page, selection, fiscalYear, { extraHidden = '' } = 
     </form>${selection?.yearError ? `<p class="status status-error">${escapeHtml(selection.yearError)} Showing ${fiscalYear}.</p>` : ''}`;
 }
 
-// ── Position ───────────────────────────────────────────────────────────────────────────────────
-function renderEquityReclassPanel(equityReclass) {
-  const bucketRows = ['perpetual', 'purpose_time', 'designated']
-    .map((key) => equityReclass.breakdown[key])
-    .filter((bucket) => bucket && bucket.cents)
-    .map((bucket) => `<tr><td>${escapeHtml(bucket.label)}</td><td class="num">${formatCents(bucket.cents)}</td></tr>`)
-    .join('');
-  const unclassified = equityReclass.unclassified.length
-    ? `<div class="bs-warn">
-        <p><b>⚠ ${equityReclass.unclassified.length} account(s) need a Donor-Restricted classification decision.</b> New or renamed accounts near the existing restricted-fund groups are not counted in either bucket until they are reviewed and added to the classification table.</p>
-        ${renderPlainTable(['Account', ['Balance', true]], equityReclass.unclassified.map((u) => `<tr><td>${escapeHtml(u.accountName)}</td><td class="num">${formatCents(u.ownBalanceCents)}</td></tr>`).join(''))}
-      </div>`
-    : '';
-  return `<div class="bs-panel" aria-label="Donor-restricted net assets">
-      ${panelHeading('Net assets — donor-restricted vs. without donor restrictions', 'Of our net assets, how much donors gave for a set purpose (funds and endowments), and how much the congregation can direct. Computed from the actual fund and endowment balances.')}
-      ${renderKpiCards([
-        { label: 'Donor-restricted', value: formatCents(equityReclass.donorRestrictedCents) },
-        { label: 'Without donor restrictions', value: formatCents(equityReclass.unrestrictedCents) },
+// ── Lay position (own − owe = net assets; usable money vs. property) ───────────────────────────
+// See buildLayPosition in balance-sheet-service.js for how each figure is drawn from the account
+// tree. Plain names for QuickBooks' short-term liability groups; anything unrecognized keeps its
+// own label.
+const SHORT_TERM_LABELS = [
+  [/accounts payable/i, 'Bills not yet paid'],
+  [/credit card/i, 'Credit cards'],
+  [/other current|payroll/i, 'Payroll withholdings not yet sent'],
+];
+function plainShortTermLabel(label) {
+  const hit = SHORT_TERM_LABELS.find(([re]) => re.test(String(label || '')));
+  return hit ? hit[1] : label;
+}
+function layRows(lines) {
+  return lines.filter(Boolean).map(([label, cents, opts = {}]) => `<tr${opts.total ? ' class="bs-group-row"' : ''}><td${opts.indent ? ' style="padding-left:30px"' : ''}>${label}</td><td class="num">${cents === null ? '—' : formatCents(cents)}</td></tr>`).join('');
+}
+function layTable(lines) {
+  return `<div class="table-wrap"><table class="bs-table bs-lay"><tbody>${layRows(lines)}</tbody></table></div>`;
+}
+function minus(cents) { return -cents; }
+
+function renderLayOwnOwe(lay) {
+  const own = layTable([
+    ['Cash (checking and petty cash)', lay.own.cashCents],
+    ['Investments (endowment and bequest funds)', lay.own.investmentsCents],
+    lay.own.otherAssetsCents ? ['Other (prepaid expenses, tax holding)', lay.own.otherAssetsCents] : null,
+    ['Commercial property <small>(loan amount on the books, not market value)</small>', lay.own.propertyCents],
+    ['<b>Total we own</b>', lay.own.totalCents, { total: true }],
+  ]);
+  const owe = layTable([
+    ...lay.owe.shortTermLines.map((line) => [escapeHtml(plainShortTermLabel(line.label)), line.cents]),
+    ['Mortgage (LCEF)', lay.owe.longTermCents],
+    ['<b>Total we owe</b>', lay.owe.totalCents, { total: true }],
+  ]);
+  return `<div class="bs-panel" aria-label="What we own">${panelHeading('What we own')}${own}</div>
+    <div class="bs-panel" aria-label="What we owe">${panelHeading('What we owe')}${owe}</div>`;
+}
+
+function renderLayMoney(lay) {
+  const m = lay.money;
+  return `<div class="bs-panel" aria-label="Money we can use">
+      ${panelHeading('1. Money we can actually use', 'Cash and investments only. The property is shown separately below because it cannot easily be sold.')}
+      ${layTable([
+        ['Cash + investments', m.cashAndInvestmentsCents],
+        ['− Bills, cards and payroll owed now', minus(lay.owe.shortTermCents), { indent: true }],
+        ['<b>= Money on hand after paying what’s due</b>', m.afterShortTermCents, { total: true }],
+        ['− Already promised: designated funds <small>(Memorial, Food Pantry, missions…)</small>', minus(m.designatedCents), { indent: true }],
+        ['− Already promised: endowment principal <small>(can never be spent)</small>', minus(m.endowmentCents), { indent: true }],
+        ['<b>= Free to direct</b>', m.freeCents, { total: true }],
       ])}
-      ${bucketRows ? renderPlainTable(['Restricted bucket', ['Amount', true]], bucketRows) : ''}
-      ${unclassified}
     </div>`;
 }
 
-function renderAssetComposition(tree) {
-  const items = buildAssetComposition(tree);
-  if (!items.length) return '';
-  return `<div class="bs-panel" aria-label="Asset composition">
-      ${panelHeading('Asset composition', 'Each asset group’s share of total assets.')}
-      <ul class="bs-meters">${items.map((item) => `<li><span>${escapeHtml(item.label)}</span><span class="bs-meter" aria-hidden="true"><i style="width:${item.sharePct.toFixed(1)}%"></i></span><span class="num">${formatCents(item.cents)} · ${item.sharePct.toFixed(1)}%</span></li>`).join('')}</ul>
+function renderLayProperty(lay, valuation, history) {
+  const p = lay.property;
+  const paidCents = p.bookCents - p.mortgageCents;
+  const paidPct = p.bookCents ? paidCents / p.bookCents * 100 : 0;
+  const hasValue = valuation && valuation.capitalizedValueCents > 0;
+  const valueNote = hasValue
+    ? `<p class="bs-note">Current valuation is estimated from the rent roll and operating costs at a ${(valuation.capRate * 100).toFixed(1)}% cap rate${valuation.asOfDate ? `, as of ${escapeHtml(valuation.asOfDate)}` : ''} (Commercial Property → Valuation).</p>`
+    : '';
+  const rows = [
+    ['Loan amount on the books <small>(recorded March 2018; loan began 2013)</small>', p.bookCents],
+    ['Mortgage left', p.mortgageCents],
+    ['<b>Owned free of debt, on the books</b>', p.equityCents, { total: true }],
+    hasValue ? ['Current valuation <small>(income method)</small>', valuation.capitalizedValueCents] : null,
+    hasValue ? ['<b>Owned free of debt, at current valuation</b>', valuation.capitalizedValueCents - p.mortgageCents, { total: true }] : null,
+  ];
+  const meter = p.bookCents > 0
+    ? `<ul class="bs-meters"><li><span>Loan paid down</span><span class="bs-meter" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, paidPct)).toFixed(1)}%"></i></span><span class="num">${formatCents(paidCents)} of ${formatCents(p.bookCents)} · ${paidPct.toFixed(0)}%</span></li></ul>`
+    : '';
+  return `<div class="bs-panel" aria-label="Property">
+      ${panelHeading('2. Property (not spendable)', 'The commercial property. The books carry it at the loan amount, not its market value.')}
+      ${layTable(rows)}
+      ${valueNote}
+      ${meter}
+      ${renderMortgageHistory(p.bookCents, history)}
+    </div>`;
+}
+
+// Year-end mortgage left for each year with a balance sheet on file, measured against the loan
+// amount on the books, so the council can see the progress year by year. The recording year's
+// paydown is measured from the amount recorded; any other first year has no prior to compare.
+// A year whose sheet is not a December 31 close is marked "so far".
+function renderMortgageHistory(bookCents, history) {
+  if (!history || !history.length) return '';
+  let prior = history[0].fiscalYear === MORTGAGE_HISTORY_FROM_YEAR ? bookCents : null;
+  const rows = history.map((h) => {
+    const partial = h.asOfDate && !/dec(ember)?\.?\s*31|-12-31/i.test(h.asOfDate);
+    const paidThisYear = prior === null ? null : prior - h.mortgageCents;
+    prior = h.mortgageCents;
+    const paid = bookCents - h.mortgageCents;
+    const pct = bookCents ? paid / bookCents * 100 : 0;
+    return `<tr><td>${h.fiscalYear}${partial ? ' <small>(so far)</small>' : ''}</td><td class="num">${formatCents(h.mortgageCents)}</td><td class="num">${paidThisYear === null ? '—' : formatCents(paidThisYear)}</td><td class="num">${formatCents(paid)} · ${pct.toFixed(0)}%</td></tr>`;
+  }).join('');
+  return `<h4 class="bs-h">Mortgage progress by year</h4>
+    <p class="bs-note">Mortgage left at each year’s balance sheet. Years without an imported balance sheet are not shown; import the multi-year Statement of Financial Position to fill them in.</p>
+    ${renderPlainTable(['Year', ['Mortgage left', true], ['Paid that year', true], ['Paid down since recorded', true]], rows)}`;
+}
+
+function renderLayCheck(lay) {
+  const parts = `${formatCents(lay.money.freeCents)} free + ${formatCents(lay.money.designatedCents + lay.money.endowmentCents)} promised${lay.own.otherAssetsCents ? ` + ${formatCents(lay.own.otherAssetsCents)} other` : ''} + ${formatCents(lay.property.equityCents)} property = ${formatCents(lay.netAssetsCents)} net assets`;
+  return Math.abs(lay.checkCents) < 1
+    ? `<p class="bs-check is-ok">✓ ${parts}</p>`
+    : `<p class="bs-check is-off">⚠ The pieces are off by ${formatExactCents(lay.checkCents)} — check the import for a misclassified account.</p>`;
+}
+
+function renderUnclassifiedWarning(equityReclass) {
+  if (!equityReclass || !equityReclass.unclassified.length) return '';
+  return `<div class="bs-warn">
+      <p><b>⚠ ${equityReclass.unclassified.length} account(s) need a Donor-Restricted classification decision.</b> New or renamed accounts near the existing restricted-fund groups are not counted as promised until they are reviewed and added to the classification table.</p>
+      ${renderPlainTable(['Account', ['Balance', true]], equityReclass.unclassified.map((u) => `<tr><td>${escapeHtml(u.accountName)}</td><td class="num">${formatCents(u.ownBalanceCents)}</td></tr>`).join(''))}
     </div>`;
 }
 
@@ -467,6 +547,7 @@ export const BALANCE_STYLES = `
 // print sheet.
 export function renderBalancePage(pageId, {
   balanceSheet, balanceTrends, balancePriorYear = null, selection = null, printMode = false,
+  balancePropertyValue = null, balanceMortgageHistory = null,
   canManageBalanceImport, balanceXlsxImportStatus, balanceXlsxImportMessage,
   canImportBalanceMultiYear, balanceMultiYearXlsxImportStatus, balanceMultiYearXlsxImportMessage,
 }) {
@@ -532,15 +613,18 @@ export function renderBalancePage(pageId, {
   }
 
   // 'position' (default)
+  const lay = isLive && !emptyYear ? buildLayPosition(balanceSheet.accounts, balanceSheet.equityReclass) : null;
   const positionBody = emptyYear ? emptyNote : `${renderKpiCards([
-      { label: 'What we own (assets)', value: formatCents(report.totals.assetsCents) },
-      { label: 'What we owe (liabilities)', value: formatCents(report.totals.liabilitiesCents), hint: 'Loans and bills not yet paid' },
+      { label: 'What we own', value: formatCents(report.totals.assetsCents) },
+      { label: 'What we owe', value: formatCents(report.totals.liabilitiesCents), hint: 'Mortgage, bills and payroll not yet paid' },
       { label: 'Net assets', value: formatCents(report.totals.equityCents), hint: 'What we own minus what we owe' },
     ])}
     ${renderBalanceCheck(report.totals.equationDifferenceCents)}
-    ${isLive ? DESIGNATED_FUNDS_NOTE : ''}
-    ${isLive ? renderEquityReclassPanel(report.equityReclass) : ''}
-    ${isLive ? renderAssetComposition(buildBalanceTree(balanceSheet.accounts)) : ''}
+    ${lay ? `${renderLayOwnOwe(lay)}
+    ${renderLayMoney(lay)}
+    ${renderLayProperty(lay, balancePropertyValue, balanceMortgageHistory)}
+    ${renderLayCheck(lay)}
+    ${renderUnclassifiedWarning(report.equityReclass)}` : ''}
     ${isLive ? renderYearOverYear(balanceSheet.accounts, fiscalYear, balancePriorYear) : ''}
     ${isLive && printMode ? `${panelHeading('Full account detail', hideZero ? 'Zero-balance lines are hidden.' : '')}${renderBalanceDetailTree(balanceSheet.accounts, { hideZero }).html}` : ''}
     <p class="no-print">See <a href="${escapeHtml(balanceHref('account-detail', isLive ? { fiscal_year: fiscalYear } : {}))}">Account detail</a> and <a href="${escapeHtml(balanceHref('multi-year'))}">Multi-year position</a> for the full breakdown behind these totals.</p>`;
