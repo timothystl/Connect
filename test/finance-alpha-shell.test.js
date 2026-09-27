@@ -708,7 +708,7 @@ describe('Finance alpha staging shell', () => {
     expect(html).toContain('$300,000');
     expect(html).toContain('$100,000');
     expect(html).toContain('$200,000');
-    expect(html).toContain('✓ Adds up: what we own − what we owe = net assets');
+    expect(html).toContain('✓ Adds up: what we own − what we owe = net assets'); // the synthetic fixture keeps the bookkeeping view
     expect(statements).toHaveLength(2);
     expect(statements.every((sql) => /^SELECT\b/i.test(sql))).toBe(true);
 
