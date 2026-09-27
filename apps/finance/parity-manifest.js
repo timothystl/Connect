@@ -127,6 +127,7 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     capabilities: ['budget builder', 'scenarios', 'multi-year forecast', 'outlook', 'board categories', 'purpose tags'],
     pages: [
       { id: 'builder', label: 'Budget builder', status: 'live' },
+      { id: 'connect', label: 'Connect budget planner', status: 'live' },
       { id: 'scenarios', label: 'Scenarios', status: 'live' },
       { id: 'multi-year', label: 'Multi-year forecast', status: 'live' },
       { id: 'compensation-link', label: 'Compensation', status: 'live' },
@@ -177,6 +178,7 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     capabilities: ['account tree', 'board-category presentation', 'fiscal-year actuals', 'resources by purpose'],
     pages: [
       { id: 'chart', label: 'Chart of accounts', status: 'live' },
+      { id: 'connect', label: 'Connect chart of accounts', status: 'live' },
       { id: 'access', label: 'Access & roles', status: 'live' },
     ],
   },

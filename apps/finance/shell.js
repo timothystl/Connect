@@ -948,6 +948,13 @@ function renderEntityCards(entities) {
   return entities.map((entity) => (entity.available === false ? renderUnavailableCard(`${entity.label} · ${entity.periodLabel}`, entity.unavailableNote) : `<div class="card"><small>${escapeHtml(entity.label)} · ${escapeHtml(entity.periodLabel)}</small><strong>${formatSignedCents(entity.resultCents)}</strong><span>Income ${formatCents(entity.incomeCents)} · expenses ${formatCents(entity.expenseCents)} · ${entity.source === 'live' ? 'live from Connect' : 'synthetic fixture'}</span></div>`)).join('');
 }
 
+function renderConnectWorkspaceFrame(workspaceSection) {
+  const label = workspaceSection === 'planning' ? 'Budget Planner' : 'Chart of Accounts';
+  const src = `/accounting?section=${workspaceSection}`;
+  return `<p class="muted-line">Connect’s ${label}, running in Finance with the same controls and autosave. It edits the same saved data as Finance’s own pages. <a href="${src}" target="_blank" rel="noopener">Open full screen</a></p>
+    <iframe src="${src}" title="${label} (Connect)" style="width:100%;height:calc(100vh - 150px);min-height:720px;border:1px solid #E3E7EE;border-radius:10px;background:#F3F7FA"></iframe>`;
+}
+
 function renderSectionBody(ctx) {
   const {
     section, pageId, summary, giving, givingSource, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends,
@@ -1328,6 +1335,11 @@ function renderSectionBody(ctx) {
     }
     if (page.id === 'multi-year') return renderForecastPage({ basis, planning: ctx.planningScenarios, runway: ctx.planningRunway, params: ctx.searchParams });
     return renderScenariosPage({ basis, planning: ctx.planningScenarios, canEdit: !councilPreview && canEditPlanning(roleResult), status: describeFormStatus(ctx.searchParams, 'planning') });
+  }
+  // Connect's own Budget Planner and Chart of Accounts (the accounting workspace, which runs
+  // Connect's screens unchanged), framed here beside Finance's pages for side-by-side use.
+  if ((section.id === 'planning' || section.id === 'accounts') && page.id === 'connect') {
+    return renderConnectWorkspaceFrame(section.id === 'planning' ? 'planning' : 'accounts');
   }
   if (section.id === 'planning' && page.id === 'builder' && ctx.budgetBuilder?.ok) {
     return renderBudgetBuilderPage({

@@ -63,7 +63,7 @@ export function renderAccountingWorkspace(viewer, url, version) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Accounting workspace · Timothy Finance</title><link rel="stylesheet" href="/accounting/app.css?v=${encodeURIComponent(version || 'dev')}">
 <style>body{margin:0;background:var(--warm-bg,#F3F7FA)}#tab-finance{display:block!important}.workspace-header{padding:14px 20px;background:#fff;border-bottom:1px solid #ddd;display:flex;gap:20px;align-items:center}@media print{.workspace-header{display:none}}</style>
-</head><body><header class="workspace-header"><strong>Timothy Finance · Accounting workspace</strong><a href="/">New Finance pages</a><a href="/?section=quickbooks">QuickBooks</a></header>
+</head><body><header class="workspace-header"><strong>Timothy Finance · Accounting workspace</strong><a href="/" target="_top">New Finance pages</a><a href="/?section=quickbooks" target="_top">QuickBooks</a></header>
 <div id="error-boundary" style="display:none"></div>${MARKUP}
 <script>window.__ACCOUNTING__=${safeJson({ role: viewer.role, permissions: viewer.permissions || {}, section: url.searchParams.get('section') || 'health' })};${SHIM}</script>
 <script src="/accounting/app.js?v=${encodeURIComponent(version || 'dev')}"></script><script>${ACCOUNTING_BOOT}</script></body></html>`;
