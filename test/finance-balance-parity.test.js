@@ -6,6 +6,7 @@ import { buildFinanceBalanceSheetTrendV1, respondWithFinanceBalanceSheetTrendV1 
 import { validateFinanceBalanceSheetTrendV1, acceptFinanceBalanceSheetTrendV1 } from '../contracts/validators/finance-balance-sheet-trend-consumer.js';
 import {
   buildBalanceTree, filterZeroBalanceTree, flattenBalanceTree, buildAssetComposition, parseBalanceSelection,
+  buildPriorBalanceLookup,
 } from '../apps/finance/balance-sheet-service.js';
 import { renderBalancePage, buildBalanceTrendCsv, renderBalanceCheck } from '../apps/finance/balance-pages.js';
 import worker from '../apps/finance/shell.js';
@@ -396,5 +397,32 @@ describe('Finance shell serves the parity pages from its own database', () => {
     const print = await (await get('/?section=balance&page=position&fiscal_year=2026&print=1')).text();
     expect(print).toContain('Full account detail');
     expect(print).toContain('.bs-chart');
+  });
+});
+
+describe('this year vs. last year prior-balance lookup', () => {
+  const liab = (path, cents) => ({ classification: 'Liabilities', categoryPath: path, accountName: path.split(':').pop(), depth: path.split(':').length - 1, hasChildren: false, ownBalanceCents: cents });
+  const current = [
+    liab('Liabilities', 0), liab('Liabilities:Long-Term Liabilities', 0),
+    liab('Liabilities:Long-Term Liabilities:26002 LCEF Mortgage 1 (xx53206)', 28000000),
+    liab('Liabilities:Long-Term Liabilities:Unnumbered Note', 50000),
+  ];
+  const node = (path) => flattenBalanceTree(buildBalanceTree(current)).find((n) => n.path === path);
+
+  it('finds an account whose parent group was renamed, by its account number', () => {
+    const prior = [liab('Liabilities', 0), liab('Liabilities:Long Term Liabilities', 0),
+      liab('Liabilities:Long Term Liabilities:26002 LCEF Mortgage 1', 29519489)];
+    const priorOf = buildPriorBalanceLookup(prior, current);
+    expect(priorOf(node('Liabilities:Long-Term Liabilities:26002 LCEF Mortgage 1 (xx53206)'))).toBe(29519489);
+    expect(priorOf(node('Liabilities'))).toBe(29519489);
+    expect(priorOf(node('Liabilities:Long-Term Liabilities'))).toBeUndefined();
+  });
+
+  it('falls back to the exact name, and never guesses between two candidates', () => {
+    const prior = [liab('Liabilities', 0), liab('Liabilities:Notes:Unnumbered Note', 60000),
+      liab('Liabilities:A:26002 Old Mortgage', 1), liab('Liabilities:B:26002 Other Mortgage', 2)];
+    const priorOf = buildPriorBalanceLookup(prior, current);
+    expect(priorOf(node('Liabilities:Long-Term Liabilities:Unnumbered Note'))).toBe(60000);
+    expect(priorOf(node('Liabilities:Long-Term Liabilities:26002 LCEF Mortgage 1 (xx53206)'))).toBeUndefined();
   });
 });

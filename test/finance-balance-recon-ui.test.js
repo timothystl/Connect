@@ -534,3 +534,16 @@ describe('renderGroupedBarChart stacking is opt-in', () => {
     expect(flatXs.length).toBe(2);
   });
 });
+
+describe('Balance sheet this year vs. last year', () => {
+  it('matches an account by its number when its parent group changed between years', () => {
+    const { ctx } = makeCtx();
+    const row = (path, cents) => ({ classification: 'Liabilities', category_path: path, account_name: path.split(':').pop(), depth: path.split(':').length - 1, own_balance_cents: cents });
+    const html = ctx.finRenderBalanceYoyCard(
+      [row('Liabilities', 0), row('Liabilities:Long-Term Liabilities', 0), row('Liabilities:Long-Term Liabilities:26002 LCEF Mortgage 1 (xx53206)', 28000000)],
+      { rows: [row('Liabilities', 0), row('Liabilities:Long Term Liabilities', 0), row('Liabilities:Long Term Liabilities:26002 LCEF Mortgage 1', 29519489)] },
+      2026);
+    const line = html.slice(html.indexOf('26002 LCEF Mortgage 1 (xx53206)'));
+    expect(line.slice(0, line.indexOf('</tr>'))).toContain('$295,194.89');
+  });
+});
