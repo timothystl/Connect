@@ -2972,11 +2972,11 @@ export default {
       try {
         form = await request.formData();
       } catch {
-        return response(null, { status: 303, headers: { Location: '/?section=compensation&status=error&reason=invalid_json' } });
+        return response(null, { status: 303, headers: { Location: '/?section=compensation&page=plan&status=error&reason=invalid_json' } });
       }
       const current = await fetchConnectSalaryPlannerState(env, accessJwt);
       if (!current.ok) {
-        const params = new URLSearchParams({ section: 'compensation', status: 'error', reason: current.reason || 'unknown' });
+        const params = new URLSearchParams({ section: 'compensation', page: 'plan', status: 'error', reason: current.reason || 'unknown' });
         if (current.message) params.set('message', String(current.message).slice(0, 200));
         return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
       }
@@ -3006,7 +3006,7 @@ export default {
 
       if (action === 'remove' || action === 'edit') {
         if (index == null || !Number.isInteger(index) || !roster[index]) {
-          return response(null, { status: 303, headers: { Location: '/?section=compensation&status=error&reason=invalid_index' } });
+          return response(null, { status: 303, headers: { Location: '/?section=compensation&page=plan&status=error&reason=invalid_index' } });
         }
       }
       if (action === 'remove') {
@@ -3022,9 +3022,9 @@ export default {
 
       const result = await postConnectFinanceCompensationWrite(env, accessJwt, data);
       if (result.ok) {
-        return response(null, { status: 303, headers: { Location: '/?section=compensation&status=ok' } });
+        return response(null, { status: 303, headers: { Location: '/?section=compensation&page=plan&status=ok' } });
       }
-      const params = new URLSearchParams({ section: 'compensation', status: 'error', reason: result.reason || 'unknown' });
+      const params = new URLSearchParams({ section: 'compensation', page: 'plan', status: 'error', reason: result.reason || 'unknown' });
       if (result.message) params.set('message', String(result.message).slice(0, 200));
       return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
     }
