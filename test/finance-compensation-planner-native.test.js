@@ -26,7 +26,8 @@ const executablePath = browserExecutable();
 
 describe.skipIf(!executablePath)('Compensation Planner in a browser', () => {
   let browser;
-  beforeAll(async () => { browser = await chromium.launch({ executablePath }); });
+  // A cold Chrome on a busy CI runner can take well over the 10s default to start.
+  beforeAll(async () => { browser = await chromium.launch({ executablePath }); }, 60000);
   afterAll(async () => { if (browser) await browser.close(); });
 
   async function open(opts) {
