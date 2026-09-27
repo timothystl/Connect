@@ -518,6 +518,10 @@ describe('lay position from the September 2026 balance sheet', () => {
     expect(html).toContain('$408,921'); // owned free of debt at valuation
     expect(html).toContain('Mortgage progress by year');
     expect(html).toContain('$25,981'); // paid during 2025
+    expect(html).toContain('Original loan <small>(2013, estimated)</small>');
+    expect(html).toContain('$605,000');
+    expect(html).toContain('$327,606 of $605,000 · 54%'); // paid down from the estimated original
+    expect(html).toContain('Paid down from original loan');
     expect(html).not.toContain('Retained Earnings');
     expect(html).toContain('✓ $288,207 free');
   });

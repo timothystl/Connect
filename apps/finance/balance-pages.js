@@ -186,30 +186,41 @@ function renderLayMoney(lay) {
     </div>`;
 }
 
+// The LCEF loan began in spring 2013, before the books tracked it. No 2013 note is on hand, so this
+// is an estimate (Andrew, September 27, 2026): the 2018 payments fit a 20-year loan at 4.5% with a
+// $3,827.38 payment and exactly 180 payments left in March 2018, which amortizes back to $604,977
+// in spring 2013 (and reproduces the Dec 2019 balance to within 3 cents). A lump-sum payoff from
+// the house sold out of the same loan would make the real figure higher. Replace with the amount
+// on the LCEF note or deed of trust when it is found; set to null to hide the line.
+export const ORIGINAL_PROPERTY_LOAN = { cents: 60500000, label: '2013, estimated' };
+
 function renderLayProperty(lay, valuation, history) {
   const p = lay.property;
-  const paidCents = p.bookCents - p.mortgageCents;
-  const paidPct = p.bookCents ? paidCents / p.bookCents * 100 : 0;
+  const original = ORIGINAL_PROPERTY_LOAN && ORIGINAL_PROPERTY_LOAN.cents > 0 ? ORIGINAL_PROPERTY_LOAN : null;
+  const startCents = original ? original.cents : p.bookCents;
+  const paidCents = startCents - p.mortgageCents;
+  const paidPct = startCents ? paidCents / startCents * 100 : 0;
   const hasValue = valuation && valuation.capitalizedValueCents > 0;
   const valueNote = hasValue
     ? `<p class="bs-note">Current valuation is estimated from the rent roll and operating costs at a ${(valuation.capRate * 100).toFixed(1)}% cap rate${valuation.asOfDate ? `, as of ${escapeHtml(valuation.asOfDate)}` : ''} (Commercial Property → Valuation).</p>`
     : '';
   const rows = [
-    ['Loan amount on the books <small>(recorded March 2018; loan began 2013)</small>', p.bookCents],
+    original ? [`Original loan <small>(${escapeHtml(original.label)})</small>`, original.cents] : null,
+    ['Loan amount on the books <small>(recorded March 2018)</small>', p.bookCents],
     ['Mortgage left', p.mortgageCents],
     ['<b>Owned free of debt, on the books</b>', p.equityCents, { total: true }],
     hasValue ? ['Current valuation <small>(income method)</small>', valuation.capitalizedValueCents] : null,
     hasValue ? ['<b>Owned free of debt, at current valuation</b>', valuation.capitalizedValueCents - p.mortgageCents, { total: true }] : null,
   ];
-  const meter = p.bookCents > 0
-    ? `<ul class="bs-meters"><li><span>Loan paid down</span><span class="bs-meter" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, paidPct)).toFixed(1)}%"></i></span><span class="num">${formatCents(paidCents)} of ${formatCents(p.bookCents)} · ${paidPct.toFixed(0)}%</span></li></ul>`
+  const meter = startCents > 0
+    ? `<ul class="bs-meters"><li><span>Loan paid down${original ? ` <small>(from the original loan, ${escapeHtml(original.label)})</small>` : ''}</span><span class="bs-meter" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, paidPct)).toFixed(1)}%"></i></span><span class="num">${formatCents(paidCents)} of ${formatCents(startCents)} · ${paidPct.toFixed(0)}%</span></li></ul>`
     : '';
   return `<div class="bs-panel" aria-label="Property">
       ${panelHeading('2. Property (not spendable)', 'The commercial property. The books carry it at the loan amount, not its market value.')}
       ${layTable(rows)}
       ${valueNote}
       ${meter}
-      ${renderMortgageHistory(p.bookCents, history)}
+      ${renderMortgageHistory(p.bookCents, history, original)}
     </div>`;
 }
 
@@ -217,20 +228,22 @@ function renderLayProperty(lay, valuation, history) {
 // amount on the books, so the council can see the progress year by year. The recording year's
 // paydown is measured from the amount recorded; any other first year has no prior to compare.
 // A year whose sheet is not a December 31 close is marked "so far".
-function renderMortgageHistory(bookCents, history) {
+// "Paid down" is measured from the original loan when one is set, else from the amount recorded.
+function renderMortgageHistory(bookCents, history, original = null) {
   if (!history || !history.length) return '';
+  const startCents = original ? original.cents : bookCents;
   let prior = history[0].fiscalYear === MORTGAGE_HISTORY_FROM_YEAR ? bookCents : null;
   const rows = history.map((h) => {
     const partial = h.asOfDate && !/dec(ember)?\.?\s*31|-12-31/i.test(h.asOfDate);
     const paidThisYear = prior === null ? null : prior - h.mortgageCents;
     prior = h.mortgageCents;
-    const paid = bookCents - h.mortgageCents;
-    const pct = bookCents ? paid / bookCents * 100 : 0;
+    const paid = startCents - h.mortgageCents;
+    const pct = startCents ? paid / startCents * 100 : 0;
     return `<tr><td>${h.fiscalYear}${partial ? ' <small>(so far)</small>' : ''}</td><td class="num">${formatCents(h.mortgageCents)}</td><td class="num">${paidThisYear === null ? '—' : formatCents(paidThisYear)}</td><td class="num">${formatCents(paid)} · ${pct.toFixed(0)}%</td></tr>`;
   }).join('');
   return `<h4 class="bs-h">Mortgage progress by year</h4>
     <p class="bs-note">Mortgage left at each year’s balance sheet. Years without an imported balance sheet are not shown; import the multi-year Statement of Financial Position to fill them in.</p>
-    ${renderPlainTable(['Year', ['Mortgage left', true], ['Paid that year', true], ['Paid down since recorded', true]], rows)}`;
+    ${renderPlainTable(['Year', ['Mortgage left', true], ['Paid that year', true], [original ? 'Paid down from original loan' : 'Paid down since recorded', true]], rows)}`;
 }
 
 function renderLayCheck(lay) {
