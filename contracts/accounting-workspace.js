@@ -1,0 +1,72 @@
+// Explicit compatibility surface for the accounting workspace. This is not a general proxy.
+// QuickBooks uses Finance's existing connection; salary uses the existing planner contract.
+const ROUTES = new Map([
+  ['status', ['GET']],
+  ['overview', ['GET']],
+  ['daycare/sync', ['POST']],
+  ['daycare', ['GET', 'POST']],
+  ['daycare/church-budget-preview', ['GET']],
+  ['daycare/church-budget-import', ['POST']],
+  ['daycare/bulk', ['POST']],
+  ['daycare/rooms', ['GET']],
+  ['daycare/rooms/sync', ['POST']],
+  ['revenue-streams', ['GET', 'PUT']],
+  ['flow', ['GET']],
+  ['flow-expense-map', ['GET', 'PUT']],
+  ['cash-policy', ['GET', 'PUT']],
+  ['import-status', ['GET']],
+  ['daycare/budget-override', ['POST']],
+  ['daycare/allocation-config', ['GET', 'PUT']],
+  ['daycare/allocation', ['GET']],
+  ['church/this-year', ['GET']],
+  ['church/multi-year', ['GET']],
+  ['church/import-preview', ['POST']],
+  ['church/import', ['POST']],
+  ['church/monthly-import-preview', ['POST']],
+  ['church/monthly-import', ['POST']],
+  ['church/activity-import-preview', ['POST']],
+  ['church/activity-import', ['POST']],
+  ['church/budget-multi-year-import-preview', ['POST']],
+  ['church/budget-multi-year-import', ['POST']],
+  ['church/balances/import-preview', ['POST']],
+  ['church/balances/import', ['POST']],
+  ['church/balances/multi-year-import-preview', ['POST']],
+  ['church/balances/multi-year-import', ['POST']],
+  ['church/balances', ['GET']],
+  ['church/balances/multi-year', ['GET']],
+  ['planning/church', ['GET']],
+  ['planning/church/generate-all', ['POST']],
+  ['planning/church/override-bulk', ['POST']],
+  ['planning/base-projection', ['GET', 'PUT']],
+  ['church/actual-override', ['PUT']],
+  ['planning/board-categories', ['GET', 'PUT']],
+  ['planning/purpose-tags', ['GET', 'PUT']],
+  ['planning/church/generate', ['POST']],
+  ['planning/church/override', ['POST']],
+  ['planning/church/commit', ['POST']],
+  ['board-packet', ['GET']],
+  ['property/ivanhoe/budget-import', ['POST']],
+  ['property/ivanhoe/monthly', ['POST']],
+  ['property/ivanhoe/monthly-import-csv', ['POST']],
+  ['property/ivanhoe/distributions', ['POST']],
+  ['property/ivanhoe/meta', ['PATCH']],
+  ['property/ivanhoe/capital-ledger', ['POST']],
+  ['property/ivanhoe/repairs', ['POST']],
+  ['property/ivanhoe', ['GET']],
+ ]);
+const DYNAMIC = [
+  [/^daycare\/\d+$/, ['PUT', 'DELETE']],
+  [/^planning\/church\/\d+$/, ['DELETE']],
+  [/^property\/ivanhoe\/(monthly|distributions)\/\d{4}-\d{2}$/, ['DELETE']],
+  [/^property\/ivanhoe\/(capital-ledger|repairs)\/\d+$/, ['DELETE']],
+  [/^property\/ivanhoe\/reserves\/[a-z_]+\/(monthly|disbursements)$/, ['POST']],
+  [/^property\/ivanhoe\/reserves\/[a-z_]+\/monthly\/\d{4}-\d{2}$/, ['DELETE']],
+  [/^property\/ivanhoe\/reserves\/[a-z_]+\/disbursements\/[a-zA-Z0-9_-]+$/, ['DELETE']],
+];
+export function accountingWorkspaceTarget(value, method) {
+  if (typeof value !== 'string' || value.length > 4096 || /[\\#]/.test(value)) return null;
+  const [path] = value.split('?');
+  const methods = ROUTES.get(path) || DYNAMIC.find(([pattern]) => pattern.test(path))?.[1];
+  if (!methods?.includes(method)) return null;
+  return new URL('/admin/api/finance/' + value, 'https://connect.timothystl.org');
+}

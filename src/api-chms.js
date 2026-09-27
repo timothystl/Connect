@@ -73,7 +73,7 @@ export const DASHBOARD_FIRST_GIVERS_SQL = `
    ORDER BY first_gift_date DESC
    LIMIT 20`;
 
-export async function handleChmsApi(req, env, url, method, seg, role = 'admin') {
+export async function handleChmsApi(req, env, url, method, seg, role = 'admin', verifiedActor = null) {
   if (env.FINANCE_STORAGE_MODE === 'copying' && seg.startsWith('finance/') && !['GET','HEAD'].includes(method)) return json({error:'Accounting maintenance: please retry shortly.'},503);
   const db = financeStorageDb(env);
 
@@ -176,7 +176,7 @@ export async function handleChmsApi(req, env, url, method, seg, role = 'admin') 
       const result = await handleContractsApi(req, env, url, method, seg, db);
       return result !== null ? result : json({ error: 'Not found' }, 404);
     }
-    const result = await handleFinanceApi(req, env, url, method, seg, db, false, true, role);
+    const result = await handleFinanceApi(req, env, url, method, seg, db, false, true, role, verifiedActor);
     return result !== null ? result : json({ error: 'Not found' }, 404);
   }
 
@@ -840,7 +840,7 @@ export async function handleChmsApi(req, env, url, method, seg, role = 'admin') 
   // isFinance is `true` unconditionally rather than re-checking the single 'finance' item, which
   // would wrongly 403 e.g. a council member who was let through above on 'compensation' alone.
   if (seg.startsWith('finance')) {
-    const result = await handleFinanceApi(req, env, url, method, seg, db, isAdmin, true, role);
+    const result = await handleFinanceApi(req, env, url, method, seg, db, isAdmin, true, role, verifiedActor);
     if (result !== null) return result;
   }
 

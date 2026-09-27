@@ -1,3 +1,4 @@
+import { ACCOUNTING_JS, ACCOUNTING_CSS, ACCOUNTING_CSP, accountingViewer, renderAccountingWorkspace, relayAccountingWorkspace } from './accounting-workspace.js';
 import { FINANCE_RELEASE_CHANNEL, FINANCE_VERSION } from './version.js';
 import givingFixture from '../../contracts/examples/giving-summary-v1.synthetic.json';
 import { acceptConnectGivingSummaryV1 } from '../../contracts/validators/connect-giving-consumer.js';
@@ -1522,7 +1523,7 @@ function renderShell(ctx) {
   <div class="app-shell">
     <aside class="app-sidebar">
       <nav aria-label="Finance workspace">${renderSectionNav(section, page, { roleResult, councilPreview, fund: /^(?:all|\d{1,9})$/.test(ctx?.searchParams?.get('fund') || '') ? ctx.searchParams.get('fund') : '' })}</nav>
-      <div class="sidebar-foot">${production ? 'Production · Timothy Lutheran<br>Access verified through Connect' : 'Isolated staging environment<br>Test data may be present'}</div>
+      <div class="sidebar-foot">${accountingViewer(roleResult) ? '<a href="/accounting">Familiar accounting workspace</a><br><br>' : ''}${production ? 'Production · Timothy Lutheran<br>Access verified through Connect' : 'Isolated staging environment<br>Test data may be present'}</div>
     </aside>
     <main>
       <div class="page-head"><div><div class="eyebrow">${escapeHtml(group)}</div><h1 class="page-title">${escapeHtml(pageTitle)}</h1></div>${section.id === 'health' ? renderHealthViewToggle(resolveHealthView(ctx.healthView), { councilPreview }) : ''}<a class="print-link" href="${escapeHtml(printHref(ctx.searchParams))}">Print</a>${section.id === 'packet' ? ' <a class="print-link" href="/print/board-packet">Print board packet</a>' : ''}</div>
@@ -1531,7 +1532,7 @@ function renderShell(ctx) {
       ${sectionBody}
       <div class="page-foot">
         <p>Report labels identify live data, test fixtures, and unavailable sections. Unavailable data is never a zero balance. Giving remains in Connect; payroll remains in Website.</p>
-        <div>Timothy Lutheran Church · ${release}${production ? ' · <a href="https://connect.timothystl.org/#finance">Advanced accounting tools</a>' : ''}</div>
+        <div>Timothy Lutheran Church · ${release}${production ? ' · <a href="/accounting">Advanced accounting tools</a>' : ''}</div>
       </div>
     </main>
   </div>
@@ -1670,6 +1671,23 @@ export default {
 
     // Connect's Compensation Planner inside Finance (connect-planner.js). Its page may be framed by
     // Finance and runs Connect's scripts, so it carries its own CSP; everything else keeps Finance's.
+    if (route.id === 'accounting-workspace-asset') {
+      const isJs = url.pathname.endsWith('.js');
+      return response(request.method === 'HEAD' ? null : (isJs ? ACCOUNTING_JS : ACCOUNTING_CSS), {
+        headers: { 'Content-Type': isJs ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8' },
+      }, { cacheControl: 'private, max-age=86400' });
+    }
+    if (route.id === 'accounting-workspace-api') return relayAccountingWorkspace(request, rawEnv, url);
+    if (route.id === 'accounting-workspace-page') {
+      const viewer = accountingViewer(await fetchVerifiedRole(rawEnv, request.headers.get('Cf-Access-Jwt-Assertion') || ''));
+      if (!viewer) return response('Access denied: accounting role could not be verified', { status: 403 });
+      const res = response(request.method === 'HEAD' ? null : renderAccountingWorkspace(viewer, url, env.RELEASE_SHA), {
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+      });
+      res.headers.set('Content-Security-Policy', ACCOUNTING_CSP);
+      res.headers.set('X-Frame-Options', 'SAMEORIGIN');
+      return res;
+    }
     if (route.id === 'connect-planner-asset') {
       const isJs = url.pathname.endsWith('.js');
       return response(request.method === 'HEAD' ? null : (isJs ? CONNECT_PLANNER_JS : CONNECT_PLANNER_CSS), {

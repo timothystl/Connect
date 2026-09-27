@@ -340,6 +340,9 @@ const ROUTES = [
   // connect-planner.js): the page, its scripts and stylesheet, the reads it makes through
   // Connect's contracts, and its save, which relays to Connect's finance-compensation-write-v1
   // (a council member's save goes to their private draft in Finance's database instead).
+  { id: 'accounting-workspace-page', paths: ['/accounting'], dataSource: 'live-relay-read' },
+  { id: 'accounting-workspace-asset', paths: ['/accounting/app.js', '/accounting/app.css'], dataSource: 'none' },
+  { id: 'accounting-workspace-api', paths: ['/api/v1/accounting-workspace'], methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], dataSource: 'live-relay', writer: true, contract: 'connect.finance-workspace.v1' },
   { id: 'connect-planner-page', paths: ['/connect-planner'], dataSource: 'live-relay-read' },
   { id: 'connect-planner-asset', paths: ['/connect-planner/app.js', '/connect-planner/app.css'], dataSource: 'none' },
   { id: 'connect-planner-read-v1', paths: ['/api/v1/connect-planner/salary', '/api/v1/connect-planner/church-year', '/api/v1/connect-planner/board-categories', '/api/v1/connect-planner/purpose-tags'], dataSource: 'live-relay-read' },
