@@ -272,6 +272,42 @@ export function balanceTotalsByPath(accounts) {
   return new Map(flattenBalanceTree(buildBalanceTree(accounts)).map((node) => [node.path, node.totalBalanceCents]));
 }
 
+// The prior-year lookup for "this year vs. last year". An exact path match comes first, but a path
+// holds every parent group's label, so the same account can land on a different path from one
+// year's export to the next (moved from one liabilities group to another, or imported through the
+// multi-year Statement of Financial Position rather than the single-year sheet). A node with no
+// exact match therefore falls back to its account number ("26002 LCEF Mortgage 1" -> 26002), then
+// its exact account name, each within the same classification and only when exactly one prior-year
+// line carries it and that line was not already matched by its own path, so a comparison is never
+// against a guess. Returns a function of the node: the prior total in cents, or undefined.
+const accountCodeOf = (label) => (/^(\d{4,6})\b/.exec(String(label || '').trim()) || [])[1] || null;
+export function buildPriorBalanceLookup(priorAccounts, currentAccounts = []) {
+  const priorNodes = flattenBalanceTree(buildBalanceTree(priorAccounts));
+  const byPath = new Map(priorNodes.map((node) => [node.path, node.totalBalanceCents]));
+  const currentPaths = new Set((currentAccounts || []).map((account) => account.categoryPath));
+  const unique = (keyOf) => {
+    const map = new Map();
+    for (const node of priorNodes) {
+      if (currentPaths.has(node.path)) continue;
+      const key = keyOf(node);
+      if (!key) continue;
+      const scoped = `${node.classification}\u0000${key}`;
+      map.set(scoped, map.has(scoped) ? null : node.totalBalanceCents);
+    }
+    return map;
+  };
+  const byCode = unique((node) => accountCodeOf(node.label));
+  const byName = unique((node) => String(node.label || '').trim().toLowerCase());
+  return (node) => {
+    if (byPath.has(node.path)) return byPath.get(node.path);
+    for (const [map, key] of [[byCode, accountCodeOf(node.label)], [byName, String(node.label || '').trim().toLowerCase()]]) {
+      const cents = key ? map.get(`${node.classification}\u0000${key}`) : undefined;
+      if (cents !== undefined && cents !== null) return cents;
+    }
+    return undefined;
+  };
+}
+
 // Connect's Asset Composition pie (finPieItemsFromTree(tree, 'Assets', 'totalBalanceCents')): the
 // depth-0 Assets node's direct groups with a positive total, largest first, each with its share of
 // the shown total.

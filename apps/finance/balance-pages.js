@@ -1,6 +1,6 @@
 import {
   buildBalanceSheetView, buildLiveBalanceSheetView, buildBalanceTree, filterZeroBalanceTree, flattenBalanceTree,
-  balanceTotalsByPath, buildAssetComposition,
+  buildPriorBalanceLookup, buildAssetComposition,
 } from './balance-sheet-service.js';
 import { escapeHtml, formatCents, formatSignedCents, renderKpiCards, renderSectionHeading, renderTable } from './render-helpers.js';
 import { csvText } from './payroll-report-render.js';
@@ -169,8 +169,9 @@ function renderAssetComposition(tree) {
 }
 
 // Connect's finRenderBalanceYoyCard: every account on this year's sheet (its structure is the
-// reading), compared with the same path's prior-year rolled-up total; a path with no prior entry
-// reads "new this year" rather than a misleading $0.
+// reading), compared with the same account's prior-year rolled-up total (by path, else by account
+// number or name -- see buildPriorBalanceLookup); an account with no prior entry reads "new this
+// year" rather than a misleading $0.
 function renderYearOverYear(accounts, fiscalYear, prior) {
   const priorYear = fiscalYear - 1;
   const heading = panelHeading(`${fiscalYear} vs. ${priorYear}`);
@@ -180,15 +181,15 @@ function renderYearOverYear(accounts, fiscalYear, prior) {
       : `No ${priorYear} balance sheet on file yet &mdash; import one to see a year-over-year comparison here.`;
     return `<div class="bs-panel" aria-label="Year over year">${heading}<p class="bs-note">${why}</p></div>`;
   }
-  const priorByPath = balanceTotalsByPath(prior.accounts);
+  const priorOf = buildPriorBalanceLookup(prior.accounts, accounts);
   const rows = flattenBalanceTree(buildBalanceTree(accounts)).map((node) => {
     const group = node.children.length > 0;
     const indent = `style="padding-left:${14 + node.depth * 16}px"`;
     const cls = group ? ' class="bs-group-row"' : '';
-    if (!priorByPath.has(node.path)) {
+    const priorCents = priorOf(node);
+    if (priorCents === undefined) {
       return `<tr${cls}><td ${indent}>${escapeHtml(node.label)}</td><td class="num">${formatCents(node.totalBalanceCents)}</td><td class="num">—</td><td class="num bs-flat">new this year</td><td class="num">—</td></tr>`;
     }
-    const priorCents = priorByPath.get(node.path);
     const delta = node.totalBalanceCents - priorCents;
     const pct = priorCents !== 0 ? delta / Math.abs(priorCents) * 100 : null;
     const tone = toneClass(delta);

@@ -4518,17 +4518,60 @@ function finBalanceTotalsByPath(rows) {
   })(finBuildBalanceTreeFromFlatRows(rows));
   return map;
 }
+// An exact path match comes first, but a path holds every parent group's label, so the same
+// account can land on a different path from one year's export to the next (moved between
+// liabilities groups, or imported through the multi-year Statement of Financial Position). A node
+// with no exact match falls back to its account number ("26002 LCEF Mortgage 1" -> 26002), then
+// its exact name, within the same classification, only when exactly one otherwise-unmatched
+// prior-year line carries it. Same rule as Finance's buildPriorBalanceLookup. Returns
+// function(node) -> prior total in cents, or undefined.
+function finBalanceCodeOf(label) {
+  var m = /^(\d{4,6})\b/.exec(String(label || '').trim());
+  return m ? m[1] : null;
+}
+function finBalancePriorLookup(priorRows, currentRows) {
+  var byPath = finBalanceTotalsByPath(priorRows);
+  var currentPaths = {};
+  (currentRows || []).forEach(function(r) { currentPaths[r.category_path] = true; });
+  var nodes = [];
+  (function walk(list) { (list || []).forEach(function(n) { nodes.push(n); walk(n.children); }); })(finBuildBalanceTreeFromFlatRows(priorRows));
+  function unique(keyOf) {
+    var map = {};
+    nodes.forEach(function(n) {
+      if (currentPaths[n.path]) return;
+      var key = keyOf(n);
+      if (!key) return;
+      var scoped = n.classification + '\u0000' + key;
+      map[scoped] = Object.prototype.hasOwnProperty.call(map, scoped) ? null : n.totalBalanceCents;
+    });
+    return map;
+  }
+  var nameOf = function(n) { return String(n.label || '').trim().toLowerCase(); };
+  var byCode = unique(function(n) { return finBalanceCodeOf(n.label); });
+  var byName = unique(nameOf);
+  return function(n) {
+    if (Object.prototype.hasOwnProperty.call(byPath, n.path)) return byPath[n.path];
+    var pairs = [[byCode, finBalanceCodeOf(n.label)], [byName, nameOf(n)]];
+    for (var i = 0; i < pairs.length; i++) {
+      var key = pairs[i][1];
+      var v = key ? pairs[i][0][n.classification + '\u0000' + key] : undefined;
+      if (v !== undefined && v !== null) return v;
+    }
+    return undefined;
+  };
+}
 // Walks the CURRENT year's tree (its structure is the reading — a discontinued account from last
 // year with nothing on the books this year is not shown as a line item, same as it wouldn't be on
-// a printed balance sheet) and looks up each node's prior-year total by path. A path with no prior
+// a printed balance sheet) and looks up each node's prior-year total (finBalancePriorLookup). One with no prior
 // entry at all reads "new" rather than a misleading $0.00 prior figure — an account genuinely
 // opened this year is a different fact than one that existed at $0.
-function finRenderBalanceYoyRows(nodes, priorMap, html) {
+function finRenderBalanceYoyRows(nodes, priorOf, html) {
   html = html || [];
   (nodes || []).forEach(function(n) {
     var cur = n.totalBalanceCents;
-    var hasPrior = Object.prototype.hasOwnProperty.call(priorMap, n.path);
-    var prior = hasPrior ? priorMap[n.path] : null;
+    var priorCents = priorOf(n);
+    var hasPrior = priorCents !== undefined;
+    var prior = hasPrior ? priorCents : null;
     var bold = n.children.length > 0;
     var deltaHtml, pctHtml;
     if (!hasPrior) {
@@ -4549,7 +4592,7 @@ function finRenderBalanceYoyRows(nodes, priorMap, html) {
       + '<td style="text-align:right;padding:5px 8px;">' + deltaHtml + '</td>'
       + '<td style="text-align:right;padding:5px 8px;">' + pctHtml + '</td>'
       + '</tr>');
-    finRenderBalanceYoyRows(n.children, priorMap, html);
+    finRenderBalanceYoyRows(n.children, priorOf, html);
   });
   return html;
 }
@@ -4562,7 +4605,7 @@ function finRenderBalanceYoyCard(currentRows, priorData, currentYear) {
       + '<p style="font-size:.8rem;color:var(--warm-gray);">No ' + priorYear + ' balance sheet on file yet &mdash; upload one from Data &amp; Imports to see a year-over-year comparison here.</p></div>';
   }
   var tree = finBuildBalanceTreeFromFlatRows(currentRows);
-  var priorMap = finBalanceTotalsByPath(priorRows);
+  var priorOf = finBalancePriorLookup(priorRows, currentRows);
   var th = function(label, right) {
     return '<th style="text-align:' + (right ? 'right' : 'left') + ';padding:8px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--warm-meta);">' + label + '</th>';
   };
@@ -4570,7 +4613,7 @@ function finRenderBalanceYoyCard(currentRows, priorData, currentYear) {
     + '<p style="font-size:.74rem;color:var(--warm-gray);margin:0 0 8px;">Every account on the ' + currentYear + ' balance sheet, compared line by line against the same account’s ' + priorYear + ' total.</p>'
     + '<div class="fin-card" style="padding:0;overflow:hidden;overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:.8rem;">'
     + '<thead><tr style="background:var(--warm-surface-header);">' + th('Account') + th(String(currentYear), true) + th(String(priorYear), true) + th('Change', true) + th('%', true) + '</tr></thead>'
-    + '<tbody>' + finRenderBalanceYoyRows(tree, priorMap).join('') + '</tbody></table></div></div>';
+    + '<tbody>' + finRenderBalanceYoyRows(tree, priorOf).join('') + '</tbody></table></div></div>';
 }
 // The snapshot year and the trend window are both explicit state, not fixed to "now": a church
 // uploading several years of history needs to look at a past year's balance sheet, and the
