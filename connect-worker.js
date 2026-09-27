@@ -500,7 +500,13 @@ async function _fetchRouted(req, env, url, path, method) {
           // When this hostname is protected by Access, exchange the independently
           // verified staff identity for Connect's existing live-revocable session.
           // With no Access header, the legacy/break-glass login remains available.
-          if (req.headers.get('Cf-Access-Jwt-Assertion')) return handleAccessLogin(req, env);
+          // A failed bridge (unconfigured, unverifiable token, no matching account, or a
+          // database hiccup) must never strand a visitor with no way back to the password
+          // form -- fall through to it instead of surfacing the bridge's own error page.
+          if (req.headers.get('Cf-Access-Jwt-Assertion')) {
+            const accessResult = await handleAccessLogin(req, env);
+            if (accessResult.status === 302) return accessResult;
+          }
           return html(LOGIN_HTML);
         }
         const extra = { 'Cache-Control': 'no-store, no-cache, must-revalidate' };
