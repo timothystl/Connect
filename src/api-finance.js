@@ -4383,7 +4383,7 @@ export async function buildChurchMultiYear(db, yearsParam) {
   return { years, byYear, streamsByYear };
 }
 
-export async function handleFinanceApi(req, env, url, method, seg, db, isAdmin, isFinance, role = 'admin') {
+export async function handleFinanceApi(req, env, url, method, seg, db, isAdmin, isFinance, role = 'admin', verifiedActor = null) {
   if (!isFinance) return json({ error: 'Access denied: finance data requires finance access' }, 403);
 
   // ── Commercial Property (only 'ivanhoe' exists today; propertyKey is threaded through so a
@@ -5321,7 +5321,7 @@ export async function handleFinanceApi(req, env, url, method, seg, db, isAdmin, 
     const rows = (await db.prepare('SELECT * FROM finance_budget_plan ORDER BY category ASC, fiscal_year ASC').all()).results || [];
     if (role === 'council') {
       let username = '';
-      try { username = ((await getAuthInfo(req, env)) || {}).username || ''; } catch { username = ''; }
+      try { username = (verifiedActor || (await getAuthInfo(req, env)) || {}).username || ''; } catch { username = ''; }
       if (username) {
         const overlayRow = await db.prepare("SELECT value FROM finance_settings WHERE key=?").bind(councilBudgetKey(username)).first();
         if (overlayRow) {
@@ -5374,7 +5374,7 @@ export async function handleFinanceApi(req, env, url, method, seg, db, isAdmin, 
     const b = await req.json().catch(() => ({}));
     let username = '';
     if (role === 'council') {
-      try { username = ((await getAuthInfo(req, env)) || {}).username || ''; } catch { username = ''; }
+      try { username = (verifiedActor || (await getAuthInfo(req, env)) || {}).username || ''; } catch { username = ''; }
     }
     const result = await applyBudgetPlanOverrideRows(db, role, username, b.rows);
     if (result.error) return json({ error: result.error }, result.status || 400);
@@ -5403,7 +5403,7 @@ export async function handleFinanceApi(req, env, url, method, seg, db, isAdmin, 
   if (seg === 'finance/planning/salary' && method === 'GET') {
     let username = '';
     if (role === 'council') {
-      try { username = ((await getAuthInfo(req, env)) || {}).username || ''; } catch { username = ''; }
+      try { username = (verifiedActor || (await getAuthInfo(req, env)) || {}).username || ''; } catch { username = ''; }
     }
     const data = await resolveSalaryPlannerState(db, role, username);
     return json({ data });
@@ -5413,7 +5413,7 @@ export async function handleFinanceApi(req, env, url, method, seg, db, isAdmin, 
     const b = await req.json().catch(() => null);
     let username = '';
     if (role === 'council') {
-      try { username = ((await getAuthInfo(req, env)) || {}).username || ''; } catch { username = ''; }
+      try { username = (verifiedActor || (await getAuthInfo(req, env)) || {}).username || ''; } catch { username = ''; }
     }
     const result = await applySalaryPlannerWrite(db, role, username, b);
     if (result.error) return json({ error: result.error }, result.status || 400);
@@ -5537,7 +5537,7 @@ export async function handleFinanceApi(req, env, url, method, seg, db, isAdmin, 
     if (!Number.isFinite(amountCents)) return json({ error: 'Invalid planned_amount' }, 400);
     if (role === 'council') {
       let username = '';
-      try { username = ((await getAuthInfo(req, env)) || {}).username || ''; } catch { username = ''; }
+      try { username = (verifiedActor || (await getAuthInfo(req, env)) || {}).username || ''; } catch { username = ''; }
       if (!username) return json({ error: 'Access denied: this account has no username to save under' }, 403);
       const key = councilBudgetKey(username);
       const existingRow = await db.prepare("SELECT value FROM finance_settings WHERE key=?").bind(key).first();

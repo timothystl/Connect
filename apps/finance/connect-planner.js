@@ -35,6 +35,7 @@ export function plannerViewer(roleResult) {
   const role = roleResult.role;
   if (!['admin', 'compensation', 'council'].includes(role)) return null;
   const compensation = roleResult.permissions && roleResult.permissions.compensation;
+  if (role === 'council' && !['view', 'edit'].includes(compensation)) return null;
   return { role, permissions: { compensation: compensation === 'edit' ? 'edit' : 'view' } };
 }
 
