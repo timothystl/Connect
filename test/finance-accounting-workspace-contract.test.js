@@ -110,7 +110,7 @@ describe('accounting workspace contract', () => {
     expect((await call('planning/church')).status).toBe(403);
   });
   it('cannot become a general proxy, expose QuickBooks or revive clear-all', async () => {
-    for (const p of ['../people','//evil.test','qb/connect','church/clear-all','planning/salary','church/this-year/../clear-all']) {
+    for (const p of ['../people','//evil.test','qb/connect','church/clear-all','church/this-year/../clear-all']) {
       expect((await call(p)).status).toBe(404);
     }
     expect((await call('planning/church','DELETE')).status).toBe(404);
@@ -122,6 +122,13 @@ describe('accounting workspace contract', () => {
     expect((await call('planning/church')).status).toBe(200);
     expect((await call('planning/board-categories','PUT',{expenseLabels:{test:'forbidden'}})).status).toBe(403);
     expect(db._raw.prepare('SELECT COUNT(*) n FROM finance_settings').get().n).toBe(0);
+  });
+  it('preserves permission-checked salary reads without adding a salary writer', async () => {
+    db._raw.exec("UPDATE app_users SET role='staff'");
+    expect((await call('planning/salary')).status).toBe(403);
+    db._raw.prepare("INSERT OR REPLACE INTO chms_config(key,value) VALUES('role_permissions_json',?)").run(JSON.stringify({staff:{compensation:'view'}}));
+    expect((await call('planning/salary')).status).toBe(200);
+    expect((await call('planning/salary','PUT',{})).status).toBe(404);
   });
   it('keeps council budget reads and writes in the verified user’s private overlay', async () => {
     db._raw.exec("UPDATE app_users SET role='council'");

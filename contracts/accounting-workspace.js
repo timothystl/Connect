@@ -35,6 +35,7 @@ const ROUTES = new Map([
   ['church/balances', ['GET']],
   ['church/balances/multi-year', ['GET']],
   ['planning/church', ['GET']],
+  ['planning/salary', ['GET']],
   ['planning/church/generate-all', ['POST']],
   ['planning/church/override-bulk', ['POST']],
   ['planning/base-projection', ['GET', 'PUT']],

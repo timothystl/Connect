@@ -34,7 +34,7 @@ export const ACCOUNTING_BOOT = String.raw`(function(){
   api=function(path,opts){
     var base=path.split('?')[0], method=((opts&&opts.method)||'GET').toUpperCase();
     if(base==='/admin/api/finance/planning/salary'){
-      if(method==='GET') return call('/api/v1/connect-planner/salary');
+      if(method==='GET' && cfg.role!=='finance' && cfg.role!=='staff') return call('/api/v1/connect-planner/salary');
       if(method==='PUT') return call('/api/v1/connect-planner/salary-save',{method:'POST',headers:{'Content-Type':'application/json'},body:opts.body});
     }
     if(path.indexOf('/admin/api/finance/')!==0) return Promise.reject(new Error('Not an accounting operation'));
