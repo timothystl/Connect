@@ -17,7 +17,7 @@ function renderMappingRows(nodes) {
 const QB_STATUS_MESSAGES = {
   connected: 'QuickBooks connected. Run a sync to load the latest figures.',
   disconnected: 'QuickBooks disconnected and its access revoked.',
-  budget_saved: 'Budget choice saved. The next sync uses it.',
+  restored: 'Restored. The QuickBooks figures are back to the chosen backup; the figures that were replaced were backed up first.',
 };
 
 function renderQuickbooksStatusLine(params) {
@@ -26,26 +26,21 @@ function renderQuickbooksStatusLine(params) {
   if (qb === 'error') return `<p class="status status-error">${escapeHtml(params.get('message') || 'QuickBooks request failed.')}</p>`;
   if (qb === 'synced') {
     const warnings = Number(params.get('warnings')) || 0;
-    return `<p class="status">Synced ${escapeHtml(params.get('rows') || '0')} Church Report rows from QuickBooks${warnings ? ` with ${warnings} warning${warnings === 1 ? '' : 's'}` : ''}.</p>`;
+    return `<p class="status">Synced ${escapeHtml(params.get('rows') || '0')} Church Report rows of actuals from QuickBooks${warnings ? ` with ${warnings} warning${warnings === 1 ? '' : 's'}` : ''}. The previous figures were backed up first; restore them below if these look wrong.</p>`;
   }
   return QB_STATUS_MESSAGES[qb] ? `<p class="status">${QB_STATUS_MESSAGES[qb]}</p>` : '';
 }
 
 // Finance's own QuickBooks connection (quickbooks-oauth-routes.js), shown once FINANCE_QB_ENABLED
 // is on. Admins get the controls; everyone who can see the section gets the status.
-export function renderQuickbooksConnection(own, { canManage, budgets, params } = {}) {
+export function renderQuickbooksConnection(own, { canManage, backups, params } = {}) {
   const thisYear = new Date().getFullYear();
   const yearBoxes = Array.from({ length: 6 }, (_, i) => thisYear - i).map((y) => `<label><input type="checkbox" name="fiscal_year" value="${y}"> ${y}</label>`).join(' ');
-  const budgetList = budgets
-    ? (budgets.ok
-      ? `<form method="POST" action="/api/v1/qb/budget-select"><div class="field"><label for="qb-budget">Budget used for Budget vs Actual</label><select id="qb-budget" name="budget_id"><option value="">Choose automatically (legacy rule)</option>${budgets.budgets.map((b) => `<option value="${escapeHtml(b.id)}"${b.id === budgets.selectedBudgetId ? ' selected' : ''}>${escapeHtml(`${b.name} (${b.startDate}–${b.endDate})${b.active ? '' : ' · inactive'}`)}</option>`).join('')}</select></div><button type="submit">Save budget choice</button></form>`
-      : `<p class="status status-error">Budgets could not be loaded: ${escapeHtml(budgets.error || 'unknown error')}</p>`)
-    : '';
   const controls = !canManage ? '' : own.connected
-    ? `<form method="POST" action="/api/v1/qb/sync" style="display:inline"><button type="submit">Sync now</button></form>
+    ? `<p>Sync brings in actuals only: yearly Profit &amp; Loss for ${thisYear - 4}–${thisYear} (this year to date), monthly Profit &amp; Loss for ${thisYear - 1}–${thisYear}, and the chart of accounts. Budgets are not imported from QuickBooks. It replaces only earlier QuickBooks figures, and backs them up first.</p>
+      <form method="POST" action="/api/v1/qb/sync" style="display:inline"><button type="submit">Sync now</button></form>
       <form method="POST" action="/api/v1/qb/disconnect" style="display:inline"><button type="submit" onclick="return confirm('Disconnect QuickBooks and revoke Finance’s access?')">Disconnect</button></form>
-      <form method="POST" action="/api/v1/qb/sync-years"><fieldset><legend>Sync actuals for specific years</legend>${yearBoxes}</fieldset><button type="submit">Sync selected years</button></form>
-      ${budgets ? budgetList : '<p><a href="/?section=quickbooks&amp;page=sync-status&amp;budgets=1">Choose which QuickBooks budget to use</a></p>'}`
+      <form method="POST" action="/api/v1/qb/sync-years"><fieldset><legend>Sync actuals for specific years</legend>${yearBoxes}</fieldset><button type="submit">Sync selected years</button></form>`
     : '<p><a class="button" href="/api/v1/qb/connect">Connect QuickBooks</a></p>';
   return `<section aria-label="QuickBooks connection">
     ${renderSectionHeading({ eyebrow: 'QuickBooks', heading: 'Connection', badge: own.connected ? 'Connected to Finance' : 'Not connected' })}
@@ -58,7 +53,23 @@ export function renderQuickbooksConnection(own, { canManage, budgets, params } =
       ])
       : '<p>Finance is not connected to QuickBooks. An admin connects it once; Finance then keeps its own access current.</p>'}
     ${controls}
+    ${canManage ? renderSyncBackups(backups) : ''}
   </section>`;
+}
+
+// Pre-sync backups (quickbooks-sync-backup.js), newest first, each with a Restore button.
+export function renderSyncBackups(backups) {
+  if (!backups) return '';
+  if (!backups.ok) return `<p class="status status-error">Backups could not be listed: ${escapeHtml(backups.error || 'unknown error')}</p>`;
+  const intro = '<h3>Backups before each sync</h3><p>Every sync first saves the QuickBooks figures it is about to replace. Restoring puts those figures back (and saves the current ones first, so a restore can be undone). Imports, committed budget plans and hand-typed corrections are never changed by a sync or a restore.</p>';
+  if (!backups.backups.length) return `${intro}<p>No backups yet. The first one is made automatically when you sync.</p>`;
+  const rows = backups.backups.map((b) => {
+    const when = escapeHtml(String(b.createdAt || '').slice(0, 16).replace('T', ' ') + ' UTC');
+    const years = b.churchRows ? (b.firstYear === b.lastYear ? String(b.firstYear) : `${b.firstYear}–${b.lastYear}`) : 'none';
+    return `<tr><td>${when}</td><td>${escapeHtml(b.reason || '')}</td><td>${escapeHtml(String(b.churchRows))} rows (${escapeHtml(years)})</td>
+      <td><form method="POST" action="/api/v1/qb/restore"><input type="hidden" name="backup_id" value="${escapeHtml(String(b.id))}"><button type="submit" onclick="return confirm('Put the QuickBooks figures back to this backup? The current figures are backed up first.')">Restore</button></form></td></tr>`;
+  }).join('');
+  return `${intro}${renderTable({ head: ['Saved at', 'Reason', 'QuickBooks figures', ''], rows })}`;
 }
 
 function money(cents) {
@@ -126,7 +137,7 @@ function renderImportHistory(result) {
   </section>`;
 }
 
-export function renderQuickbooksPage(pageId, { dataStatus, accountsReport, quickbooksOwn = null, quickbooksBudgets = null, quickbooksTransactions = null, importHistory = null, canManageQuickbooks = false, searchParams = null }) {
+export function renderQuickbooksPage(pageId, { dataStatus, accountsReport, quickbooksOwn = null, quickbooksBackups = null, quickbooksTransactions = null, importHistory = null, canManageQuickbooks = false, searchParams = null }) {
   if (['transactions', 'expense-drilldown', 'vendor-spend', 'exceptions'].includes(pageId)) {
     return renderTransactionPage(pageId, quickbooksTransactions);
   }
@@ -144,7 +155,7 @@ export function renderQuickbooksPage(pageId, { dataStatus, accountsReport, quick
   // connection card (once enabled) must not depend on that status feed, so a status that cannot be
   // built only drops its own panel.
   const connection = quickbooksOwn && !quickbooksOwn.syntheticUnavailable
-    ? renderQuickbooksConnection(quickbooksOwn, { canManage: canManageQuickbooks, budgets: quickbooksBudgets, params: searchParams })
+    ? renderQuickbooksConnection(quickbooksOwn, { canManage: canManageQuickbooks, backups: quickbooksBackups, params: searchParams })
     : '';
   let statusSection;
   try {

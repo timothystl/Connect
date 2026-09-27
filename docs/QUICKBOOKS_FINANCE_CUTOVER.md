@@ -32,12 +32,28 @@ Status: steps 1–4 were completed September 25, 2026, and both switches are set
 5. **Flip both switches and release.** Merge the change that sets `QBO_MANAGED_BY_FINANCE = "1"` and `FINANCE_QB_ENABLED: "1"`. Deploy Connect first, then Finance.
 6. **Connect Finance.** An admin opens Finance → QuickBooks → Sync status and does the following:
    1. Choose **Connect QuickBooks** and approve the Timothy Lutheran company.
-   2. Optionally choose the budget.
-   3. Choose **Sync now**.
+   2. Choose **Sync now**.
 
    Once this works, Connect's old redirect URI can be removed from the Intuit app.
 7. **Verify.** Compare a few Church Report totals with QuickBooks for the current year, one prior year and one recent month.
    - The first Finance sync also corrects a column-offset bug in the old Connect sync, which had placed each prior year's and each month's figures on the following year or month. So figures from an earlier Connect sync may change; the new ones should match QuickBooks.
+
+## What a sync imports (decision: Andrew, September 27, 2026)
+
+- **Actuals only.** Sync brings in:
+  - yearly Profit & Loss for this year and the four before it (this year is year to date);
+  - monthly Profit & Loss for this year and last year;
+  - the chart of accounts (active accounts, up to 1,000).
+- **No budgets from QuickBooks.** Intuit does not list `BudgetVsActuals` among its supported API reports, and the old Budget-vs-Actual figures were not trustworthy. Budgets stay in Finance: imported files, the budget import, or a committed plan.
+- **Budgets still show beside the actuals.** Church Report shows one source per year. When that source is the QuickBooks sync and it carries no budget, the budget comes from the next source in priority, line by line (`resolveChurchYearPrecedence` in `src/api-finance.js`).
+- **Transactions are not stored.** The Transactions pages read QuickBooks live, one date range at a time.
+- **A backup comes first.** Before every sync, Finance copies the rows it can replace:
+  - Church Report rows tagged `qbo_sync`;
+  - the `finance_qb_snapshot` cache.
+
+  They go to `finance_qb_sync_backup_*` (migration `0017`, which Finance creates on first use). If the backup fails, the sync does not run. Finance keeps the 10 most recent backups.
+- **Restoring.** Sync status lists the backups, each with a **Restore** button. A restore saves the current figures first, so it can be undone. Imports, plans and hand-typed corrections are never changed by a sync or a restore.
+- **Whole-database safety net.** Cloudflare D1 Time Travel can return all of `timothy-finance-db` to any minute in the last 30 days (`npx wrangler d1 time-travel restore timothy-finance-db --timestamp=<ISO time> --config wrangler.finance.jsonc`). It rolls back every Finance table, so use it only if the per-sync restore is not enough.
 
 ## Rollback
 

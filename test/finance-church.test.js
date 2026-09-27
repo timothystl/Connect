@@ -494,6 +494,42 @@ describe('resolveChurchYearPrecedence', () => {
     expect(resolved[0].own_actual_cents).toBe(100);
   });
 
+  it('takes budgets for an actuals-only QuickBooks year from the next source that has them, line by line', () => {
+    const rows = [
+      { fiscal_year: 2026, period_month: 0, source: 'qbo_sync', category_path: 'Revenue:Offerings', own_actual_cents: 100, own_budget_cents: null },
+      { fiscal_year: 2026, period_month: 0, source: 'qbo_sync', category_path: 'Revenue:Other', own_actual_cents: 5, own_budget_cents: null },
+      { fiscal_year: 2026, period_month: 0, source: 'import', category_path: 'Revenue:Offerings', own_actual_cents: 999, own_budget_cents: null },
+      { fiscal_year: 2026, period_month: 0, source: 'plan_committed', category_path: 'Revenue:Offerings', own_actual_cents: 0, own_budget_cents: 500 },
+      { fiscal_year: 2026, period_month: 0, source: 'plan_committed', category_path: 'Expenditures:Snow Removal', classification: 'Expenses', own_actual_cents: 0, own_budget_cents: 40 },
+    ];
+    const resolved = resolveChurchYearPrecedence(rows);
+    const byPath = Object.fromEntries(resolved.map((r) => [r.category_path, r]));
+    expect(resolved).toHaveLength(3);
+    expect(byPath['Revenue:Offerings']).toMatchObject({ source: 'qbo_sync', own_actual_cents: 100, own_budget_cents: 500, budget_source: 'plan_committed' });
+    expect(byPath['Revenue:Other']).toMatchObject({ own_actual_cents: 5, own_budget_cents: null });
+    // A budgeted account with no QuickBooks activity yet keeps its budget with a $0 actual.
+    expect(byPath['Expenditures:Snow Removal']).toMatchObject({ source: 'qbo_sync', own_actual_cents: 0, own_budget_cents: 40 });
+  });
+
+  it('leaves a QuickBooks year that already has budget figures exactly as it is', () => {
+    const rows = [
+      { fiscal_year: 2025, period_month: 0, source: 'qbo_sync', category_path: 'Revenue:Offerings', own_actual_cents: 100, own_budget_cents: 300 },
+      { fiscal_year: 2025, period_month: 0, source: 'import', category_path: 'Revenue:Offerings', own_actual_cents: 999, own_budget_cents: 800 },
+      { fiscal_year: 2025, period_month: 0, source: 'import', category_path: 'Revenue:Gifts', own_actual_cents: 1, own_budget_cents: 2 },
+    ];
+    expect(resolveChurchYearPrecedence(rows)).toEqual([rows[0]]);
+  });
+
+  it('applies a hand-typed actual correction on top of the budget fallback', () => {
+    const rows = [
+      { fiscal_year: 2026, period_month: 0, source: 'qbo_sync', category_path: 'Revenue:Offerings', own_actual_cents: 100, own_budget_cents: null },
+      { fiscal_year: 2026, period_month: 0, source: 'import', category_path: 'Revenue:Offerings', own_actual_cents: 0, own_budget_cents: 500 },
+      { fiscal_year: 2026, period_month: 0, source: 'manual_actual_override', category_path: 'Revenue:Offerings', own_actual_cents: 120 },
+    ];
+    const [row] = resolveChurchYearPrecedence(rows);
+    expect(row).toMatchObject({ own_actual_cents: 120, own_budget_cents: 500, source: 'manual_actual_override' });
+  });
+
   it('falls back to an import row for a year with no qbo_sync row', () => {
     const rows = [{ fiscal_year: 2026, source: 'import', category_path: 'Income:A', own_actual_cents: 999 }];
     const resolved = resolveChurchYearPrecedence(rows);

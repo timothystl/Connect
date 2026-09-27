@@ -3,9 +3,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { readdirSync, readFileSync } from 'node:fs';
 import worker from '../apps/finance/shell.js';
 import {
-  handleBudgetSelect, handleCallback, handleConnect, handleDisconnect, handleSync, handleSyncYears, readConnectionSummary,
+  handleCallback, handleConnect, handleDisconnect, handleRestore, handleSync, handleSyncYears, readConnectionSummary,
 } from '../apps/finance/quickbooks-oauth-routes.js';
 import * as financeSync from '../apps/finance/quickbooks-church-sync.js';
+import { KEEP_BACKUPS, listSyncBackups } from '../apps/finance/quickbooks-sync-backup.js';
 import * as connectFinance from '../src/api-finance.js';
 import { financeStorageDb } from '../src/finance-storage.js';
 
@@ -129,27 +130,35 @@ describe('connect and callback', () => {
 });
 
 describe('sync', () => {
-  it('writes the snapshot and Church Report entries exactly as legacy Connect does', async () => {
+  it('writes actuals and the account list only, never budgets, and never calls the budget reports', async () => {
     const db = financeDb();
     connect(db);
     db.raw.prepare("INSERT INTO finance_church_entries (fiscal_year, period_month, classification, category_path, account_name, source) VALUES (2025, 0, 'Income', 'Revenue:Stale', 'Stale', 'qbo_sync')").run();
     db.raw.prepare("INSERT INTO finance_church_entries (fiscal_year, period_month, classification, category_path, account_name, source) VALUES (2025, 0, 'Income', 'Revenue:Imported', 'Imported', 'import')").run();
-    const res = await handleSync(post('/api/v1/qb/sync'), null, ENV, db, ctx());
+    const fetchImpl = intuitFetch();
+    const res = await handleSync(post('/api/v1/qb/sync'), null, ENV, db, ctx({ fetchImpl }));
     expect(location(res).searchParams.get('qb')).toBe('synced');
+    const called = fetchImpl.mock.calls.map(([u]) => String(u));
+    expect(called.some((u) => u.includes('BudgetVsActuals') || u.includes('FROM%20Budget'))).toBe(false);
 
     const entries = db.raw.prepare("SELECT fiscal_year, period_month, classification, category_path, own_actual_cents FROM finance_church_entries WHERE source='qbo_sync' ORDER BY fiscal_year, period_month, category_path").all();
-    // Prior years from the multi-year report (never the current year from it), normalized
-    // classifications, no running-subtotal rows, and monthly rows for the current year.
+    // Every year column from the multi-year report (this year to date included, the Total column
+    // skipped), normalized classifications, no running-subtotal rows, monthly rows, no budgets.
     expect(entries.filter((e) => e.period_month === 0 && e.fiscal_year === 2024).map((e) => [e.classification, e.category_path, e.own_actual_cents])).toEqual([
       ['Expenses', 'Expenditures:Utilities', 1000], ['Income', 'Revenue:Offerings', 10000],
     ]);
+    expect(entries.filter((e) => e.period_month === 0 && e.fiscal_year === 2026).map((e) => [e.category_path, e.own_actual_cents])).toEqual([
+      ['Expenditures:Utilities', 3000], ['Revenue:Offerings', 30000],
+    ]);
+    expect([...new Set(entries.filter((e) => e.period_month === 0).map((e) => e.fiscal_year))]).toEqual([2024, 2025, 2026]);
+    expect(db.raw.prepare("SELECT COUNT(*) AS n FROM finance_church_entries WHERE source='qbo_sync' AND own_budget_cents IS NOT NULL").get().n).toBe(0);
     expect(entries.some((e) => e.category_path === 'Revenue:Stale')).toBe(false);
     expect(entries.filter((e) => e.period_month > 0).map((e) => [e.period_month, e.own_actual_cents])).toEqual([[8, 2500], [9, 3000]]);
     expect(entries.some((e) => /Net Revenue/.test(e.category_path))).toBe(false);
     // Other sources are never touched.
     expect(db.raw.prepare("SELECT COUNT(*) AS n FROM finance_church_entries WHERE source='import'").get().n).toBe(1);
 
-    expect(db.raw.prepare("SELECT key FROM finance_qb_snapshot ORDER BY key").all().map((r) => r.key)).toContain('accounts');
+    expect(db.raw.prepare("SELECT key FROM finance_qb_snapshot ORDER BY key").all().map((r) => r.key)).toEqual(['accounts']);
     expect((await readConnectionSummary(db)).lastSyncedAt).toBe(new Date(NOW_MS).toISOString());
   });
 
@@ -176,17 +185,71 @@ describe('sync', () => {
   });
 });
 
-describe('budget choice and disconnect', () => {
-  it('stores or clears the chosen budget id', async () => {
+describe('backups and restore', () => {
+  const qboRows = (db) => db.raw.prepare("SELECT fiscal_year, period_month, category_path, own_actual_cents, own_budget_cents FROM finance_church_entries WHERE source='qbo_sync' ORDER BY fiscal_year, period_month, category_path").all();
+
+  it('backs up the QuickBooks figures before syncing and restores them exactly, leaving other sources alone', async () => {
     const db = financeDb();
-    await handleBudgetSelect(post('/api/v1/qb/budget-select', [['budget_id', '7']]), null, ENV, db, ctx());
-    expect(db.raw.prepare("SELECT value FROM finance_settings WHERE key='finance_qb_selected_budget_id'").get().value).toBe('7');
-    await handleBudgetSelect(post('/api/v1/qb/budget-select', [['budget_id', '']]), null, ENV, db, ctx());
-    expect(db.raw.prepare("SELECT value FROM finance_settings WHERE key='finance_qb_selected_budget_id'").get()).toBeUndefined();
-    const bad = await handleBudgetSelect(post('/api/v1/qb/budget-select', [['budget_id', "7' OR 1"]]), null, ENV, db, ctx());
-    expect(location(bad).searchParams.get('qb')).toBe('error');
+    connect(db);
+    db.raw.prepare("INSERT INTO finance_church_entries (fiscal_year, period_month, classification, category_path, account_name, own_actual_cents, own_budget_cents, source) VALUES (2025, 0, 'Income', 'Revenue:Old', 'Old', 777, 900, 'qbo_sync')").run();
+    db.raw.prepare("INSERT INTO finance_church_entries (fiscal_year, period_month, classification, category_path, account_name, own_actual_cents, own_budget_cents, source) VALUES (2026, 0, 'Income', 'Revenue:Offerings', 'Offerings', 0, 50000, 'plan_committed')").run();
+    db.raw.prepare("INSERT INTO finance_qb_snapshot (key, value, synced_at) VALUES ('budget_vs_actual', '{\"old\":1}', 'then')").run();
+    const before = qboRows(db);
+
+    await handleSync(post('/api/v1/qb/sync'), null, ENV, db, ctx());
+    expect(qboRows(db)).not.toEqual(before);
+    const { backups } = await listSyncBackups(db);
+    expect(backups).toHaveLength(1);
+    expect(backups[0]).toMatchObject({ reason: 'Before Sync now', churchRows: 1, snapshotRows: 1, firstYear: 2025, lastYear: 2025 });
+
+    const res = await handleRestore(post('/api/v1/qb/restore', [['backup_id', String(backups[0].id)]]), null, ENV, db, ctx());
+    expect(location(res).searchParams.get('qb')).toBe('restored');
+    expect(qboRows(db)).toEqual(before);
+    expect(db.raw.prepare('SELECT key, value FROM finance_qb_snapshot').all()).toEqual([{ key: 'budget_vs_actual', value: '{"old":1}' }]);
+    expect(db.raw.prepare("SELECT own_budget_cents FROM finance_church_entries WHERE source='plan_committed'").get().own_budget_cents).toBe(50000);
+
+    // The restore saved the synced figures first, so it can be undone.
+    const after = await listSyncBackups(db);
+    expect(after.backups).toHaveLength(2);
+    expect(after.backups[0].reason).toMatch(/^Before restoring/);
+    await handleRestore(post('/api/v1/qb/restore', [['backup_id', String(after.backups[0].id)]]), null, ENV, db, ctx());
+    expect(qboRows(db).some((r) => r.fiscal_year === 2026 && r.category_path === 'Revenue:Offerings' && r.own_actual_cents === 30000)).toBe(true);
   });
 
+  it('keeps the newest backups, and never prunes the one being restored', async () => {
+    const db = financeDb();
+    connect(db);
+    for (let i = 0; i < KEEP_BACKUPS + 2; i += 1) await handleSync(post('/api/v1/qb/sync'), null, ENV, db, ctx());
+    const { backups } = await listSyncBackups(db);
+    expect(backups).toHaveLength(KEEP_BACKUPS);
+    const oldest = backups[backups.length - 1];
+    const res = await handleRestore(post('/api/v1/qb/restore', [['backup_id', String(oldest.id)]]), null, ENV, db, ctx());
+    expect(location(res).searchParams.get('qb')).toBe('restored');
+    expect(db.raw.prepare("SELECT COUNT(*) AS n FROM finance_church_entries WHERE source='qbo_sync'").get().n).toBe(oldest.churchRows);
+  });
+
+  it('refuses non-admins and unknown backups without changing anything', async () => {
+    const db = financeDb();
+    const denied = await handleRestore(post('/api/v1/qb/restore', [['backup_id', '1']]), null, ENV, db, ctx({ isAdmin: false }));
+    expect(location(denied).searchParams.get('message')).toMatch(/Only admins/);
+    const missing = await handleRestore(post('/api/v1/qb/restore', [['backup_id', '99']]), null, ENV, db, ctx());
+    expect(location(missing).searchParams.get('message')).toMatch(/no longer exists/);
+    expect((await listSyncBackups(db)).backups).toHaveLength(0);
+  });
+
+  it('changes nothing when QuickBooks returns no reports', async () => {
+    const db = financeDb();
+    connect(db);
+    db.raw.prepare("INSERT INTO finance_church_entries (fiscal_year, period_month, classification, category_path, account_name, own_actual_cents, source) VALUES (2025, 0, 'Income', 'Revenue:Old', 'Old', 777, 'qbo_sync')").run();
+    const failing = vi.fn(async (url) => (String(url).includes('/reports/') || String(url).includes('/query?')
+      ? new Response('{"Fault":{}}', { status: 500 }) : intuitFetch()(url)));
+    const res = await handleSync(post('/api/v1/qb/sync'), null, ENV, db, ctx({ fetchImpl: failing }));
+    expect(location(res).searchParams.get('qb')).toBe('error');
+    expect(qboRows(db)).toEqual([{ fiscal_year: 2025, period_month: 0, category_path: 'Revenue:Old', own_actual_cents: 777, own_budget_cents: null }]);
+  });
+});
+
+describe('disconnect', () => {
   it('revokes the token and clears the connection and cache', async () => {
     const db = financeDb();
     connect(db);

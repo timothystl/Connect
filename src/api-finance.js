@@ -2182,6 +2182,38 @@ const CHURCH_SOURCE_PRIORITY = ['qbo_sync', 'import', 'import_activity', 'plan_c
 // instead, so a correction takes effect everywhere Actual is read (Church Report, Financial
 // Health, Planning) without needing to re-upload or re-sync the whole file for one line.
 const CHURCH_ACTUAL_OVERRIDE_SOURCE = 'manual_actual_override';
+// The QuickBooks sync brings in actuals only (Andrew, 2026-09-27: QuickBooks' budget reports are
+// not reliable through its API), so a year it covers has QuickBooks actuals and no budget. The
+// budget for that year then comes from the next source in CHURCH_SOURCE_PRIORITY that has one (an
+// imported file, a budget import or a committed plan), matched line by line on period_month and
+// category_path. Budget lines with no QuickBooks line (an account with no activity yet) are kept
+// with a $0 actual so the budget total is complete. A winning source that already carries any
+// budget figure is left exactly as it is.
+function withChurchBudgetFallback(base, yearRows) {
+  if (!base.length || base[0].source !== 'qbo_sync') return base;
+  if (base.some(r => r.own_budget_cents != null)) return base;
+  let budgetRows = null;
+  for (const src of CHURCH_SOURCE_PRIORITY) {
+    if (src === 'qbo_sync') continue;
+    const matching = yearRows.filter(r => r.source === src && r.own_budget_cents != null);
+    if (matching.length) { budgetRows = matching; break; }
+  }
+  if (!budgetRows) return base;
+  const key = r => `${r.period_month || 0}\u0000${r.category_path}`;
+  const budgetByKey = new Map(budgetRows.map(r => [key(r), r]));
+  const used = new Set();
+  const merged = base.map(r => {
+    const b = budgetByKey.get(key(r));
+    if (!b) return r;
+    used.add(key(r));
+    return { ...r, own_budget_cents: b.own_budget_cents, budget_source: b.source };
+  });
+  for (const b of budgetRows) {
+    if (!used.has(key(b))) merged.push({ ...b, own_actual_cents: 0, source: 'qbo_sync', budget_source: b.source });
+  }
+  return merged;
+}
+
 export function resolveChurchYearPrecedence(rows) {
   const byYear = new Map();
   for (const r of rows) {
@@ -2195,6 +2227,7 @@ export function resolveChurchYearPrecedence(rows) {
       const matching = yearRows.filter(r => r.source === src);
       if (matching.length) { base = matching; break; }
     }
+    base = withChurchBudgetFallback(base, yearRows);
     const overrides = yearRows.filter(r => r.source === CHURCH_ACTUAL_OVERRIDE_SOURCE);
     if (!overrides.length) { out.push(...base); continue; }
     const overrideByPath = new Map(overrides.map(r => [r.category_path, r]));

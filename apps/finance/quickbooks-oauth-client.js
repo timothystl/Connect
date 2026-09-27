@@ -168,7 +168,7 @@ export function makeQboClient(env, conn, fetchImpl = fetch) {
   return {
     companyInfo: () => get(`/companyinfo/${conn.realm_id}?minorversion=${MINOR_VERSION}`),
     accounts: () => get(`/query?query=${encodeURIComponent(
-      "SELECT Id, Name, AccountType, AccountSubType, CurrentBalance, Classification FROM Account WHERE Active = true MAXRESULTS 200"
+      "SELECT Id, Name, AccountType, AccountSubType, CurrentBalance, Classification FROM Account WHERE Active = true MAXRESULTS 1000"
     )}&minorversion=${MINOR_VERSION}`),
     // See src/quickbooks.js's own comment history (and AGENTS.md's FIN2 note) on why this is
     // "BudgetVsActuals" (plural) — Intuit's real canned report name — and why its own numbers are
