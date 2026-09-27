@@ -335,7 +335,7 @@ const ROUTES = [
   { id: 'qb-disconnect-v1', paths: ['/api/v1/qb/disconnect'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.quickbooks-disconnect.v1' },
   { id: 'qb-sync-v1', paths: ['/api/v1/qb/sync'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.quickbooks-sync.v1' },
   { id: 'qb-sync-years-v1', paths: ['/api/v1/qb/sync-years'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.quickbooks-sync-years.v1' },
-  { id: 'qb-budget-select-v1', paths: ['/api/v1/qb/budget-select'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.quickbooks-budget-select.v1' },
+  { id: 'qb-restore-v1', paths: ['/api/v1/qb/restore'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.quickbooks-restore.v1' },
   // Connect's own Compensation Planner, served inside Finance for side-by-side use (see
   // connect-planner.js): the page, its scripts and stylesheet, the reads it makes through
   // Connect's contracts, and its save, which relays to Connect's finance-compensation-write-v1

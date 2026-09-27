@@ -68,7 +68,7 @@ const DB_WRITE_ROUTE_IDS = new Set([
   'property-receivable-save-v1', 'property-receivable-import-v1', 'property-receivable-remove-v1', 'property-bank-rec-save-v1', 'property-bank-rec-remove-v1',
   'hr-person-save-v1', 'hr-credential-save-v1', 'hr-review-save-v1', 'hr-goal-save-v1',
   'hr-position-save-v1', 'hr-policy-save-v1', 'hr-signature-save-v1', 'hr-benefit-change-save-v1',
-  'qb-disconnect-v1', 'qb-sync-v1', 'qb-sync-years-v1', 'qb-budget-select-v1',
+  'qb-disconnect-v1', 'qb-sync-v1', 'qb-sync-years-v1', 'qb-restore-v1',
 ]);
 // The two browser GETs of Finance's QuickBooks OAuth handshake: they store the CSRF state and the
 // connection row, so they are writers even though they answer GET.
@@ -127,7 +127,7 @@ describe('Finance staging route manifest', () => {
       '/api/v1/property-capital-ledger-entry',
       '/api/v1/compensation-raise-plan-save', '/api/v1/compensation-council-draft-save', '/api/v1/compensation-council-overlay-save',
       '/print/board-packet',
-      '/api/v1/qb/connect', '/api/v1/qb/callback', '/api/v1/qb/disconnect', '/api/v1/qb/sync', '/api/v1/qb/sync-years', '/api/v1/qb/budget-select',
+      '/api/v1/qb/connect', '/api/v1/qb/callback', '/api/v1/qb/disconnect', '/api/v1/qb/sync', '/api/v1/qb/sync-years', '/api/v1/qb/restore',
       '/accounting', '/accounting/app.js', '/accounting/app.css', '/api/v1/accounting-workspace',
       '/connect-planner', '/connect-planner/app.js', '/connect-planner/app.css',
       '/api/v1/connect-planner/salary', '/api/v1/connect-planner/church-year', '/api/v1/connect-planner/board-categories', '/api/v1/connect-planner/purpose-tags',

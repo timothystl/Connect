@@ -1,6 +1,6 @@
 // ── QuickBooks connection and sync, owned by Finance ─────────────────────────────────────────────
 // Andrew, 2026-09-25: the QuickBooks connection moves from Connect to Finance. These handlers are
-// Finance's own connect / callback / disconnect / sync / sync-years / budget-selection, wired in
+// Finance's own connect / callback / disconnect / sync / sync-years / restore, wired in
 // shell.js behind FINANCE_QB_ENABLED ('1' turns them on; anything else answers "not enabled").
 // Every table they touch lives in Finance's database (FINANCE_DB): finance_qb_connection,
 // finance_qb_snapshot and finance_qb_oauth_state from migrations/0008, plus finance_settings and
@@ -14,14 +14,16 @@
 //
 // Each handler takes `(req, url, env, db, ctx)`; `ctx.isAdmin` must come from Finance's verified
 // role (connect-role-client.js). `ctx.fetchImpl` / `ctx.now` / `ctx.randomUUID` exist for tests.
-// Sync mirrors legacy finance/qb/sync and finance/qb/sync-years (src/api-finance.js) step for step,
-// including writing finance_church_entries under source 'qbo_sync'.
+// Sync writes finance_church_entries under source 'qbo_sync' like legacy finance/qb/sync, but
+// imports actuals and the chart of accounts only -- never budgets -- and backs up everything it
+// may replace first (quickbooks-sync-backup.js), so an admin can restore the previous figures.
 
 import { getAuthorizeUrl, exchangeCodeForTokens, revokeToken, refreshTokens, makeQboClient, qboConfigured } from './quickbooks-oauth-client.js';
 import { ensureFreshAccessToken } from './quickbooks-token-service.js';
-import { mergeCurrentYearBudgetAndActual, fetchQboJson } from './quickbooks-budget-merge.js';
+import { fetchQboJson } from './quickbooks-budget-merge.js';
+import { createSyncBackup, restoreSyncBackup } from './quickbooks-sync-backup.js';
 import {
-  flattenReportTree, makeCurrentYearExtractor, makeMonthlyExtractor, makeMultiYearExtractor,
+  flattenReportTree, makeMonthlyExtractor, makeMultiYearExtractor,
   makeSingleYearActualExtractor, parseMonthColTitle, persistChurchEntries,
 } from './quickbooks-church-sync.js';
 
@@ -144,29 +146,11 @@ export async function syncQuickbooks(env, db, ctx) {
   if (error) return { ok: false, error };
   const year = new Date(ctx.now ? ctx.now() : Date.now()).getFullYear();
   const warnings = [];
-  const preferredBudgetRow = await db.prepare("SELECT value FROM finance_settings WHERE key='finance_qb_selected_budget_id'").first();
-  const preferredBudgetId = preferredBudgetRow?.value || null;
 
-  // The trusted reconstruction (Budget entity + date-scoped P&L). The native BudgetVsActuals report
-  // is called only so a genuine failure still shows as a warning; its figures are never used.
-  const currentYearMerge = await mergeCurrentYearBudgetAndActual(client, year, warnings, preferredBudgetId);
-  const nativeBudgetVsActual = await fetchQboJson(
-    'Budget vs Actual (native report)',
-    client.budgetVsActual({ start_date: `${year}-01-01`, end_date: `${year}-12-31` }),
-    warnings,
-    `make sure a Budget for ${year} exists in QuickBooks under Settings > Budgeting`
-  );
-  if (nativeBudgetVsActual) warnings.push('Budget vs Actual: QuickBooks\' native report responded, but its figures are not used — the reconstructed report is used instead (the native report is unsupported by Intuit and has returned unreliable totals).');
-  let budgetVsActual = null;
-  if (currentYearMerge) {
-    budgetVsActual = {
-      Columns: { Column: [{ ColTitle: 'Account' }, { ColTitle: 'Actual' }, { ColTitle: 'Budget' }, { ColTitle: 'Over Budget By' }] },
-      Rows: { Row: currentYearMerge.rows },
-      _synthesized: true,
-    };
-  } else if (!nativeBudgetVsActual) {
-    warnings.push('Budget vs Actual: could not build any Budget vs Actual data this sync — both the native report and the Budget-entity reconstruction failed.');
-  }
+  // Actuals and the chart of accounts only (Andrew, 2026-09-27). Budgets are not imported from
+  // QuickBooks: its BudgetVsActuals report is not a supported API report and returned unreliable
+  // totals, and the Budget-entity reconstruction was not trusted either. Budgets stay with Finance's
+  // own imports and committed plans; Church Report shows them beside these actuals.
   const accounts = await fetchQboJson('Account balances', client.accounts(), warnings);
   const profitAndLoss = await fetchQboJson(
     'Profit & Loss (multi-year)',
@@ -178,41 +162,41 @@ export async function syncQuickbooks(env, db, ctx) {
     client.profitAndLoss({ start_date: `${year - 1}-01-01`, end_date: `${year}-12-31`, summarize_column_by: 'Month' }),
     warnings
   );
+  if (!accounts && !profitAndLoss && !profitAndLossMonthly) {
+    return { ok: false, error: 'QuickBooks returned no reports, so nothing was changed. ' + warnings.join(' ') };
+  }
 
-  const syncedAt = new Date(ctx.now ? ctx.now() : Date.now()).toISOString();
-  const ops = [];
-  if (budgetVsActual) ops.push(db.prepare(
-    `INSERT INTO finance_qb_snapshot (key,value,synced_at) VALUES ('budget_vs_actual',?,?)
-     ON CONFLICT(key) DO UPDATE SET value=excluded.value, synced_at=excluded.synced_at`
-  ).bind(JSON.stringify(budgetVsActual), syncedAt));
-  if (accounts) ops.push(db.prepare(
-    `INSERT INTO finance_qb_snapshot (key,value,synced_at) VALUES ('accounts',?,?)
-     ON CONFLICT(key) DO UPDATE SET value=excluded.value, synced_at=excluded.synced_at`
-  ).bind(JSON.stringify(accounts), syncedAt));
-  if (ops.length) await db.batch(ops);
-
-  // Church Report entries. As in legacy, the multi-year pass writes PRIOR years only (the current
-  // year comes from the budget-merged tree), which avoids double-counting when the two report
-  // shapes name an account differently; monthly rows use period_month 1-12.
+  // Church Report entries: yearly actuals for every year in the window (including this year to
+  // date), and monthly rows (period_month 1-12) for this year and last.
   const churchRows = [];
   if (profitAndLoss && profitAndLoss.Rows) {
     // Column 0 is the account-name column (cells[0]); the extractors index years from cells[1],
     // so they must be given the data columns only. Passing every column shifted each year onto
     // the next year's figures.
     const cols = ((profitAndLoss.Columns && profitAndLoss.Columns.Column) || []).slice(1);
-    const colYears = cols.map((c) => { const m = /(\d{4})/.exec(c.ColTitle || ''); const y = m ? parseInt(m[1], 10) : null; return (y === year) ? null : y; });
+    const colYears = cols.map((c) => { const m = /^\s*(\d{4})\s*$/.exec(c.ColTitle || ''); return m ? parseInt(m[1], 10) : null; });
     flattenReportTree(profitAndLoss.Rows.Row, [], null, makeMultiYearExtractor(colYears), churchRows);
   }
-  if (currentYearMerge) flattenReportTree(currentYearMerge.rows, [], null, makeCurrentYearExtractor(year), churchRows);
   if (profitAndLossMonthly && profitAndLossMonthly.Rows) {
     // Same for monthly columns: data columns only, or each month takes the next month's figure.
     const monthCols = ((profitAndLossMonthly.Columns && profitAndLossMonthly.Columns.Column) || []).slice(1);
     const colPeriods = monthCols.map((c) => parseMonthColTitle(c.ColTitle || ''));
     flattenReportTree(profitAndLossMonthly.Rows.Row, [], null, makeMonthlyExtractor(colPeriods), churchRows);
   }
+
+  // Back up everything this sync may replace before changing anything; no backup, no sync.
+  let backup;
+  try { backup = await createSyncBackup(db, { reason: 'Before Sync now', now: ctx.now ? ctx.now() : Date.now() }); }
+  catch (e) { return { ok: false, error: `Nothing was synced because the backup could not be made (${e.message}).` }; }
+
+  const syncedAt = new Date(ctx.now ? ctx.now() : Date.now()).toISOString();
+  if (accounts) await db.prepare(
+    `INSERT INTO finance_qb_snapshot (key,value,synced_at) VALUES ('accounts',?,?)
+     ON CONFLICT(key) DO UPDATE SET value=excluded.value, synced_at=excluded.synced_at`
+  ).bind(JSON.stringify(accounts), syncedAt).run();
   await persistChurchEntries(db, churchRows, syncedAt);
   await db.prepare('UPDATE finance_qb_connection SET last_synced_at=? WHERE id=1').bind(syncedAt).run();
-  return { ok: true, syncedAt, warnings, churchEntriesSynced: churchRows.length };
+  return { ok: true, syncedAt, warnings, churchEntriesSynced: churchRows.length, backupId: backup.id };
 }
 
 export async function handleSync(req, url, env, db, ctx) {
@@ -236,9 +220,13 @@ export async function syncQuickbooksYears(env, db, ctx, requestedYears) {
     const pnl = await fetchQboJson(`Profit & Loss (${year})`, client.profitAndLoss({ start_date: `${year}-01-01`, end_date: `${year}-12-31` }), warnings);
     if (pnl && pnl.Rows) flattenReportTree(pnl.Rows.Row, [], null, makeSingleYearActualExtractor(year), churchRows);
   }
+  if (!churchRows.length) return { ok: false, error: 'QuickBooks returned no figures for those years, so nothing was changed. ' + warnings.join(' ') };
+  let backup;
+  try { backup = await createSyncBackup(db, { reason: `Before syncing ${years.join(', ')}`, now: ctx.now ? ctx.now() : Date.now() }); }
+  catch (e) { return { ok: false, error: `Nothing was synced because the backup could not be made (${e.message}).` }; }
   const syncedAt = new Date(ctx.now ? ctx.now() : Date.now()).toISOString();
   await persistChurchEntries(db, churchRows, syncedAt);
-  return { ok: true, syncedAt, warnings, years, churchEntriesSynced: churchRows.length };
+  return { ok: true, syncedAt, warnings, years, churchEntriesSynced: churchRows.length, backupId: backup.id };
 }
 
 export async function handleSyncYears(req, url, env, db, ctx) {
@@ -250,30 +238,14 @@ export async function handleSyncYears(req, url, env, db, ctx) {
   return back({ qb: 'synced', rows: String(result.churchEntriesSynced), warnings: String(result.warnings.length) });
 }
 
-// Budget list for the page (legacy GET finance/qb/budgets). Refreshes the token like any read.
-export async function listQuickbooksBudgets(env, db, ctx) {
-  const { client, error } = await freshClient(env, db, ctx);
-  if (error) return { ok: false, error };
-  const warnings = [];
-  const budgetsData = await fetchQboJson('Budget entity', client.budgets(), warnings);
-  const budgets = (budgetsData?.QueryResponse?.Budget || []).map((b) => ({
-    id: String(b.Id), name: b.Name || '(unnamed budget)', startDate: b.StartDate || '', endDate: b.EndDate || '',
-    entryType: b.BudgetEntryType || '', active: !!b.Active,
-  }));
-  const selectedRow = await db.prepare("SELECT value FROM finance_settings WHERE key='finance_qb_selected_budget_id'").first();
-  return { ok: true, budgets, selectedBudgetId: selectedRow?.value || null, warnings };
-}
-
-// POST /api/v1/qb/budget-select — legacy PATCH finance/qb/budgets.
-export async function handleBudgetSelect(req, url, env, db, ctx) {
-  if (!ctx?.isAdmin) return refused('Only admins can choose the QuickBooks budget.');
+// POST /api/v1/qb/restore — put one backup's QuickBooks rows and cache back.
+export async function handleRestore(req, url, env, db, ctx) {
+  if (!ctx?.isAdmin) return refused('Only admins can restore QuickBooks data.');
   let form;
   try { form = await req.formData(); } catch { return refused('Invalid request.'); }
-  const raw = String(form.get('budget_id') || '').trim();
-  if (raw && !/^[A-Za-z0-9_-]{1,64}$/.test(raw)) return refused('That budget id is not valid.');
-  if (!raw) await db.prepare("DELETE FROM finance_settings WHERE key='finance_qb_selected_budget_id'").run();
-  else await db.prepare(
-    `INSERT INTO finance_settings (key,value) VALUES ('finance_qb_selected_budget_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`
-  ).bind(raw).run();
-  return back({ qb: 'budget_saved' });
+  let result;
+  try { result = await restoreSyncBackup(db, form.get('backup_id'), { now: ctx.now ? ctx.now() : Date.now() }); }
+  catch (e) { return refused('Nothing was restored: ' + e.message); }
+  if (!result.ok) return refused(result.error);
+  return back({ qb: 'restored' });
 }

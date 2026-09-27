@@ -121,9 +121,10 @@ import {
   applyWorkerBenefitFields, planFormReturnLocation, PlanFormError,
 } from './compensation-plan-form.js';
 import {
-  QB_PAGE, qbEnabled, readConnectionSummary as readQbConnectionSummary, listQuickbooksBudgets, handleConnect as handleQbConnect, handleCallback as handleQbCallback, handleDisconnect as handleQbDisconnect,
-  handleSync as handleQbSync, handleSyncYears as handleQbSyncYears, handleBudgetSelect as handleQbBudgetSelect,
+  QB_PAGE, qbEnabled, readConnectionSummary as readQbConnectionSummary, handleConnect as handleQbConnect, handleCallback as handleQbCallback, handleDisconnect as handleQbDisconnect,
+  handleSync as handleQbSync, handleSyncYears as handleQbSyncYears, handleRestore as handleQbRestore,
 } from './quickbooks-oauth-routes.js';
+import { listSyncBackups } from './quickbooks-sync-backup.js';
 import { loadQuickbooksTransactions } from './quickbooks-transactions-service.js';
 import { readImportHistory } from './import-history-service.js';
 import { resolveAccountsReport } from './accounts-report-service.js';
@@ -1398,7 +1399,7 @@ function renderSectionBody(ctx) {
   }
   if (section.id === 'quickbooks') {
     return renderQuickbooksPage(page.id, {
-      dataStatus, accountsReport, quickbooksOwn: ctx.quickbooksOwn, quickbooksBudgets: ctx.quickbooksBudgets,
+      dataStatus, accountsReport, quickbooksOwn: ctx.quickbooksOwn, quickbooksBackups: ctx.quickbooksBackups,
       quickbooksTransactions: ctx.quickbooksTransactions, importHistory: ctx.importHistory,
       canManageQuickbooks: roleResult.ok && roleResult.role === 'admin', searchParams: ctx.searchParams,
     });
@@ -1572,7 +1573,7 @@ async function runPropertyLedgerWrite(routeId, db, body) {
 
 const QB_ROUTE_HANDLERS = {
   'qb-connect-v1': handleQbConnect, 'qb-callback-v1': handleQbCallback, 'qb-disconnect-v1': handleQbDisconnect,
-  'qb-sync-v1': handleQbSync, 'qb-sync-years-v1': handleQbSyncYears, 'qb-budget-select-v1': handleQbBudgetSelect,
+  'qb-sync-v1': handleQbSync, 'qb-sync-years-v1': handleQbSyncYears, 'qb-restore-v1': handleQbRestore,
 };
 
 // A short, non-sensitive reason shown on the role-verification denial page, so a failure can be
@@ -3760,13 +3761,13 @@ export default {
         const accountsFiscalYear = section.id === 'accounts' ? chartOfAccountsFiscalYear(url.searchParams.get('fiscal_year')) : null;
         let accountsReport = ['accounts', 'quickbooks'].includes(section.id)
           ? safeSyntheticRead(() => resolveAccountsReport(env, env.FINANCE_DB, { fiscalYear: accountsFiscalYear })) : null;
-        // Finance's own QuickBooks connection, once enabled (quickbooks-oauth-routes.js). The budget
-        // list is a live QuickBooks call, so it is fetched only when an admin asks for it.
+        // Finance's own QuickBooks connection, once enabled (quickbooks-oauth-routes.js), and for
+        // admins the pre-sync backups they can restore (quickbooks-sync-backup.js).
         let quickbooksOwn = ['quickbooks', 'data'].includes(section.id) && qbEnabled(env) && env.FINANCE_DB
           ? safeSyntheticRead(() => readQbConnectionSummary(env.FINANCE_DB)) : null;
-        let quickbooksBudgets = url.searchParams.get('budgets') === '1' && roleResult.ok && roleResult.role === 'admin'
-          ? after(quickbooksOwn, (own) => (own && own.connected
-            ? listQuickbooksBudgets(env, env.FINANCE_DB, {}).catch((e) => ({ ok: false, error: e.message })) : null)) : null;
+        let quickbooksBackups = section.id === 'quickbooks' && resolveFinancePage(section, pageId).id === 'sync-status'
+          && qbEnabled(env) && env.FINANCE_DB && roleResult.ok && roleResult.role === 'admin'
+          ? listSyncBackups(env.FINANCE_DB) : null;
         let quickbooksTransactions = section.id === 'quickbooks'
           && ['transactions', 'expense-drilldown', 'vendor-spend', 'exceptions'].includes(resolveFinancePage(section, pageId).id)
           && qbEnabled(env) && env.FINANCE_DB
@@ -4089,7 +4090,7 @@ export default {
           : null;
         // Every load above started without waiting on the others; one slow Connect answer now
         // costs its own timeout once, not once per section read in turn.
-        [summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBudgets, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, payrollBundle, financeHealth] = await Promise.all([summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBudgets, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, payrollBundle, financeHealth]);
+        [summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, payrollBundle, financeHealth] = await Promise.all([summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, payrollBundle, financeHealth]);
         const balancePriorYear = await balancePriorYearLoad;
         const printMode = url.searchParams.get('print') === '1';
         return response((printMode ? renderPrintPage : renderShell)({
@@ -4100,7 +4101,7 @@ export default {
           propertyReservesLive, propertyLedgers, propertyLedgersLive, propertyValuation, propertyPolicy, propertyDebt, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, accountsReport,
           dataStatus, classification, classificationRevenueStatus, classificationRevenueMessage, classificationExpenseStatus, classificationExpenseMessage,
           importStatus, quickbooksSnapshot, daycarePreviewYear, daycarePreview, dataDaycareImportStatus, dataDaycareImportMessage, quickbooksEnabled: qbEnabled(env),
-          quickbooksOwn, quickbooksBudgets, quickbooksTransactions, importHistory, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, cashRunway, canManageCashPolicy, cashPolicyStatus, cashPolicyMessage,
+          quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, cashRunway, canManageCashPolicy, cashPolicyStatus, cashPolicyMessage,
           compensationPlanRaw, canEditCompensation, compensationEditIndex, compensationEntryStatus, compensationEntryMessage,
     compensationProjection,
           givingEntryStatus, givingEntryMessage, budgetEntryStatus, budgetEntryMessage, payrollBundle,
