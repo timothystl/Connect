@@ -336,15 +336,15 @@ const ROUTES = [
   { id: 'qb-sync-v1', paths: ['/api/v1/qb/sync'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.quickbooks-sync.v1' },
   { id: 'qb-sync-years-v1', paths: ['/api/v1/qb/sync-years'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.quickbooks-sync-years.v1' },
   { id: 'qb-restore-v1', paths: ['/api/v1/qb/restore'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.quickbooks-restore.v1' },
-  // Connect's own Compensation Planner, served inside Finance for side-by-side use (see
-  // connect-planner.js): the page, its scripts and stylesheet, the reads it makes through
-  // Connect's contracts, and its save, which relays to Connect's finance-compensation-write-v1
-  // (a council member's save goes to their private draft in Finance's database instead).
+  // Connect's accounting screens framed inside Finance (accounting-workspace.js), and the
+  // Compensation Planner's script and data routes (apps/finance/planner/, connect-planner.js): the
+  // reads relay through Connect's contracts, and the save relays to Connect's
+  // finance-compensation-write-v1 (a council member's save goes to their private draft in
+  // Finance's database instead).
   { id: 'accounting-workspace-page', paths: ['/accounting'], dataSource: 'live-relay-read' },
   { id: 'accounting-workspace-asset', paths: ['/accounting/app.js', '/accounting/app.css'], dataSource: 'none' },
   { id: 'accounting-workspace-api', paths: ['/api/v1/accounting-workspace'], methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], dataSource: 'live-relay', writer: true, contract: 'connect.finance-workspace.v1' },
-  { id: 'connect-planner-page', paths: ['/connect-planner'], dataSource: 'live-relay-read' },
-  { id: 'connect-planner-asset', paths: ['/connect-planner/app.js', '/connect-planner/app.css'], dataSource: 'none' },
+  { id: 'compensation-planner-asset', paths: ['/compensation-planner/app.js'], dataSource: 'none' },
   { id: 'connect-planner-read-v1', paths: ['/api/v1/connect-planner/salary', '/api/v1/connect-planner/church-year', '/api/v1/connect-planner/board-categories', '/api/v1/connect-planner/purpose-tags'], dataSource: 'live-relay-read' },
   { id: 'connect-planner-save-v1', paths: ['/api/v1/connect-planner/salary-save'], methods: WRITE_METHODS, dataSource: 'live-relay', writer: true, contract: 'connect.finance-compensation-write-relay.v1' },
 ];

@@ -1,3 +1,4 @@
+import { PLANNER_CSS } from './planner/styles.js';
 import { buildCompensationCouncilSnapshot, buildCompensationReportView, buildLiveCompensationCouncilSnapshot, filterCompensationWorkersForViewer, summarizeCompensationWorkers } from './compensation-report-service.js';
 import { buildCompensationBenchmarkView } from './compensation-benchmark-service.js';
 import { buildCompensationBenefitsView } from './compensation-benefits-service.js';
@@ -92,7 +93,7 @@ export function renderCouncilOverlayEditor(plan, entryStatus, entryMessage) {
 export function renderCompensationPage(pageId, {
   compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, viewerRole,
   compensationPlanRaw, canEditCompensation, editIndex, entryStatus, entryMessage, canEditCouncilOverlay = false,
-  compensationProjection = null, planYear = null, refYear = null,
+  compensationProjection = null, planYear = null, refYear = null, plannerConfig = null,
 }) {
   // The real roster editor (compensation-editor-pages.js) takes over the Plan page entirely for
   // the admin/compensation roles it's built for, whenever shell.js's own fetch-edit-resubmit
@@ -107,12 +108,19 @@ export function renderCompensationPage(pageId, {
       + renderRaiseMethodsEditor(compensationPlanRaw.data, compensationProjection, { planYear })
       + renderPlanProjection(compensationProjection, { councilDraft: false, viewerRole });
   }
-  // Connect's own planner (connect-planner.js), framed here: the same five tabs, live totals and
-  // autosave as in Connect, saving to the same plan. Andrew prefers this view (September 27), so it
-  // is Compensation's first (default) page; Finance's own Plan page stays as a secondary tab.
-  if (pageId === 'connect') {
-    return `<p class="muted-line">The Compensation Planner, with the same tabs and autosave as in Connect. It edits the same saved plan as the Plan (new view) and Rates &amp; ranges pages. <a href="/connect-planner" target="_blank" rel="noopener">Open full screen</a></p>
-      <iframe src="/connect-planner" title="Compensation Planner (Connect)" style="width:100%;height:calc(100vh - 150px);min-height:720px;border:1px solid #E3E7EE;border-radius:10px;background:#F3F7FA"></iframe>`;
+  // The Compensation Planner (apps/finance/planner/): Finance's own interactive page, with the
+  // same five views, live totals and autosave as Connect's legacy Salary Planner. The page is a
+  // mount point plus its settings; the bundled script does the rest and saves to the same plan.
+  if (pageId === 'planner') {
+    if (!plannerConfig) {
+      return '<p class="status status-error">The Compensation Planner is available to admin, compensation and council accounts.</p>';
+    }
+    const config = JSON.stringify(plannerConfig).replace(/</g, '\\u003c');
+    return `<style>${PLANNER_CSS}</style>
+      <div id="cp-root" class="cp"><p class="status status-pending">Loading the compensation plan…</p></div>
+      <noscript><p class="status status-error">The Compensation Planner needs JavaScript. The Plan (new view) page works without it.</p></noscript>
+      <script type="application/json" id="cp-config">${config}</script>
+      <script src="/compensation-planner/app.js?v=${encodeURIComponent(plannerConfig.version || 'local')}" defer></script>`;
   }
   // Legacy's "This year's rates" and market comparison data: editable by admin/compensation,
   // shown read-only to the other roles allowed to read the saved plan.

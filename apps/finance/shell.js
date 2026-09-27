@@ -51,9 +51,9 @@ import { describePlanningBasisFailure, fetchPlanningBasis } from './connect-plan
 import { fetchBudgetBuilder } from './finance-budget-builder-client.js';
 import { fetchBoardLayout } from './finance-board-layout-client.js';
 import {
-  CONNECT_PLANNER_CSP, CONNECT_PLANNER_CSS, CONNECT_PLANNER_JS, churchYearFromReport, councilDraftFromPlan,
-  plannerViewer, renderConnectPlannerPage,
+  churchYearFromReport, councilDraftFromPlan, plannerViewer,
 } from './connect-planner.js';
+import { PLANNER_APP_JS } from './planner/bundle.generated.js';
 import { buildBoardLayoutWrites, normalizeBoardLayout } from './board-layout.js';
 import { BUDGET_BUILDER_STYLES, renderBudgetBuilderPage } from './planning-builder-pages.js';
 import { fetchLiveFinanceCashRunway } from './finance-cash-runway-client.js';
@@ -217,6 +217,11 @@ const SECURITY_HEADERS = Object.freeze({
   'X-Frame-Options': 'DENY',
   'X-Robots-Tag': 'noindex, nofollow',
 });
+
+// The Compensation Planner page (Compensation → Planner) is Finance's one interactive page: it
+// loads its own bundled script from this Worker (script-src 'self', never inline) and calls back
+// only to this Worker. Everything else stays as SECURITY_HEADERS sets it.
+const PLANNER_PAGE_CSP = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'";
 
 function response(body, init = {}, { cacheControl } = {}) {
   const headers = new Headers(init.headers);
@@ -1407,6 +1412,16 @@ function renderSectionBody(ctx) {
       compensationProjection,
       planYear: /^\d{4}$/.test(ctx.searchParams?.get('plan_year') || '') ? ctx.searchParams.get('plan_year') : null,
       refYear: /^\d{4}$/.test(ctx.searchParams?.get('ref_year') || '') ? Number(ctx.searchParams.get('ref_year')) : null,
+      // The Planner page's own script reads this (apps/finance/planner/); every read and save it
+      // makes re-checks the role on the server.
+      plannerConfig: plannerViewer(roleResult) ? {
+        role: roleResult.role,
+        permissions: { compensation: roleResult.permissions?.compensation === 'edit' ? 'edit' : 'view' },
+        baseYear: defaultCompensationTargetYear() - 1,
+        targetYear: defaultCompensationTargetYear(),
+        preview: Boolean(councilPreview),
+        version: ctx.metadata?.releaseSha || 'local',
+      } : null,
     });
   }
   if (section.id === 'quickbooks') {
@@ -1611,23 +1626,14 @@ function describeRoleFailure(result) {
   return byReason[result.reason] || String(result.reason || 'unknown');
 }
 
-// The Connect planner's page, reads and save. Every call re-checks the viewer's Connect role; the
-// reads and the shared-plan save then relay to Connect's own contracts, which verify it again.
+// The Compensation Planner's reads and save (apps/finance/planner/, and the accounting workspace's
+// own salary calls). Every call re-checks the viewer's Connect role; the reads and the shared-plan
+// save then relay to Connect's own contracts, which verify it again.
 async function handleConnectPlanner(request, env, url, route) {
   const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
   const jsonResponse = (body, status = 200) => response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
   const roleResult = await fetchVerifiedRole(env, accessJwt);
   const viewer = plannerViewer(roleResult);
-  if (route.id === 'connect-planner-page') {
-    if (!viewer) {
-      return response('<!doctype html><meta charset="utf-8"><p style="font-family:sans-serif">The compensation planner is available to admin, compensation and council accounts.</p>', { status: 403, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-    }
-    const html = request.method === 'HEAD' ? null : renderConnectPlannerPage({ viewer, baseYear: defaultCompensationTargetYear() - 1, version: env.RELEASE_SHA });
-    const res = response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
-    res.headers.set('Content-Security-Policy', CONNECT_PLANNER_CSP);
-    res.headers.set('X-Frame-Options', 'SAMEORIGIN');
-    return res;
-  }
   if (!viewer) return jsonResponse({ error: 'Access denied: the compensation planner needs an admin, compensation or council account' }, 403);
   if (route.id === 'connect-planner-save-v1') {
     if (!isSameOriginPost(request, url)) return jsonResponse({ error: 'That save did not come from Timothy Finance.' }, 403);
@@ -1682,7 +1688,7 @@ export default {
       }, { cacheControl: 'public, max-age=86400' });
     }
 
-    // Connect's Compensation Planner inside Finance (connect-planner.js). Its page may be framed by
+    // Connect's accounting screens inside Finance (accounting-workspace.js). Its page may be framed by
     // Finance and runs Connect's scripts, so it carries its own CSP; everything else keeps Finance's.
     if (route.id === 'accounting-workspace-asset') {
       const isJs = url.pathname.endsWith('.js');
@@ -1701,13 +1707,14 @@ export default {
       res.headers.set('X-Frame-Options', 'SAMEORIGIN');
       return res;
     }
-    if (route.id === 'connect-planner-asset') {
-      const isJs = url.pathname.endsWith('.js');
-      return response(request.method === 'HEAD' ? null : (isJs ? CONNECT_PLANNER_JS : CONNECT_PLANNER_CSS), {
-        headers: { 'Content-Type': isJs ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8' },
+    // The Compensation Planner's script (apps/finance/planner/), bundled at build time. Versioned by
+    // release in the page's script URL, so it can be cached.
+    if (route.id === 'compensation-planner-asset') {
+      return response(request.method === 'HEAD' ? null : PLANNER_APP_JS, {
+        headers: { 'Content-Type': 'text/javascript; charset=utf-8' },
       }, { cacheControl: 'private, max-age=86400' });
     }
-    if (route.id === 'connect-planner-page' || route.id === 'connect-planner-read-v1' || route.id === 'connect-planner-save-v1') {
+    if (route.id === 'connect-planner-read-v1' || route.id === 'connect-planner-save-v1') {
       return handleConnectPlanner(request, env, url, route);
     }
 
@@ -3543,6 +3550,10 @@ export default {
         // already goes through in renderSectionBody below. Needed here, before that render happens,
         // to gate the Compensation Plan roster editor's own live fetch on the right page.
         const effectivePageId = resolveFinancePage(section, pageId).id;
+        // The Planner is an interactive page; its printable form is the Council report.
+        if (section.id === 'compensation' && effectivePageId === 'planner' && url.searchParams.get('print') === '1') {
+          return response(null, { status: 303, headers: { Location: '/?section=compensation&page=council&print=1' } });
+        }
         const councilPreview = url.searchParams.get('council') === '1';
         const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
         const roleStarted = Date.now();
@@ -4105,7 +4116,9 @@ export default {
         [summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, payrollBundle, financeHealth] = await Promise.all([summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, payrollBundle, financeHealth]);
         const balancePriorYear = await balancePriorYearLoad;
         const printMode = url.searchParams.get('print') === '1';
-        return response((printMode ? renderPrintPage : renderShell)({
+        // The Planner is the one Finance page that runs script (its own, from this Worker only).
+        const plannerPage = section.id === 'compensation' && effectivePageId === 'planner';
+        const shellResponse = response((printMode ? renderPrintPage : renderShell)({
           printFragment: printMode && url.searchParams.get('fragment') === '1',
           healthView: url.searchParams.get('view'), healthAppeal: url.searchParams.get('appeal'), healthFlow: url.searchParams.get('flow'), financeHealth, facilities, hr, givingBatch, givingAnalytics, givingAnalyticsPeople, accessRoles, budgetBuilder, boardLayout, planningBasis, planningScenarios, planningRunway, propertyBooks, searchParams: url.searchParams,
           metadata, summary, giving, givingSource, section, pageId, councilPreview, roleResult, churchReport, churchReportLive, churchTrendLive,
@@ -4151,6 +4164,10 @@ export default {
         }), {
           headers: { 'Content-Type': 'text/html; charset=utf-8' },
         });
+        if (plannerPage && !printMode) {
+          shellResponse.headers.set('Content-Security-Policy', PLANNER_PAGE_CSP);
+        }
+        return shellResponse;
       } catch {
         return response('Synthetic staging data unavailable', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
       }
