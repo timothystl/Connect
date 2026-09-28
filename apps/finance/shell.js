@@ -30,7 +30,7 @@ import { describeGivingBatchFailure, fetchGivingBatchLedger, fetchGivingBatchWor
 import { GIFT_TRANSACTIONS_STYLES, buildTransactionsCsv, normalizeTransactionParams, renderOnlineGivingPage, renderTransactionsPage, transactionsCsvFilename, transactionsCsvParams } from './gift-transactions-pages.js';
 import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, fetchGivingBoard, fetchGivingReport, postGivingBoardEmail, postGivingFollowupWrite, postGivingImpactWrite } from './connect-giving-analytics-client.js';
 import { GIVING_REPORTS_STYLES, givingReportParams, givingReportRequests, impactStatementsFromForm, renderGivingReportPage } from './giving-reports-pages.js';
-import { COUNCIL_REPORT_STYLES, councilParams, renderCouncilEmailHtml, renderCouncilReportPage } from './council-report-pages.js';
+import { COUNCIL_REPORT_STYLES, councilAnalysisRequests, councilParams, renderCouncilEmailHtml, renderCouncilReportPage } from './council-report-pages.js';
 import { fetchAccessRoles } from './connect-access-client.js';
 import { fetchFinanceClassification } from './finance-classification-client.js';
 import { fetchFinancePropertyDebt } from './finance-property-debt-client.js';
@@ -1313,7 +1313,8 @@ function renderSectionBody(ctx) {
     const keep = councilPreview ? { council: '1' } : {};
     switch (page.id) {
       case 'council': return renderCouncilReportPage({
-        result: totals, params: ctx.searchParams, today: isoDay(new Date()), status,
+        result: totals, analysisResults: ctx.councilAnalysis ? ctx.councilAnalysis.map(asResult) : null,
+        params: ctx.searchParams, today: isoDay(new Date()), status,
         canEmail: canEditNudges, print: ctx.searchParams.get('print') === '1', council: councilPreview,
       });
       case 'year-over-year': return renderYearOverYearPage({ result: totals, keep });
@@ -4282,9 +4283,14 @@ export default {
           : section.id === 'charts' && resolveFinancePage(section, pageId).id === 'concentration' ? 'concentration' : null;
         let accessRoles = section.id === 'accounts' && resolveFinancePage(section, pageId).id === 'access'
           ? fetchAccessRoles(env, accessJwt) : null;
+        // Council report › Analysis reads the distribution and five-year trend (both totals only)
+        // instead of the board.
+        const councilView = analyticsPageId === 'council' ? councilParams(url.searchParams, isoDay(new Date())) : null;
+        const councilAnalysisLoad = councilView?.mode === 'analysis'
+          ? Promise.all(councilAnalysisRequests(councilView.year).map(([report, query]) => fetchGivingReport(env, accessJwt, report, query))) : null;
         const givingAnalyticsLoads = analyticsPageId ? Promise.all([
-          analyticsPageId === 'statements' ? null
-            : analyticsPageId === 'council' ? fetchGivingBoard(env, accessJwt, { period: councilParams(url.searchParams, isoDay(new Date())).period })
+          analyticsPageId === 'statements' || councilAnalysisLoad ? null
+            : analyticsPageId === 'council' ? fetchGivingBoard(env, accessJwt, { period: councilView.period })
               : fetchGivingAnalytics(env, accessJwt, { fund: url.searchParams.get('fund') || 'general' }),
           ['statements', 'nudges'].includes(analyticsPageId) && !councilPreview
             && !(roleResult.ok && roleResult.role !== 'admin' && roleResult.permissions?.giving === 'anon')
@@ -4322,6 +4328,7 @@ export default {
         const shellResponse = response((printMode ? renderPrintPage : renderShell)({
           printFragment: printMode && url.searchParams.get('fragment') === '1',
           givingReports: givingReportsLoad ? await givingReportsLoad : null,
+          councilAnalysis: councilAnalysisLoad ? await councilAnalysisLoad : null,
           healthView: url.searchParams.get('view'), healthAppeal: url.searchParams.get('appeal'), healthFlow: url.searchParams.get('flow'), financeHealth, facilities, hr, givingBatch, givingAnalytics, givingAnalyticsPeople, gymIncome, accessRoles, budgetBuilder, boardLayout, planningBasis, planningScenarios, planningRunway, propertyBooks, searchParams: url.searchParams,
           metadata, summary, giving, givingSource, section, pageId, councilPreview, roleResult, churchReport, churchReportLive, churchTrendLive,
           balanceSheet, balanceTrends, balancePriorYear, balancePropertyValue, balanceMortgageHistory, balanceSelection, daycareReport, daycareReportLive, daycareEntries, daycareEditId, propertyReport, propertyReportLive, propertyReserves,
