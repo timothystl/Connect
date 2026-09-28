@@ -2,7 +2,7 @@
 
 Decision (Andrew, September 25, 2026): Finance owns the QuickBooks connection.
 
-Status: steps 1–4 were completed September 25, 2026, and both switches are set to `"1"` (step 5).
+Status: steps 1–6 are complete. Both switches were set to `"1"` and released on September 25, 2026, and Andrew then connected and synced QuickBooks from Finance. Remaining: the step 7 comparison and the later cleanup.
 
 ## Design
 
