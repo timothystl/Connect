@@ -35,7 +35,7 @@ material limitation honestly; a green build is not proof of data migration or us
 ## Talking with Andrew
 
 Andrew is a pastor, not a developer. Do not narrate your steps or mention files, scripts,
-commands, branches, or tools in messages to him. Reply in plain language, in this order:
+commands, branches, or tools in messages to him. Reply in plain language, Answer in a direct, concise manner without outlining your steps, in this order:
 
 1. Restate the issue in your own words, so he knows you understood it.
 2. If it is a bug, say what you confirmed is actually going wrong.
