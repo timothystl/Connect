@@ -382,6 +382,47 @@ function dashMonthListHtml(d, L) {
   return '<div class="home-month-card">' + dashSection(L.key, esc(L.title), '<span class="dsec-meta">' + list.length + '</span>', body, true) + '</div>';
 }
 
+// ── Sunday attendance model, shared with the Attendance tab ────────────────
+// Defined here rather than in js-attendance.js because Home's attendance entry card needs both
+// on first paint, and app-ext.js (where the Attendance tab lives) is loaded lazily.
+// One row per Sunday date, combining the 08:00 and 10:45 service records (if present).
+// services defaults to the Attendance tab's wide load; Home passes its own short window.
+// _loadedServices is defined in js-attendance.js (app-ext.js, lazily loaded), hence the typeof.
+function attSundayMap(services) {
+  var map = {};
+  (services || (typeof _loadedServices !== 'undefined' ? _loadedServices : null) || []).forEach(function(s) {
+    if (s.service_type !== 'sunday') return;
+    if (!map[s.service_date]) map[s.service_date] = { date: s.service_date, att8: 0, att1045: 0, id8: null, id1045: null, name: '', notes: '' };
+    var row = map[s.service_date];
+    if (s.service_time === '08:00') { row.att8 = s.attendance || 0; row.id8 = s.id; }
+    else if (s.service_time === '10:45') { row.att1045 = s.attendance || 0; row.id1045 = s.id; }
+    if (s.service_name) row.name = s.service_name;
+    if (s.notes) row.notes = s.notes;
+  });
+  Object.keys(map).forEach(function(d) { map[d].combined = map[d].att8 + map[d].att1045; });
+  return map;
+}
+
+// Saves one Sunday's 8:00 and 10:45 counts. row is that date's attSundayMap() entry, if any.
+// Shared by the Attendance tab and Home. Resolves only when every write succeeded.
+function attSaveSunday(date, a8, a1045, row) {
+  var saves = [];
+  if (row && (row.id8 || row.id1045)) {
+    // Existing rows for this date — update in place rather than calling bulk-sunday, which
+    // always INSERTs new rows (no upsert) and would create duplicates.
+    if (row.id8) saves.push(api('/admin/api/attendance/' + row.id8, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attendance: a8 }) }));
+    else if (a8) saves.push(api('/admin/api/attendance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ service_date: date, service_time: '08:00', service_name: row.name || '', service_type: 'sunday', attendance: a8 }) }));
+    if (row.id1045) saves.push(api('/admin/api/attendance/' + row.id1045, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attendance: a1045 }) }));
+    else if (a1045) saves.push(api('/admin/api/attendance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ service_date: date, service_time: '10:45', service_name: row.name || '', service_type: 'sunday', attendance: a1045 }) }));
+  } else {
+    saves.push(api('/admin/api/attendance/bulk-sunday', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ service_date: date, service_name: (row && row.name) || '', att_8: a8, att_1045: a1045 }) }));
+  }
+  // Not a per-call .catch: a per-call catch that swallows its own rejection would make
+  // Promise.all resolve as if every save succeeded even when one genuinely failed. Callers
+  // put one catch on the aggregate instead.
+  return Promise.all(saves);
+}
+
 // ── Home attendance entry (OS5) ─────────────────────────────────────────
 // A short window of Sundays (8 weeks back through the coming one), fetched on its own so Home
 // never waits on the Attendance tab's five-year load. Saving goes through attSaveSunday(),

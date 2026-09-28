@@ -157,10 +157,27 @@ describe('OS5 — Home', () => {
 });
 
 describe('OS5 — attSaveSunday', () => {
+  // Both helpers live in js-dashboard.js (app-staff.js) so Home can use them before the lazily
+  // loaded app-ext.js (and js-attendance.js with it) exists.
+  const MODEL = JS_DASHBOARD.slice(
+    JS_DASHBOARD.indexOf('// ── Sunday attendance model'),
+    JS_DASHBOARD.indexOf('// ── Home attendance entry (OS5)'));
+
+  it('ships with Home, not with the lazily loaded Attendance tab', () => {
+    expect(MODEL).toContain('function attSundayMap(');
+    expect(MODEL).toContain('function attSaveSunday(');
+    expect(JS_ATTENDANCE).not.toMatch(/^function attSundayMap\(|^function attSaveSunday\(/m);
+  });
+
+  it('defaults to the Attendance tab\'s load without requiring it to exist', () => {
+    const fn = new Function(MODEL + '\nreturn attSundayMap;');
+    expect(fn()()).toEqual({});
+  });
+
   function load() {
     const calls = [];
     const api = (url, opts) => { calls.push([url, opts && opts.method, opts && JSON.parse(opts.body)]); return Promise.resolve({}); };
-    const fn = new Function('api', '_loadedServices', JS_ATTENDANCE + '\nreturn { attSaveSunday, attSundayMap };');
+    const fn = new Function('api', '_loadedServices', MODEL + '\nreturn { attSaveSunday, attSundayMap };');
     return { calls, ...fn(api, []) };
   }
 
@@ -181,7 +198,7 @@ describe('OS5 — attSaveSunday', () => {
   });
 
   it('rejects when any write fails', async () => {
-    const fn = new Function('api', '_loadedServices', JS_ATTENDANCE + '\nreturn attSaveSunday;');
+    const fn = new Function('api', '_loadedServices', MODEL + '\nreturn attSaveSunday;');
     const save = fn((url) => url.endsWith('/7') ? Promise.reject(new Error('nope')) : Promise.resolve({}), []);
     await expect(save('2026-09-20', 1, 2, { id8: 7, id1045: 8, name: '' })).rejects.toThrow('nope');
   });
