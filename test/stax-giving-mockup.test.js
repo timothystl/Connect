@@ -1505,9 +1505,11 @@ describe('Stax Giving mockup — recurring gifts moved into the main Giving page
   // The standalone screen at /admin/giving/stax-mockup/recurring is gone — it's now the
   // Recurring pane inside Giving > Offerings (src/frontend/js-giving.js's givRecurring*
   // functions), reusing the exact same /admin/api/giving/stax-mockup/recurring routes tested
-  // above. The old URL 301s here rather than 404ing, so an existing bookmark/link still works.
-  it('301s the old standalone recurring page to the new pane, without requiring auth', async () => {
-    const req = new Request('https://connect.timothystl.org/admin/giving/stax-mockup/recurring');
+  // above. On production and staging the old URL now goes to Finance's Online giving →
+  // Recurring tab (test/stax-mockup-finance-redirect.test.js); local development, with no
+  // Finance host, still 301s here rather than 404ing, so an existing link still works.
+  it('301s the old standalone recurring page to the new pane locally, without requiring auth', async () => {
+    const req = new Request('http://localhost:8787/admin/giving/stax-mockup/recurring');
     const stmt = { bind: () => stmt, first: async () => null, all: async () => ({ results: [] }), run: async () => ({ meta: {} }) };
     const env = { ADMIN_PASSWORD: 'x', SESSION_SECRET: 'x', DB: { prepare: () => stmt, batch: async () => [] } };
     const res = await worker.fetch(req, env);

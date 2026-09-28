@@ -54,6 +54,14 @@ const R2_PHOTO_PREFIXES = ['people/', 'households/', 'branding/', 'register-scan
 // cookie so User-Agent detection resumes deciding on the visitor's next plain visit.
 // isPhoneUserAgent itself now lives in src/auth.js (imported above) — it also drives the
 // persistent-session decision there, so the two can't drift apart.
+// The Finance app host paired with a Connect host (production, the legacy chms name, staging);
+// null for local development, which has no Finance host to send people to.
+function financeOriginForConnectHost(hostname) {
+  if (hostname === 'connect.timothystl.org' || hostname === 'chms.timothystl.org') return 'https://finance.timothystl.org';
+  if (hostname === 'connect-staging.timothystl.org') return 'https://finance-staging.timothystl.org';
+  return null;
+}
+
 function prefersDesktop(req) {
   return /(?:^|;\s*)mob_pref=desktop(?:;|$)/.test(req.headers.get('cookie') || req.headers.get('Cookie') || '');
 }
@@ -467,10 +475,20 @@ async function _fetchRouted(req, env, url, path, method) {
         return json({ error: 'Internal server error' }, 500);
       }
     }
-    // Staff review queue for unmatched Stax mockup gifts — same session auth as the rest of
-    // Connect; role check for Giving access happens the same way it does on every other Giving
-    // screen (isFinance, computed inside handleChmsApi) for the /admin/api/giving/stax-mockup/*
-    // data routes this page calls. The page shell itself only needs "is signed in".
+    // Staff screens for the Stax mockup moved to Finance's Giving Entry → Online giving tabs
+    // (Payments · Recurring · Givers & matching · Form settings), which relay every change back
+    // to Connect. On production and staging the old URLs redirect there so bookmarks and in-app
+    // links keep working; local development, with no Finance host, keeps the original pages.
+    // The data routes under /admin/api/giving/stax-mockup/* are unchanged.
+    const staxFinanceOrigin = financeOriginForConnectHost(url.hostname);
+    const staxFinanceTab = {
+      '/admin/giving/stax-mockup': 'page=online&view=associations',
+      '/admin/giving/stax-mockup/funds': 'page=online-form',
+      '/admin/giving/stax-mockup/recurring': 'page=online&view=recurring',
+    }[path.replace(/\/$/, '')];
+    if (staxFinanceTab && method === 'GET' && staxFinanceOrigin) {
+      return new Response(null, { status: 302, headers: { 'Location': `${staxFinanceOrigin}/?section=giving&${staxFinanceTab}` } });
+    }
     if (path === '/admin/giving/stax-mockup' && method === 'GET') {
       if (!await isAuthed(req, env)) return html(LOGIN_HTML);
       return renderStaxGivingMockupReviewHtml();
@@ -479,10 +497,8 @@ async function _fetchRouted(req, env, url, path, method) {
       if (!await isAuthed(req, env)) return html(LOGIN_HTML);
       return renderStaxGivingMockupFundsAdminHtml();
     }
-    // Recurring gifts moved into the main Giving page as a pane (Offerings → Recurring) instead
-    // of living on its own disconnected URL — see src/frontend/js-giving.js's givRecurring*
-    // functions and js-core.js's ?pane=recurring landing hook. This keeps the old bookmark/link
-    // working rather than 404ing it.
+    // Local development: recurring gifts are a pane of the main Giving page (Offerings →
+    // Recurring) — see src/frontend/js-giving.js's givRecurring* functions.
     if (path === '/admin/giving/stax-mockup/recurring' && method === 'GET') {
       return new Response(null, { status: 301, headers: { 'Location': '/?pane=recurring#giving' } });
     }

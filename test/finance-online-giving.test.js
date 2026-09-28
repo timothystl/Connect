@@ -82,3 +82,18 @@ describe('Online giving form settings (Finance Giving Entry)', () => {
     expect(calls.some((c) => c.path.endsWith('/giving-online-settings-write-v1'))).toBe(false);
   });
 });
+
+describe('Online giving tabs (Finance Giving Entry)', () => {
+  it('shows Form settings as a tab of Online giving, not a separate sidebar item', async () => {
+    const { env } = makeEnv();
+    const html = await (await get(env)).text();
+    expect(html).toContain('<div class="chip-row" role="navigation" aria-label="Online giving">');
+    expect(html).toContain('<a class="chip" href="/?section=giving&amp;page=online">Payments</a>');
+    expect(html).toContain('<a class="chip" href="/?section=giving&amp;page=online&amp;view=recurring">Recurring</a>');
+    expect(html).toContain('<a class="chip" href="/?section=giving&amp;page=online&amp;view=associations">Givers &amp; matching</a>');
+    expect(html).toContain('<span class="chip is-on" aria-current="page">Form settings</span>');
+    const nav = html.slice(html.indexOf('<div class="nav-pages">'), html.indexOf('</div>', html.indexOf('<div class="nav-pages">')));
+    expect(nav).toContain('<a href="/?section=giving&amp;page=online" aria-current="page">Online giving</a>');
+    expect(nav).not.toContain('Online form settings');
+  });
+});

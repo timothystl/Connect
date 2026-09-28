@@ -40,7 +40,7 @@ export function renderSectionNav(activeSection, activePage, { roleResult, counci
     ? FINANCE_PARITY_SECTIONS.filter((s) => roleCanAccessSection(roleResult.role, s, roleResult.permissions))
     : FINANCE_PARITY_SECTIONS;
   return groupFinanceSections(visible).map(({ group, sections }) => {
-    const pages = sections.flatMap((section) => section.pages.map((page) => ({ section, page })));
+    const pages = sections.flatMap((section) => section.pages.filter((page) => !page.navParent).map((page) => ({ section, page })));
     const isActiveGroup = sections.some((s) => s.id === activeSection.id);
     const first = pages[0];
     if (pages.length <= 1) {
@@ -48,7 +48,7 @@ export function renderSectionNav(activeSection, activePage, { roleResult, counci
     }
     const links = isActiveGroup
       ? `<div class="nav-pages">${pages.map(({ section, page }) => {
-        const current = section.id === activeSection.id && page.id === activePage.id;
+        const current = section.id === activeSection.id && (page.id === activePage.id || page.id === activePage.navParent);
         const label = section.pages.length <= 1 ? section.label : page.label;
         return `<a href="${pageHref(section, page, { councilPreview, fund })}"${current ? ' aria-current="page"' : ''}>${escapeHtml(label)}</a>`;
       }).join('')}</div>`

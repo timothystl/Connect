@@ -3,6 +3,7 @@
 // which the public form, checkout, and recurring signups read; every change posts to
 // /api/v1/giving-online-settings-write, which relays it to Connect. Finance stores nothing.
 import { escapeHtml as e } from './render-helpers.js';
+import { renderOnlineGivingTabs } from './gift-transactions-pages.js';
 
 function statusBanner(status) {
   return status ? `<p class="status${status.ok ? '' : ' status-error'}">${e(status.message)}</p>` : '';
@@ -10,13 +11,14 @@ function statusBanner(status) {
 
 export function renderOnlineFormSettingsPage({ result, status, canEdit }) {
   if (!result.ok) {
-    return `${statusBanner(status)}<p class="status status-error">The online giving settings could not be read from Connect: ${e(result.message)}</p>`;
+    return `${statusBanner(status)}${renderOnlineGivingTabs('form')}<p class="status status-error">The online giving settings could not be read from Connect: ${e(result.message)}</p>`;
   }
   const { fee_percent: fee, default_fee_percent: defaultFee, max_fee_percent: maxFee, funds } = result.data;
   const disabled = canEdit ? '' : ' disabled';
   const publicCount = funds.filter((f) => f.public_giving).length;
   const fundRows = funds.map((f) => `<li><label><input type="checkbox" name="fund" value="${e(f.id)}"${f.public_giving ? ' checked' : ''}${disabled}> ${e(f.name)}</label></li>`).join('');
   return `${statusBanner(status)}
+    ${renderOnlineGivingTabs('form')}
     <p class="lede">Settings for the online giving form on give.timothystl.org. Changes save in Connect and apply the next time a donor opens the form.</p>
     ${canEdit ? '' : '<p class="status">You can view these settings. Changing them requires Giving edit access in Connect.</p>'}
     <div class="grid">
