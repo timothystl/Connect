@@ -41,19 +41,25 @@ Local development has no Finance host, so there the original Connect pages still
 `/recurring` still goes to Connect's Giving → Recurring pane). The `/admin/api/giving/stax-mockup/*`
 data routes below are unchanged.
 
-### Sandbox gifts stay out of production
+### Test gifts are kept apart from real giving
 
-Production Connect sets `STAX_SANDBOX_REFUSED = "1"` (`wrangler.toml`; Andrew, 2026-09-28:
-"sandbox should be sequestered during testing"). With it, every `/api/mockup/stax-giving/*`
-route answers 410 with a message that testing runs on staging, and a sandbox webhook is
-acknowledged (200, `ignored: "sandbox"`) without recording anything. Staging does not set it, so
-Stax testing runs against Connect staging and its own database, and shows in Finance staging.
-To test from the website form, point it at the staging Connect API, and point the Stax sandbox
-webhook at staging's `/api/mockup/stax-giving/webhook`.
+While Connect has only Stax sandbox keys, the mockup runs in test mode (`staxTestMode`, on unless
+`STAX_LIVE = "1"`; Andrew, 2026-09-28: test on the live system, never count test gifts, and a
+button to remove them). In test mode:
 
-The eight test gifts (and 13 test schedules) recorded in production before this were removed on
-2026-09-28 by `.github/workflows/purge-stax-sandbox-gifts.yml` (`mode=PREVIEW` counts only;
-`mode=DELETE` records a Time Travel bookmark and a 30-day JSON artifact of every removed row first).
+- Every gift (checkout, the first gift of a recurring signup, and sandbox webhook charges) goes
+  to `giving_test_gifts`, never `giving_entries`: no batch, review-queue row, rollup, report,
+  statement or total can include it. Donor matching still runs, so a test shows who it would be
+  credited to. Refunds and voids of test gifts are acknowledged and ignored.
+- Recurring schedules are saved with `test = 1` and marked Test on Finance's Recurring tab.
+- A Stax customer is never remembered on a person.
+- Finance → Gift Entry → Online giving → **Test gifts** lists them. **Remove all test gifts**
+  (`clear_test_gifts` on giving-batch-write-v1, Giving edit) deletes them and the test schedules,
+  best-effort cancelling those schedules at Stax first so the sandbox stops billing them.
+
+Set `STAX_LIVE = "1"` only once real, non-sandbox keys are in place; gifts then record into the
+real ledger as before. The eight test gifts recorded in the ledger before test mode existed were
+removed on 2026-09-28 with `.github/workflows/purge-stax-sandbox-gifts.yml`.
 
 ## Where the public form actually lives
 

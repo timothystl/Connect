@@ -69,7 +69,7 @@ jobs:
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           git merge-base --is-ancestor "$EXPECTED_SHA" origin/main
-          if grep -rhoE "env\.STAX_[A-Z_]+" src connect-worker.js | grep -vE "STAX_SANDBOX_|STAX_GIVING_WEBHOOK_SECRET" | grep -q .; then
+          if grep -rhoE "env\.STAX_[A-Z_]+" src connect-worker.js | grep -vE "STAX_SANDBOX_|STAX_GIVING_WEBHOOK_SECRET|STAX_LIVE" | grep -q .; then
             echo "Connect reads a non-sandbox Stax key; its gifts may be real. Refusing."; exit 1
           fi
 

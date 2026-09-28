@@ -12,7 +12,7 @@ import { getRolePermissions, permissionsForRole, batchDepositStatusFromCounts, c
 import { correctGift, voidGift, restoreGift } from './giving-gift-corrections.js';
 import { respondWithGivingTransactionsV1 } from './api-giving-transactions-contract.js';
 import { DEPOSIT_WRITE_OPS, applyDepositWrite, readDepositDetail, readOfferingsSummary } from './giving-deposits.js';
-import { readOnlineGiving, linkOnlineGift, ignoreOnlineGift, cancelRecurringSchedule, updateRecurringSchedule } from './giving-online.js';
+import { readOnlineGiving, linkOnlineGift, ignoreOnlineGift, cancelRecurringSchedule, updateRecurringSchedule, clearTestGifts } from './giving-online.js';
 
 const MAX_SPLITS = 4;
 const METHODS = new Set(['cash', 'check', 'online', 'card', 'ach', 'stock', 'other']);
@@ -225,6 +225,11 @@ export async function applyGivingBatchWrite(db, body, email, env = {}) {
   if (op === 'ignore_online_gift') return ignoreOnlineGift(db, parseInt(body.queue_id, 10), email);
   if (op === 'cancel_recurring') return cancelRecurringSchedule(db, env, parseInt(body.schedule_id, 10));
   if (op === 'update_recurring') return updateRecurringSchedule(db, env, parseInt(body.schedule_id, 10), body);
+  if (op === 'clear_test_gifts') {
+    const result = await clearTestGifts(db, env);
+    await audit(db, 'giving_test_gifts_removed_via_finance', 0, email);
+    return result;
+  }
   if (op === 'close_batch' || op === 'reopen_batch') {
     const batchId = parseInt(body.batch_id, 10);
     const batch = await db.prepare('SELECT id FROM giving_batches WHERE id=?').bind(batchId).first();

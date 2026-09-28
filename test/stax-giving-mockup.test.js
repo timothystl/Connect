@@ -162,7 +162,7 @@ describe('Stax Giving mockup — recordStaxGift', () => {
 });
 
 describe('Stax Giving mockup — webhook', () => {
-  const env = () => ({ STAX_SANDBOX_API_KEY: 'sk_test', STAX_GIVING_WEBHOOK_SECRET: 'whsec_test' });
+  const env = () => ({ STAX_LIVE: '1', STAX_SANDBOX_API_KEY: 'sk_test', STAX_GIVING_WEBHOOK_SECRET: 'whsec_test' });
 
   it('rejects a webhook call without a valid secret', async () => {
     const db = makeDb();
@@ -425,7 +425,7 @@ describe('Stax Giving mockup — public checkout API (demo mode)', () => {
         payer_first_name: 'Jamie', payer_last_name: 'Vogel', payer_email: 'jamie@example.com',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.demo).toBe(true);
@@ -442,7 +442,7 @@ describe('Stax Giving mockup — public checkout API (demo mode)', () => {
       method: 'POST',
       body: JSON.stringify({ gifts: [{ fund_id: fundId, amount: '10.00' }], payer_first_name: 'X' }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
     expect(res.status).toBe(400);
   });
 
@@ -461,7 +461,7 @@ describe('Stax Giving mockup — public checkout API (demo mode)', () => {
         payer_first_name: 'Test', payer_last_name: 'Case', payer_email: 'notanemail',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe('Enter a valid email address.');
@@ -478,7 +478,7 @@ describe('Stax Giving mockup — public checkout API (demo mode)', () => {
         payer_first_name: 'Test', payer_last_name: 'Case', payer_email: 'test.case+gift@example.co.uk',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
     expect(res.status).toBe(200);
   });
 
@@ -494,7 +494,7 @@ describe('Stax Giving mockup — public checkout API (demo mode)', () => {
         payer_first_name: 'X', payer_last_name: 'Y', payer_email: 'x@example.com',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
     expect(res.status).toBe(400);
   });
 
@@ -511,7 +511,7 @@ describe('Stax Giving mockup — public checkout API (demo mode)', () => {
         payer_first_name: 'Multi', payer_last_name: 'Fund', payer_email: 'multi@example.com',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.entryIds.length).toBe(2);
@@ -540,7 +540,7 @@ describe('Stax Giving mockup — public checkout API (demo mode)', () => {
         payer_first_name: 'Fee', payer_last_name: 'Cover', payer_email: 'fee@example.com',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
     const body = await res.json();
     expect(res.status).toBe(200);
     // 10000 * 0.02 = 200 -> total 10200, per the module's documented flat estimated fee rate.
@@ -554,7 +554,7 @@ describe('Stax Giving mockup — /stax-customer (the AVS/address exemption)', ()
   // customer_id makes Stax.js skip address/AVS requirements entirely (confirmed against Stax's
   // own tokenize() field reference — see getOrCreateStaxCustomerId's comment), so this endpoint
   // is what the browser calls BEFORE tokenize() to get one.
-  const env = () => ({ STAX_SANDBOX_API_KEY: 'sk_test', STAX_SANDBOX_WEB_PAYMENTS_TOKEN: 'wpt_test' });
+  const env = () => ({ STAX_LIVE: '1', STAX_SANDBOX_API_KEY: 'sk_test', STAX_SANDBOX_WEB_PAYMENTS_TOKEN: 'wpt_test' });
 
   it('returns a null customerId in demo mode (no live Stax credentials configured)', async () => {
     const db = makeDb();
@@ -633,7 +633,7 @@ describe('Stax Giving mockup — /stax-customer (the AVS/address exemption)', ()
 });
 
 describe('Stax Giving mockup — checkout reuses a client-supplied stax_customer_id', () => {
-  const env = () => ({ STAX_SANDBOX_API_KEY: 'sk_test', STAX_SANDBOX_WEB_PAYMENTS_TOKEN: 'wpt_test' });
+  const env = () => ({ STAX_LIVE: '1', STAX_SANDBOX_API_KEY: 'sk_test', STAX_SANDBOX_WEB_PAYMENTS_TOKEN: 'wpt_test' });
 
   it('does not create a second Stax customer when the browser already sent one from /stax-customer', async () => {
     const db = makeDb();
@@ -665,7 +665,7 @@ describe('Stax Giving mockup — a "Gateway Unreachable" charge outcome is never
   // it may still succeed on its own. Andrew hit this live; the giving page's generic error
   // message would otherwise invite an immediate resubmit with the same card, risking a real
   // donor being charged twice for one gift.
-  const env = () => ({ STAX_SANDBOX_API_KEY: 'sk_test', STAX_SANDBOX_WEB_PAYMENTS_TOKEN: 'wpt_test' });
+  const env = () => ({ STAX_LIVE: '1', STAX_SANDBOX_API_KEY: 'sk_test', STAX_SANDBOX_WEB_PAYMENTS_TOKEN: 'wpt_test' });
 
   it('checkout flags pending:true and warns against an immediate retry, never generic decline text', async () => {
     const db = makeDb();
@@ -1007,7 +1007,7 @@ describe('Stax Giving mockup — /recurring charges the first gift immediately',
   // this, a recurring signup only ever created a schedule row and relied on a separate,
   // unverified Stax API call to bill FUTURE occurrences — a donor could see "Thank you" with no
   // money moved, no ledger entry, and no receipt if that call silently failed.
-  const env = () => ({ STAX_SANDBOX_API_KEY: 'sk_test', STAX_SANDBOX_WEB_PAYMENTS_TOKEN: 'wpt_test', BREVO_API_KEY: 'brevo_test' });
+  const env = () => ({ STAX_LIVE: '1', STAX_SANDBOX_API_KEY: 'sk_test', STAX_SANDBOX_WEB_PAYMENTS_TOKEN: 'wpt_test', BREVO_API_KEY: 'brevo_test' });
 
   it('demo mode creates a schedule row but records no gift and sends no receipt', async () => {
     const db = makeDb();
@@ -1141,7 +1141,7 @@ describe('Stax Giving mockup — /recurring charges the first gift immediately',
         payment_method_id: 'pm_1',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { STAX_SANDBOX_API_KEY: 'sk_test', STAX_SANDBOX_WEB_PAYMENTS_TOKEN: 'wpt_test', DB: db }, new URL(req.url), 'POST', 'recurring');
+    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', STAX_SANDBOX_API_KEY: 'sk_test', STAX_SANDBOX_WEB_PAYMENTS_TOKEN: 'wpt_test', DB: db }, new URL(req.url), 'POST', 'recurring');
     expect(res.status).toBe(200);
     const body = await res.json();
 
@@ -1261,7 +1261,7 @@ describe('Stax Giving mockup — refund/void a gift in-app (src/api-giving.js)',
   // Endpoint confirmed against docs.staxpayments.com/reference/void-or-refund-transaction:
   // POST /transaction/:id/void-or-refund — Stax itself decides void vs refund based on whether
   // the transaction has settled, so the route only needs to record whichever outcome comes back.
-  const env = () => ({ STAX_SANDBOX_API_KEY: 'sk_test', STAX_SANDBOX_WEB_PAYMENTS_TOKEN: 'wpt_test' });
+  const env = () => ({ STAX_LIVE: '1', STAX_SANDBOX_API_KEY: 'sk_test', STAX_SANDBOX_WEB_PAYMENTS_TOKEN: 'wpt_test' });
 
   async function makeStaxEntry(db, fundId, { amountCents = 2500 } = {}) {
     const result = await recordStaxGift(db, {
@@ -1376,7 +1376,7 @@ describe('Stax Giving mockup — edit a recurring schedule (src/api-giving.js)',
   // purely local (never sent to Stax at signup), so changing it never needs a Stax call; amount/
   // interval do when a live stax_schedule_id exists — and unlike cancel, a failed Stax call here
   // must NOT be swallowed, since the local row would otherwise claim an amount Stax doesn't have.
-  const env = () => ({ STAX_SANDBOX_API_KEY: 'sk_test', STAX_SANDBOX_WEB_PAYMENTS_TOKEN: 'wpt_test' });
+  const env = () => ({ STAX_LIVE: '1', STAX_SANDBOX_API_KEY: 'sk_test', STAX_SANDBOX_WEB_PAYMENTS_TOKEN: 'wpt_test' });
 
   async function makeSchedule(db, fundId, overrides = {}) {
     const r = await db.prepare(
@@ -1556,7 +1556,7 @@ describe('Stax Giving mockup — adjustable cover-the-fee percentage', () => {
         payer_first_name: 'Pat', payer_last_name: 'Fee', payer_email: 'pat-fee@example.com',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
     expect((await res.json()).totalCents).toBe(10290);
   });
 

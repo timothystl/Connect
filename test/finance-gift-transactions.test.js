@@ -31,6 +31,8 @@ const ONLINE = {
   unmatched: [{ queue_id: 4, payer_name: 'John Hagan', payer_email: 'jh@example.org', card_brand: 'visa', card_last4: '4242', entry_id: 90, amount: 28867, gift_date: '2026-09-27', fund_name: 'General Fund' }],
   connections: [{ person_id: 7, person_name: 'Walter Krause', envelope_number: '212', processor_accounts: 1, active_recurring: 1, methods: 'card', year_cents: 60000, last_online_gift: '2026-09-20' }],
   funds: [{ id: 1, name: 'General Fund' }],
+  test_gifts: [{ id: 1, gift_date: '2026-09-28', fund_name: 'General Fund', amount_cents: 2500, fee_cents: 0, method: 'card', payer_name: 'Pat Doe', card_brand: 'visa', card_last4: '1111', person_id: null, person_name: '', created_at: '2026-09-28' }],
+  test_totals: { gifts: 1, gift_cents: 2500, schedules: 2 },
 };
 
 function makeEnv({ detail = false } = {}) {
@@ -49,6 +51,7 @@ function makeEnv({ detail = false } = {}) {
         }
         if (url.pathname.endsWith('/giving-online-v1')) return new Response(JSON.stringify(ONLINE));
         if (url.pathname.endsWith('/giving-batch-workspace-v1')) return new Response(JSON.stringify({ people: [{ id: 9, first_name: 'John', last_name: 'Hagan', envelope_number: '' }] }));
+        if (url.pathname.endsWith('/giving-batch-write-v1') && body.op === 'clear_test_gifts') return new Response(JSON.stringify({ ok: true, removed_gifts: 1, removed_schedules: 2, stax_cancelled: 0 }));
         if (url.pathname.endsWith('/giving-batch-write-v1')) return new Response(JSON.stringify({ ok: true, entry_id: 55, changed: body.op === 'correct_gift' ? 1 : undefined }));
         return new Response('{}', { status: 404 });
       },
@@ -156,5 +159,24 @@ describe('Gift Entry › Transactions and Online giving (Finance)', () => {
     expect(html).toContain('visa ····4242');
     const res = await post(env, { op: 'link_online_gift', queue_id: '4', person_id: '9', return: 'online', back: 'view=associations' });
     expect(Object.fromEntries(new URL(res.headers.get('Location'), 'https://x').searchParams)).toMatchObject({ page: 'online', view: 'associations', status: 'ok' });
+  });
+
+  it('lists test gifts apart from real giving and removes them all in one step', async () => {
+    const { env, calls } = makeEnv();
+    let html = await (await get(env, '&page=online')).text();
+    expect(html).toContain('>Test gifts (1)</a>');
+    expect(html).not.toContain('Pat Doe');
+    html = await (await get(env, '&page=online&view=test')).text();
+    expect(html).toContain('<span class="chip is-on" aria-current="page">Test gifts (1)</span>');
+    expect(html).toContain('never count in totals, reports, statements');
+    expect(html).toContain('Pat Doe <small class="tone-bad">would not match</small>');
+    expect(html).toContain('2 test recurring gifts, marked Test on the Recurring tab');
+    expect(html).toContain('name="op" value="clear_test_gifts"');
+    expect(html).toContain('Remove all test gifts (1 gift, $25.00, 2 recurring)');
+    const res = await post(env, { op: 'clear_test_gifts', return: 'online', back: 'view=test' });
+    expect(calls.at(-1)).toMatchObject({ path: expect.stringContaining('/giving-batch-write-v1'), body: { op: 'clear_test_gifts' } });
+    expect(Object.fromEntries(new URL(res.headers.get('Location'), 'https://x').searchParams)).toMatchObject({
+      page: 'online', view: 'test', status: 'ok', msg: 'Removed 1 test gift and 2 test recurring gifts. Real giving was not touched.',
+    });
   });
 });

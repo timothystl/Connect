@@ -122,7 +122,8 @@ export async function readOnlineGiving(db, today = new Date().toISOString().slic
   const recurring = (await db.prepare(
     `SELECT s.id, s.fund_id, f.name AS fund_name, s.amount_cents, s.interval, s.status,
             s.stax_schedule_id != '' AS has_stax_schedule, s.payer_name, s.person_id,
-            TRIM(COALESCE(p.first_name,'')||' '||COALESCE(p.last_name,'')) AS person_name, s.created_at, s.stax_error
+            TRIM(COALESCE(p.first_name,'')||' '||COALESCE(p.last_name,'')) AS person_name, s.created_at, s.stax_error,
+            COALESCE(s.test,0) AS test
        FROM giving_stax_recurring_schedules s JOIN funds f ON f.id=s.fund_id LEFT JOIN people p ON p.id=s.person_id
       ORDER BY CASE s.status WHEN 'cancelled' THEN 1 ELSE 0 END, s.created_at DESC, s.id DESC LIMIT 200`
   ).all()).results || [];
@@ -138,7 +139,7 @@ export async function readOnlineGiving(db, today = new Date().toISOString().slic
     `SELECT p.id AS person_id, TRIM(COALESCE(p.first_name,'')||' '||COALESCE(p.last_name,'')) AS person_name,
             COALESCE(p.envelope_number,'') AS envelope_number,
             (SELECT COUNT(*) FROM giving_stax_customers c WHERE c.person_id=p.id) AS processor_accounts,
-            (SELECT COUNT(*) FROM giving_stax_recurring_schedules s WHERE s.person_id=p.id AND s.status != 'cancelled') AS active_recurring,
+            (SELECT COUNT(*) FROM giving_stax_recurring_schedules s WHERE s.person_id=p.id AND s.status != 'cancelled' AND COALESCE(s.test,0)=0) AS active_recurring,
             (SELECT GROUP_CONCAT(DISTINCT ge.method) FROM giving_entries ge JOIN giving_batches gb ON gb.id=ge.batch_id
               WHERE ge.person_id=p.id AND ${ONLINE} AND ${DAY} >= ?) AS methods,
             (SELECT COALESCE(SUM(ge.amount),0) FROM giving_entries ge JOIN giving_batches gb ON gb.id=ge.batch_id
@@ -152,6 +153,20 @@ export async function readOnlineGiving(db, today = new Date().toISOString().slic
       ORDER BY year_cents DESC, p.last_name LIMIT 500`
   ).bind(yearStart, yearStart, yearStart).all()).results || [];
   const funds = (await db.prepare('SELECT id, name FROM funds WHERE active=1 ORDER BY sort_order, name').all()).results || [];
+  // Test-mode gifts (src/stax-giving-mockup.js staxTestMode): listed here only, never in the totals
+  // above or anywhere else that counts giving.
+  const testGifts = (await db.prepare(
+    `SELECT t.id, t.contribution_date AS gift_date, f.name AS fund_name, t.amount_cents, t.fee_cents, t.method,
+            t.payer_name, t.card_brand, t.card_last4, t.person_id,
+            TRIM(COALESCE(p.first_name,'')||' '||COALESCE(p.last_name,'')) AS person_name, t.created_at
+       FROM giving_test_gifts t JOIN funds f ON f.id=t.fund_id LEFT JOIN people p ON p.id=t.person_id
+      ORDER BY t.id DESC LIMIT 200`
+  ).all()).results || [];
+  const testTotals = await db.prepare(
+    `SELECT (SELECT COUNT(*) FROM giving_test_gifts) AS gifts,
+            (SELECT COALESCE(SUM(amount_cents),0) FROM giving_test_gifts) AS gift_cents,
+            (SELECT COUNT(*) FROM giving_stax_recurring_schedules WHERE COALESCE(test,0)=1) AS schedules`
+  ).first();
   return {
     contract: 'connect.giving-online.v1',
     as_of: today,
@@ -161,5 +176,35 @@ export async function readOnlineGiving(db, today = new Date().toISOString().slic
       year_fee_cents: sums?.year_fee_cents || 0, year_givers: sums?.year_givers || 0,
     },
     payments, recurring, unmatched, connections, funds,
+    test_gifts: testGifts,
+    test_totals: { gifts: testTotals?.gifts || 0, gift_cents: testTotals?.gift_cents || 0, schedules: testTotals?.schedules || 0 },
   };
+}
+
+// Remove every test gift and test recurring schedule (Finance → Online giving → Test gifts). Each
+// active test schedule is cancelled at Stax first, best effort, so the sandbox stops billing it;
+// the local rows go either way. Customer links created for those test ids go too. Real gifts and
+// real schedules are never touched.
+export async function clearTestGifts(db, env) {
+  const schedules = (await db.prepare(
+    `SELECT id, status, stax_schedule_id, stax_customer_id FROM giving_stax_recurring_schedules WHERE COALESCE(test,0)=1`
+  ).all()).results || [];
+  let staxCancelled = 0;
+  for (const row of schedules) {
+    if (row.status === 'cancelled' || !row.stax_schedule_id || !staxMockupConfigured(env)) continue;
+    try {
+      const del = await staxRequest(env.STAX_SANDBOX_API_KEY, `/invoice/schedule/${encodeURIComponent(row.stax_schedule_id)}`, { method: 'DELETE' });
+      if (del.ok) staxCancelled++;
+    } catch { /* the local row is removed regardless */ }
+  }
+  const gifts = await db.prepare('SELECT COUNT(*) AS n FROM giving_test_gifts').first();
+  await db.batch([
+    db.prepare(
+      `DELETE FROM giving_stax_customers WHERE stax_customer_id != '' AND stax_customer_id IN (
+         SELECT stax_customer_id FROM giving_test_gifts UNION SELECT stax_customer_id FROM giving_stax_recurring_schedules WHERE COALESCE(test,0)=1)`
+    ),
+    db.prepare('DELETE FROM giving_test_gifts'),
+    db.prepare('DELETE FROM giving_stax_recurring_schedules WHERE COALESCE(test,0)=1'),
+  ]);
+  return { ok: true, removed_gifts: gifts?.n || 0, removed_schedules: schedules.length, stax_cancelled: staxCancelled };
 }
