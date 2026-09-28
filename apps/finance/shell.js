@@ -30,6 +30,9 @@ import { describeGivingBatchFailure, fetchGivingBatchLedger, fetchGivingBatchWor
 import { GIFT_TRANSACTIONS_STYLES, buildTransactionsCsv, normalizeTransactionParams, renderOnlineGivingPage, renderTransactionsPage, transactionsCsvFilename, transactionsCsvParams } from './gift-transactions-pages.js';
 import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, fetchGivingBoard, fetchGivingReport, postGivingBoardEmail, postGivingFollowupWrite, postGivingImpactWrite } from './connect-giving-analytics-client.js';
 import { GIVING_REPORTS_STYLES, givingReportParams, givingReportRequests, impactStatementsFromForm, renderGivingReportPage } from './giving-reports-pages.js';
+import { DONOR_LETTERS_STYLES, kindOfPage, renderDonorLettersPage } from './donor-letters-pages.js';
+import { fetchGivingLetters, lettersParams, listQuery } from './donor-letters-service.js';
+import { canSendLetters, handleDonorLettersPrint, handleDonorLettersWrite, handleStatementCsv } from './donor-letters-routes.js';
 import { COUNCIL_REPORT_STYLES, councilAnalysisRequests, councilParams, renderCouncilEmailHtml, renderCouncilReportPage } from './council-report-pages.js';
 import { fetchAccessRoles } from './connect-access-client.js';
 import { fetchFinanceClassification } from './finance-classification-client.js';
@@ -1401,6 +1404,21 @@ function renderSectionBody(ctx) {
       default: return renderTrendsPage({ result: totals, keep, mdoBooks: ctx.givingMdoBooks });
     }
   }
+  if (section.id === 'giving-letters') {
+    const namedHidden = councilPreview || (roleResult.ok && roleResult.role !== 'admin' && roleResult.permissions?.giving === 'anon');
+    const asResult = (r) => (r?.ok ? { ok: true, data: r.result } : { ok: false, message: describeGivingBatchFailure(r) });
+    const d = ctx.donorLetters || {};
+    const status = ctx.searchParams.get('status') === 'ok' ? { ok: true, message: ctx.searchParams.get('msg') || 'Done.' }
+      : ctx.searchParams.get('status') === 'error' ? { ok: false, message: ctx.searchParams.get('message') || 'The request did not complete.' } : null;
+    return renderDonorLettersPage(page.id, {
+      namedHidden, status, canEdit: canSendLetters(roleResult, councilPreview),
+      params: lettersParams((k) => ctx.searchParams.get(k) || '', isoDay(new Date())),
+      result: d.list ? asResult(d.list) : { ok: false, message: 'not requested' },
+      funds: d.funds?.ok ? d.funds.result.funds : [],
+      statement: d.statement ? asResult(d.statement) : null, config: d.config ? asResult(d.config) : null,
+      search: d.search ? asResult(d.search) : null, key: d.key || '', q: d.q || '',
+    });
+  }
   if (section.id === 'giving-reports') {
     const namedHidden = councilPreview || (roleResult.ok && roleResult.role !== 'admin' && roleResult.permissions?.giving === 'anon');
     const results = (ctx.givingReports || []).map((r) => (r?.ok ? { ok: true, data: r.result } : { ok: false, message: describeGivingBatchFailure(r), data: null }));
@@ -1777,7 +1795,7 @@ function renderShell(ctx) {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Timothy Finance${production ? '' : ' — Staging'}</title>
   <link rel="icon" href="/assets/finance-mark.png"><link rel="apple-touch-icon" href="/assets/finance-icon.png">
-  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${COUNCIL_REPORT_STYLES}${GIVING_REPORTS_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}</style>
+  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${COUNCIL_REPORT_STYLES}${GIVING_REPORTS_STYLES}${DONOR_LETTERS_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}</style>
 </head>
 <body${councilPreview ? ' class="council-preview"' : ''}>
   <header class="app-header">
@@ -2029,6 +2047,9 @@ export default {
     }
 
     if (route.id === 'giving-impact-write-v1') return handleGivingImpactWrite(request, env, url);
+    if (route.id === 'giving-letters-write-v1') return handleDonorLettersWrite(request, env, url);
+    if (route.id === 'giving-letters-print') return handleDonorLettersPrint(request, env, url);
+    if (route.id === 'giving-statement-csv') return handleStatementCsv(request, env, url);
     if (route.id === 'giving-board-email-v1') {
       return handleGivingBoardEmail(request, env, url);
     }
@@ -4436,6 +4457,29 @@ export default {
         const givingReportsLoad = reportsPageId && !(reportsNamedHidden && ['insights', 'giver-trends', 'plateaus', 'bands'].includes(reportsPageId))
           ? Promise.all(givingReportRequests(reportsPageId, givingReportParams(url.searchParams, isoDay(new Date())))
             .map(([report, query]) => fetchGivingReport(env, accessJwt, report, query))) : null;
+        // Giving › Donor letters: the page's recipient list (and, for one statement, the statement,
+        // the church's letter settings, or a name search); never asked for in council preview.
+        const lettersPageId = section.id === 'giving-letters' ? resolveFinancePage(section, pageId).id : null;
+        const donorLettersLoad = lettersPageId && !reportsNamedHidden ? (async () => {
+          const lp = lettersParams((k) => url.searchParams.get(k) || '', isoDay(new Date()));
+          if (lettersPageId === 'statement') {
+            const key = /^(p|h)\d{1,12}$/.test(url.searchParams.get('key') || '') ? url.searchParams.get('key') : '';
+            const q = String(url.searchParams.get('q') || '').trim().slice(0, 60);
+            const [statement, config, search] = await Promise.all([
+              key ? fetchGivingLetters(env, accessJwt, 'statements', { year: lp.year, keys: key, through: lp.through }) : null,
+              key ? fetchGivingLetters(env, accessJwt, 'config') : null,
+              q.length >= 2 ? fetchGivingLetters(env, accessJwt, 'status', { year: lp.year, letter_type: 'year_end', channel: 'email', scope: 'both' }) : null,
+            ]);
+            return { statement, config, search, key, q };
+          }
+          if (lettersPageId === 'letters' && lp.type === 'memorial') return {};
+          const [op, query] = listQuery(kindOfPage(lettersPageId), lp);
+          const [list, funds] = await Promise.all([
+            fetchGivingLetters(env, accessJwt, op, query),
+            lettersPageId === 'nudge-letters' ? fetchGivingReport(env, accessJwt, 'funds', {}) : null,
+          ]);
+          return { list, funds };
+        })() : null;
         const facilitiesPageId = section.id === 'facilities' ? resolveFinancePage(section, pageId).id : null;
         // Gym rental income is read live from Website Admin with the caller's own Access identity.
         let gymIncome = facilitiesPageId === 'gym-rentals'
@@ -4459,6 +4503,7 @@ export default {
         const shellResponse = response((printMode ? renderPrintPage : renderShell)({
           printFragment: printMode && url.searchParams.get('fragment') === '1',
           givingReports: givingReportsLoad ? await givingReportsLoad : null,
+          donorLetters: donorLettersLoad ? await donorLettersLoad : null,
           councilAnalysis: councilAnalysisLoad ? await councilAnalysisLoad : null,
           councilBudgetDraft: councilBudgetDraftLoad ? await councilBudgetDraftLoad : null,
           healthView: url.searchParams.get('view'), healthAppeal: url.searchParams.get('appeal'), healthFlow: url.searchParams.get('flow'), financeHealth, facilities, hr, givingBatch, givingAnalytics, givingAnalyticsPeople, givingMdoBooks, gymIncome, accessRoles, budgetBuilder, boardLayout, planningBasis, planningScenarios, planningRunway, propertyBooks, searchParams: url.searchParams,

@@ -429,8 +429,12 @@ if (seg === 'giving/letters/status' && method === 'GET') {
        JOIN giving_entries ge ON ge.person_id=p.id
        JOIN giving_batches gb ON ge.batch_id=gb.id
        WHERE p.active=1
+         AND NOT (ge.amount = 0 AND ge.original_amount_cents > 0)
          AND substr(COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date),1,4)=?
-       GROUP BY p.id ORDER BY p.last_name, p.first_name`
+       GROUP BY p.id
+       -- A giver whose gifts were all voided or refunded has nothing to acknowledge.
+       HAVING SUM(ge.amount) > 0
+       ORDER BY p.last_name, p.first_name`
     ).bind(String(year)).all()).results || [];
   }
   let households = [];

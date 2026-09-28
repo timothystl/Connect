@@ -20,6 +20,7 @@ import { handleGivingBatchContracts } from './api-giving-batch-contracts.js';
 import { handleGivingOnlineContracts } from './api-giving-online-contracts.js';
 import { handleGivingAnalyticsContracts } from './api-giving-analytics-contracts.js';
 import { handleGivingReportsContracts } from './api-giving-reports-contract.js';
+import { handleGivingLettersContracts } from './api-giving-letters-contract.js';
 import { respondWithFinancePlanningBasisV1 } from './api-planning-contracts.js';
 import { respondWithFinanceAccessRolesV1 } from './api-access-contracts.js';
 import { respondWithFinanceBudgetBuilderV1 } from './api-budget-builder-contracts.js';
@@ -79,6 +80,12 @@ export async function handleContractsServiceApi(req, env, path) {
   if (path === '/api/contracts/giving-reports-v1' || path === '/api/contracts/giving-impact-write-v1') {
     const reportsResponse = await handleGivingReportsContracts(req, env, path);
     if (reportsResponse) return reportsResponse;
+  }
+
+  // Donor letters run from Finance: recipients, statements and settings, and delivery.
+  if (path.startsWith('/api/contracts/giving-letters-')) {
+    const lettersResponse = await handleGivingLettersContracts(req, env, path);
+    if (lettersResponse) return lettersResponse;
   }
 
   if (path === '/api/contracts/connect-giving-summary-v1' && req.method === 'GET') {

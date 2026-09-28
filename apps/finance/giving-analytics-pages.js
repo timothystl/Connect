@@ -614,13 +614,13 @@ export function renderStatementsPage({ result, councilPreview }) {
   if (!result.ok) return unavailable('Giving statements', result.message);
   const { statements, year } = result.data;
   const rows = statements.runs.map((r) => `<tr><td>${e(shortDate(r.last_sent))}, ${e(String(r.last_sent).slice(0, 4))}</td><td>${e(LETTER_LABELS[r.letter_type] || r.letter_type)} · ${r.year}</td><td>${r.email + r.print}</td><td>Email ${r.email} · print ${r.print}</td></tr>`).join('');
-  return `<p class="lede">Statements list each household’s gifts by fund for the period, with the IRS acknowledgement language. They are prepared and sent from Connect’s Giving tab, which keeps track of who has received one.</p>
+  return `<p class="lede">Statements list each household’s gifts by fund for the period, with the IRS acknowledgement language. They are prepared, emailed and printed here in Finance under Donor letters, which keeps track of who has received one.</p>
     ${kpis([
       [`Households giving in ${year}`, String(statements.giving_households_ytd), 'Each will receive a year-end statement'],
       ['Last statement run', statements.runs[0] ? e(shortDate(statements.runs[0].last_sent)) : '—', statements.runs[0] ? e(`${LETTER_LABELS[statements.runs[0].letter_type] || ''} · ${statements.runs[0].year}`) : 'None recorded yet'],
     ])}
     <div class="panel panel-spaced ga-cta"><div><h2>Prepare statements</h2><p class="muted-line">Choose the year, email the households with an address, and print the rest. Emailing a statement sends a real message.</p></div>
-      <a class="ga-link-button" href="${CONNECT_GIVING}?pane=letters#giving">Open statements in Connect</a></div>
+      <a class="ga-link-button" href="/?section=giving-letters&amp;page=letters&amp;type=year_end&amp;year=${e(String(year))}">Open donor letters</a></div>
     <div class="panel panel-spaced list-panel"><h2>Recent runs</h2>${rows ? `<div class="table-scroll"><table class="pm-table"><thead><tr><th>Last sent</th><th>Statement</th><th>Households</th><th>Delivery</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty-note">No statements have been recorded as sent yet.</div>'}</div>`;
 }
 
@@ -654,7 +654,7 @@ export function renderNudgeQueue({ result, totals, params, canEdit, kindHref }) 
       ? `<form method="POST" action="/api/v1/giving-followup-write" class="inline-form">${hidden(n)}<input type="hidden" name="op" value="assign"><select name="assigned_to" aria-label="Who will follow up">${staffOptions(n.assigned_to)}</select><button type="submit" class="button-outline">Assign</button></form>
          <form method="POST" action="/api/v1/giving-followup-write" class="inline-form">${hidden(n)}<input type="hidden" name="op" value="done"><button type="submit" class="button-outline">Mark done</button></form>`
       : (assigned ? `<span class="muted">With ${e(assigned)}</span>` : '');
-    const thank = current.key === 'first_time' ? `<a class="ga-link-button" href="${CONNECT_GIVING}?pane=receipts#giving">Thank in Connect</a>` : '';
+    const thank = current.key === 'first_time' ? `<a class="ga-link-button" href="/?section=giving-letters&amp;page=receipts">Send thank-you letters</a>` : '';
     return `<li><div><b>${e(n.name)}</b><small>${e(n.detail)}</small></div><div class="ga-amount">${money(n.cents)}</div><div class="right ga-actions">${thank}${actions}</div></li>`;
   }).join('');
   return `${kpis([

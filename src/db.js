@@ -1038,6 +1038,35 @@ const GIVING_CONFIG_KEYS = [
 const IMPORT_CONFIG_KEYS = [
   'breeze_statuses_seen',
 ];
+// Donor letters: drop the legacy UNIQUE(person_id, year, letter_type) from giving_letter_sends
+// (see migrations/0060_giving_letter_sends_channels.sql) so an email and a printed copy, or two
+// households without a recipient, can each be recorded. One atomic batch, only while the table
+// still carries that constraint; every row is kept.
+export async function rebuildGivingLetterSendsIfLegacy(db) {
+  const row = await db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='giving_letter_sends'`).first().catch(() => null);
+  if (!row || !/UNIQUE\s*\(\s*person_id\s*,\s*year\s*,\s*letter_type\s*\)/i.test(row.sql || '')) return false;
+  await db.batch([
+    `DROP TABLE IF EXISTS giving_letter_sends_v2`,
+    `CREATE TABLE giving_letter_sends_v2 (
+       id            INTEGER PRIMARY KEY AUTOINCREMENT,
+       person_id     INTEGER NOT NULL,
+       year          INTEGER NOT NULL,
+       letter_type   TEXT    NOT NULL,
+       sent_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+       household_id  INTEGER,
+       channel       TEXT    NOT NULL DEFAULT 'email',
+       recipient_key TEXT
+     )`,
+    `INSERT INTO giving_letter_sends_v2 (id, person_id, year, letter_type, sent_at, household_id, channel, recipient_key)
+       SELECT id, person_id, year, letter_type, sent_at, household_id, channel, recipient_key FROM giving_letter_sends`,
+    `DROP TABLE giving_letter_sends`,
+    `ALTER TABLE giving_letter_sends_v2 RENAME TO giving_letter_sends`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_gls_recipient ON giving_letter_sends(recipient_key, year, letter_type, channel) WHERE recipient_key IS NOT NULL`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_gls_legacy ON giving_letter_sends(person_id, year, letter_type) WHERE recipient_key IS NULL`,
+  ].map((sql) => db.prepare(sql)));
+  return true;
+}
+
 export async function migrateNonFinanceSettingsFromConfig(db) {
   const marker = await db.prepare("SELECT value FROM chms_config WHERE key='non_finance_settings_migrated_v1'").first();
   if (marker) return;
@@ -1483,7 +1512,7 @@ function _schemaFingerprint() {
     seedStudentTuitionHistory, seedTuitionAid, seedTuitionYearRates,
     // Not a seed, but it runs from _doInitDb and its body decides what gets removed — so an
     // edit to it has to re-trigger the full init the same way a seed edit does.
-    scrubServerManagedSchedulerSecrets,
+    scrubServerManagedSchedulerSecrets, rebuildGivingLetterSendsIfLegacy,
   ].map((f) => f.toString());
   parts.push(DB_INIT.join('\n'));
   const src = parts.join('\n');
@@ -2438,6 +2467,7 @@ async function _doInitDb(db) {
   await seedIvanhoePropertyJuly2026(db);
   await seedIvanhoePropertyAugust2026(db);
   await scrubServerManagedSchedulerSecrets(db);
+  await rebuildGivingLetterSendsIfLegacy(db);
 
   // Recorded LAST, and only on success. If anything above threw, initDb's own catch clears
   // its memoized promise so the next request retries — and because no fingerprint was

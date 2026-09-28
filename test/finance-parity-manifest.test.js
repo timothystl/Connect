@@ -8,6 +8,7 @@ describe('Finance interface parity manifest', () => {
       { id: 'giving', label: 'Giving Entry', permission: 'finance' },
       { id: 'giving-analytics', label: 'Giving', permission: 'finance' },
       { id: 'giving-reports', label: 'Giving reports', permission: 'finance' },
+      { id: 'giving-letters', label: 'Donor letters', permission: 'finance' },
       { id: 'tuition', label: 'Tuition Aid', permission: 'tuitionaid' },
       { id: 'charts', label: 'Charts', permission: 'finance' },
       { id: 'church', label: 'Church Report', permission: 'finance' },
@@ -36,7 +37,7 @@ describe('Finance interface parity manifest', () => {
     expect(groupFinanceSections().map(({ group, sections }) => ({ group, ids: sections.map((s) => s.id) }))).toEqual([
       { group: 'Financial Health', ids: ['health'] },
       { group: 'Gift Entry', ids: ['giving'] },
-      { group: 'Giving', ids: ['giving-analytics', 'giving-reports'] },
+      { group: 'Giving', ids: ['giving-analytics', 'giving-reports', 'giving-letters'] },
       { group: 'Tuition Aid', ids: ['tuition'] },
       { group: 'Charts', ids: ['charts'] },
       { group: 'Church', ids: ['church'] },

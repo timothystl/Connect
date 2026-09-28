@@ -73,7 +73,7 @@ export function roleCanAccessSection(role, section, permissions = {}) {
   if (!['finance', 'staff', 'council'].includes(role)) return false;
   if (section.permission === 'admin') return false;
   if (section.permission === 'compensation' && role !== 'council') return false;
-  const item = ['giving', 'giving-analytics', 'giving-reports'].includes(section.id) ? 'giving' : section.permission;
+  const item = ['giving', 'giving-analytics', 'giving-reports', 'giving-letters'].includes(section.id) ? 'giving' : section.permission;
   const canRead = key => (key === 'giving' ? ['anon', 'view', 'edit'] : ['view', 'edit']).includes(permissions[key]);
   if (!canRead(item)) return false;
   // Gift Entry names donors on every page, so totals-only Giving access (council) does not open it.

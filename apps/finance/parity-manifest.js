@@ -67,6 +67,18 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     ],
   },
   {
+    // Donor letters sent from Finance (Andrew, Sept 28 2026): statements and letters, thank-you
+    // receipts, nudge letters and one statement at a time. Records and delivery through Connect.
+    id: 'giving-letters', label: 'Donor letters', group: 'Giving', permission: 'finance',
+    capabilities: ['year-end, mid-year and quarterly statements', 'thank-you, appeal and memorial letters', 'email or print with sent tracking', 'thank-you receipts queue', 'nudge letters', 'one statement with CSV'],
+    pages: [
+      { id: 'letters', label: 'Statements and letters', status: 'live' },
+      { id: 'receipts', label: 'Thank-you receipts', status: 'live' },
+      { id: 'nudge-letters', label: 'Nudge letters', status: 'live' },
+      { id: 'statement', label: 'One statement', status: 'live' },
+    ],
+  },
+  {
     // Moved from Connect (Andrew, Sept 28 2026). Connect's own planner, served inside Finance.
     id: 'tuition', label: 'Tuition Aid', group: 'Tuition Aid', permission: 'tuitionaid',
     capabilities: ['K-8 aid planner', 'Lutheran High School aid', 'aid budget and policy', 'year navigator and history', 'pipeline'],
