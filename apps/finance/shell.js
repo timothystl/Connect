@@ -45,7 +45,7 @@ import { readQuickbooksSnapshot } from './quickbooks-snapshot-service.js';
 import { fetchDaycareChurchBudgetPreview, fetchFinanceBoardPacket, fetchFinanceImportStatus } from './finance-data-imports-client.js';
 import { ACCESS_STYLES, renderAccessPage } from './access-pages.js';
 import {
-  GIVING_ANALYTICS_STYLES, renderConcentrationPage, renderPledgesPage, renderStatementsPage, renderTrendsPage,
+  GIVING_ANALYTICS_STYLES, givingPaceParams, renderConcentrationPage, renderGivingPacePage, renderPledgesPage, renderStatementsPage, renderTrendsPage,
   renderWhatIfPage, renderYearOverYearPage,
 } from './giving-analytics-pages.js';
 import { describeFormStatus, handleFinanceFormWrite, isSameOriginPost } from './form-post.js';
@@ -1342,6 +1342,12 @@ function renderSectionBody(ctx) {
       annual: asResult(ctx.givingAnalytics),
     });
   }
+  if (section.id === 'charts' && page.id === 'giving-pace') {
+    return renderGivingPacePage({
+      result: ctx.givingAnalytics?.ok ? { ok: true, data: ctx.givingAnalytics.result } : { ok: false, message: describeGivingBatchFailure(ctx.givingAnalytics) },
+      pace: givingPaceParams(ctx.searchParams, isoDay(new Date())), keep: councilPreview ? { council: '1' } : {},
+    });
+  }
   if (section.id === 'charts' && page.id === 'concentration') {
     return renderConcentrationPage({ result: ctx.givingAnalytics?.ok ? { ok: true, data: ctx.givingAnalytics.result } : { ok: false, message: describeGivingBatchFailure(ctx.givingAnalytics) }, keep: councilPreview ? { council: '1' } : {} });
   }
@@ -1349,7 +1355,7 @@ function renderSectionBody(ctx) {
     return renderAccessPage({ result: ctx.accessRoles?.ok ? { ok: true, data: ctx.accessRoles.result } : { ok: false, message: describeGivingBatchFailure(ctx.accessRoles) } });
   }
   if (section.id === 'charts') {
-    return renderChartsPage(page.id, { churchReport, churchReportLive, cashRunway, propertyReserves, propertyReservesLive, giving, givingSource, canManageCashPolicy, cashPolicyStatus, cashPolicyMessage });
+    return renderChartsPage(page.id, { churchReport, churchReportLive, cashRunway, propertyReserves, propertyReservesLive, canManageCashPolicy, cashPolicyStatus, cashPolicyMessage });
   }
   if (section.id === 'church') {
     // Same admin-only gate as the legacy in-Connect Church Report's own actual-override route --
@@ -4053,7 +4059,7 @@ export default {
           ? url.searchParams.get('status') : null;
         const cashPolicyMessage = cashPolicyStatus === 'error'
           ? describeCashPolicyEntryError(url.searchParams.get('reason'), url.searchParams.get('message')) : null;
-        const givingSummary = ['health', 'giving', 'charts', 'packet'].includes(section.id)
+        const givingSummary = ['health', 'giving', 'packet'].includes(section.id)
           ? resolveGivingSummary(env) : { giving: SYNTHETIC_GIVING, source: 'synthetic-fallback' };
         let giving = after(givingSummary, (result) => result.giving);
         let givingSource = after(givingSummary, (result) => result.source);
@@ -4263,8 +4269,9 @@ export default {
         // givers) like the old Giving nudges page did, and its Annual Giving bands read the totals.
         const reportsNamedHiddenEarly = councilPreview || (roleResult.ok && roleResult.role !== 'admin' && roleResult.permissions?.giving === 'anon');
         const reportsPage = section.id === 'giving-reports' ? resolveFinancePage(section, pageId).id : null;
+        const chartsPage = section.id === 'charts' ? resolveFinancePage(section, pageId).id : null;
         const analyticsPageId = section.id === 'giving-analytics' ? resolveFinancePage(section, pageId).id
-          : section.id === 'charts' && resolveFinancePage(section, pageId).id === 'concentration' ? 'concentration'
+          : ['concentration', 'giving-pace'].includes(chartsPage) ? chartsPage
             : reportsPage === 'plateaus' && !reportsNamedHiddenEarly ? 'nudges'
               : reportsPage === 'bands' && givingReportParams(url.searchParams, isoDay(new Date())).bandsView === 'annual' ? 'household-bands' : null;
         let accessRoles = section.id === 'accounts' && resolveFinancePage(section, pageId).id === 'access'
@@ -4272,6 +4279,11 @@ export default {
         const givingAnalyticsLoads = analyticsPageId ? Promise.all([
           analyticsPageId === 'statements' ? null
             : analyticsPageId === 'council' ? fetchGivingBoard(env, accessJwt, { period: councilParams(url.searchParams, isoDay(new Date())).period })
+              // Charts › Giving vs. pace: one period for one fund scope (totals only).
+              : analyticsPageId === 'giving-pace' ? (() => {
+                const pace = givingPaceParams(url.searchParams, isoDay(new Date()));
+                return fetchGivingAnalytics(env, accessJwt, { fund: pace.fund, from: pace.from, to: pace.to });
+              })()
               : fetchGivingAnalytics(env, accessJwt, { fund: (analyticsPageId === 'household-bands' ? givingReportParams(url.searchParams, isoDay(new Date())).scopeFund : url.searchParams.get('fund')) || 'general' }),
           ['statements', 'nudges'].includes(analyticsPageId) && !councilPreview
             && !(roleResult.ok && roleResult.role !== 'admin' && roleResult.permissions?.giving === 'anon')

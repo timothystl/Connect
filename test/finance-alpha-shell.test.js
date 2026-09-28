@@ -1262,11 +1262,11 @@ describe('Finance alpha staging shell', () => {
       expect(cashReserveHtml).toContain('synthetic fixture');
       expect(cashReserveHtml).not.toContain('$35,000');
 
+      // Giving vs. pace reads Connect's giving-analytics-v1 period (test/finance-giving-pace.test.js);
+      // it never falls back to the church report's actual income or a synthetic figure.
       const pacingHtml = await (await worker.fetch(chartsRequest('giving-pace'), liveEnv)).text();
-      expect(pacingHtml).toContain('Naive monthly pace');
-      expect(pacingHtml).toContain('$20,000');
-      expect(pacingHtml).toContain(`1/12 of FY${liveFiscalYear} church income budget · live from Connect`);
-      expect(pacingHtml).not.toContain('$10,000');
+      expect(pacingHtml).toContain('Giving vs. pace could not be read from Connect');
+      expect(pacingHtml).not.toContain('Naive monthly pace');
     });
 
     it('renders each Charts page from the synthetic fixtures alone when no CONNECT_SERVICE is configured (unchanged regression baseline)', async () => {
@@ -1282,8 +1282,8 @@ describe('Finance alpha staging shell', () => {
       expect(cashReserveHtml).not.toContain('live from Connect');
 
       const pacingHtml = await (await worker.fetch(new Request('https://finance.test/?section=charts&page=giving-pace'), env)).text();
-      expect(pacingHtml).toContain('$10,000');
-      expect(pacingHtml).toContain('church income budget · synthetic fixture');
+      expect(pacingHtml).toContain('Giving vs. pace could not be read from Connect');
+      expect(pacingHtml).toContain('<select name="period">');
     });
 
     it('labels each KPI by its own independent source when only one live resolver answers (partial availability)', async () => {

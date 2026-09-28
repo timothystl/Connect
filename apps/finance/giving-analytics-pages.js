@@ -323,6 +323,122 @@ export function renderConcentrationPage({ result, keep = {} }) {
     </tbody></table></div></div>`;
 }
 
+// ── Giving vs. pace (Charts) ──────────────────────────────────────────────────────────────────
+// One period of giving for one fund scope, against the same days last year and against the
+// matching income budget spread over the period (Connect's giving-analytics-v1 period read).
+// Totals only. The period is picked here and sent to Connect as plain from/to dates.
+
+const PACE_PERIODS = [['this-month', 'This month'], ['last-month', 'Last month'], ['qtd', 'Quarter to date'], ['ytd', 'Year to date'], ['custom', 'Custom dates']];
+const PACE_MAX_DAYS = 400; // Connect's own limit (PERIOD_MAX_DAYS)
+
+function isoDay(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) ? value : null;
+}
+
+function lastDayOf(year, month) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function longDate(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${MONTHS[m - 1]} ${d}, ${y}`;
+}
+
+// ?period= and, for Custom, ?from=&to=; ?fund= as on the other Giving pages (General Fund unless
+// told otherwise). Anything unusable falls back to year to date and says why.
+export function givingPaceParams(params, today) {
+  const y = Number(today.slice(0, 4));
+  const m = Number(today.slice(5, 7));
+  const pad = (n) => String(n).padStart(2, '0');
+  const requested = params.get('period');
+  let period = PACE_PERIODS.some(([key]) => key === requested) ? requested : 'ytd';
+  let from; let to; let error = '';
+  if (period === 'custom') {
+    const a = isoDay(params.get('from'));
+    const b = isoDay(params.get('to'));
+    const days = a && b ? Math.abs(Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 864e5 + 1 : 0;
+    if (a && b && days <= PACE_MAX_DAYS) [from, to] = a <= b ? [a, b] : [b, a];
+    else {
+      error = a && b ? `Choose a range of ${PACE_MAX_DAYS} days or fewer; showing year to date.` : 'Choose both a From and a To date; showing year to date.';
+      period = 'ytd';
+    }
+  }
+  if (period === 'this-month') { from = `${y}-${pad(m)}-01`; to = today; }
+  if (period === 'last-month') {
+    const [ly, lm] = m === 1 ? [y - 1, 12] : [y, m - 1];
+    from = `${ly}-${pad(lm)}-01`; to = `${ly}-${pad(lm)}-${pad(lastDayOf(ly, lm))}`;
+  }
+  if (period === 'qtd') { from = `${y}-${pad(Math.floor((m - 1) / 3) * 3 + 1)}-01`; to = today; }
+  if (period === 'ytd') { from = `${y}-01-01`; to = today; }
+  const fund = /^[a-z0-9]{1,20}$/.test(params.get('fund') || '') ? params.get('fund') : 'general';
+  const label = {
+    'this-month': `${MONTH_NAMES[m - 1]} ${y} to date`,
+    'last-month': `${MONTH_NAMES[Number(from.slice(5, 7)) - 1]} ${from.slice(0, 4)}`,
+    qtd: `Q${Math.floor((m - 1) / 3) + 1} ${y} to date`,
+    ytd: `${y} to date`,
+    custom: `${longDate(from)} – ${longDate(to)}`,
+  }[period];
+  return { period, from, to, fund, label, error };
+}
+
+function paceMeter(label, cents, max, note, cls = '') {
+  return `<li><span>${e(label)}</span><span class="ga-meter${cls ? ` ${cls}` : ''}"><span style="width:${Math.max(0, Math.min(100, max ? cents / max * 100 : 0)).toFixed(1)}%"></span></span><b>${money(cents)}</b><small>${note}</small></li>`;
+}
+
+export function renderGivingPacePage({ result, pace, keep = {} }) {
+  const hiddenKeep = Object.entries(keep).map(([k, v]) => `<input type="hidden" name="${e(k)}" value="${e(v)}">`).join('');
+  const form = `<form method="GET" action="/" class="panel ga-pace-form">
+      <input type="hidden" name="section" value="charts"><input type="hidden" name="page" value="giving-pace">${pace.fund === 'general' ? '' : `<input type="hidden" name="fund" value="${e(pace.fund)}">`}${hiddenKeep}
+      <label class="field"><span>Period</span><select name="period">${PACE_PERIODS.map(([key, label]) => `<option value="${key}"${key === pace.period ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
+      <label class="field"><span>From <small>(custom)</small></span><input type="date" name="from" value="${e(pace.from)}"></label>
+      <label class="field"><span>To <small>(custom)</small></span><input type="date" name="to" value="${e(pace.to)}"></label>
+      <div class="form-actions"><button type="submit">Show</button></div>
+      <p class="muted-line">The dates are used when the period is Custom dates; the other periods set them for you.</p>
+    </form>`;
+  const errorNote = pace.error ? `<p class="status status-error">${e(pace.error)}</p>` : '';
+  if (!result.ok) return `${errorNote}${form}${unavailable('Giving vs. pace', result.message)}`;
+  const a = result.data;
+  const p = a.period;
+  if (!p) return `${errorNote}${form}${unavailable('Giving vs. pace', 'Connect did not answer for a period (it may need updating).')}`;
+  const hidden = { ...keep, ...(pace.period === 'ytd' ? {} : { period: pace.period }), ...(pace.period === 'custom' ? { from: pace.from, to: pace.to } : {}) };
+  const scope = fundKey(a) === 'all' ? 'all funds' : scopePhrase(a);
+  const b = p.budget;
+  const vsLast = changeNote(p.cents, p.prior_cents, 'the same days last year');
+  const paceShare = b && b.cents ? p.cents / b.cents : null;
+  const paceDiff = b ? p.cents - b.cents : null;
+  const cards = kpis([
+    [`Giving, ${pace.label}`, money(p.cents), `${p.gifts.toLocaleString('en-US')} gift${p.gifts === 1 ? '' : 's'} · ${e(shortDate(p.from))} – ${e(shortDate(p.to))}`],
+    ['Same days last year', money(p.prior_cents), vsLast.text, vsLast.tone],
+    b ? ['Budgeted pace', money(b.cents), `${paceShare === null ? '—' : pct(paceShare)} of pace · ${paceDiff >= 0 ? 'ahead by' : 'behind by'} ${money(Math.abs(paceDiff))}`, paceDiff >= 0 ? 'good' : 'warn']
+      : ['Budgeted pace', '—', 'No budget line matches this scope', ''],
+  ]);
+  const max = Math.max(p.cents, p.prior_cents, b?.cents || 0, 1);
+  const bars = `<ul class="ga-meters ga-pace">
+      ${paceMeter(`${pace.label}`, p.cents, max, `${e(shortDate(p.from))} – ${e(shortDate(p.to))}, ${p.to.slice(0, 4)}`)}
+      ${paceMeter('Same days last year', p.prior_cents, max, `${e(shortDate(p.prior_from))} – ${e(shortDate(p.prior_to))}, ${p.prior_to.slice(0, 4)}`, 'is-prior')}
+      ${b ? paceMeter('Budgeted pace', b.cents, max, 'Budget spread evenly by day', 'is-budget') : ''}
+    </ul>`;
+  const budgetWhat = !b ? '' : b.basis === 'church_income'
+    ? 'the church’s whole Income budget (the Church Report’s total, which also includes income Giving does not record, such as rentals and interest)'
+    : b.basis === 'general_fund'
+      ? `the General Fund’s budget line${b.accounts.length === 1 ? '' : 's'} on the church ledger (${e(b.accounts.join(', ') || `accounts starting ${b.codes.join(', ')}`)})`
+      : `the Income budget line${b.accounts.length === 1 ? '' : 's'} sharing an account code with these funds (${e(b.accounts.join(', '))})`;
+  const yearsText = b ? b.years.map((y) => `${money(y.annual_cents)} for ${y.year} × ${y.days} of ${y.days_in_year} days = ${money(y.cents)}`).join('; ') : '';
+  const noBudget = !b
+    ? `<p class="muted-line"><b>No budget comparison.</b> ${(p.budget_missing_years || []).length ? `No income budget line matches ${e(scope)} for ${e(p.budget_missing_years.join(' and '))}` : `No income budget line matches ${e(scope)}`}, so only last year is compared. A fund’s budget is found by the account code at the start of its name (for example 50010) on the church ledger’s Income lines.</p>`
+    : '';
+  return `${fundPicker(a, { section: 'charts', page: 'giving-pace', hidden })}
+    ${errorNote}${form}
+    <p class="lede">Giving to ${e(scope)} for ${e(pace.label)}, against the same days last year${b ? ' and the budget' : ''}. Totals only.</p>
+    ${cards}
+    <div class="panel panel-spaced"><h2>${e(pace.label)}</h2>${bars}${noBudget}</div>
+    <div class="panel panel-spaced ga-method"><h2>How this is figured</h2><ul>
+      <li><div><b>This period</b><p>Every gift to ${e(scope)} dated ${e(longDate(p.from))} through ${e(longDate(p.to))} (${p.days} day${p.days === 1 ? '' : 's'}), after voids and refunds. ${e(scopeShort(a).trim()) || 'Every fund counts.'}</p></div></li>
+      <li><div><b>Same days last year</b><p>The same calendar dates a year earlier, ${e(longDate(p.prior_from))} through ${e(longDate(p.prior_to))}. Holidays that move (Easter) can land in one year’s period and not the other’s.</p></div></li>
+      ${b ? `<li><div><b>Budgeted pace</b><p>The annual budget is ${budgetWhat}, spread evenly across the year by day: ${e(yearsText)}. Giving is seasonal (Christmas and Easter run high), so a straight-line pace runs behind early in a quarter or year and catches up later.</p></div></li>` : ''}
+    </ul></div>`;
+}
+
 // ── Pledges ───────────────────────────────────────────────────────────────────────────────────
 
 export function renderPledgesPage({ result, keep = {} }) {
@@ -587,6 +703,14 @@ export const GIVING_ANALYTICS_STYLES = `
     .ga-method li { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:10px 0; border-bottom:1px solid #EEF0F4; }
     .ga-method li p { margin:2px 0 0; color:#4B5563; font-size:13.5px; }
     .ga-method-value { flex:none; font-weight:700; color:var(--navy); white-space:nowrap; text-align:right; }
+    .ga-pace-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px 14px; align-items:end; margin-top:0; }
+    .ga-pace-form .muted-line { grid-column:1 / -1; margin:0; }
+    .ga-pace-form .form-actions button { margin-top:0; }
+    .ga-pace li { grid-template-columns:minmax(0,1.2fr) minmax(80px,2fr) auto; }
+    .ga-pace li small { grid-column:1 / -1; color:#6B7280; font-size:12px; margin-top:-6px; }
+    .ga-pace .ga-meter { height:12px; }
+    .ga-pace .is-prior span { background:#C3CDDD; }
+    .ga-pace .is-budget span { background:#C9962E; }
     .ga-link-button { display:inline-block; padding:9px 16px; border-radius:8px; background:var(--navy); color:#fff; font-size:14px; font-weight:600; text-decoration:none; white-space:nowrap; }
     .ga-link-button.is-outline { background:#fff; color:var(--navy); border:1px solid var(--navy); }
     .ga-assumptions .form-actions { align-items:center; }

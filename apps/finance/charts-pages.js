@@ -1,4 +1,3 @@
-import { buildChurchReportView, buildLiveChurchReportView } from './church-report-service.js';
 import { buildFinancialMixView, buildLiveFinancialMixView } from './financial-mix-service.js';
 import { buildResolvedCashRunwayView } from './cash-runway-service.js';
 import { escapeHtml, formatCents, renderKpiCards, renderSectionHeading, renderTable } from './render-helpers.js';
@@ -27,8 +26,8 @@ export function renderFinancialMixRows(rows) {
   return rows.map((row) => `<tr><td>${row.accountName}</td><td>${formatCents(row.amountCents)}</td><td>${row.sharePct.toFixed(1)}%</td></tr>`).join('');
 }
 
-// Live-first for the church-report-derived figures (revenue mix, expense mix, and giving-pace's
-// naive pace calculation) and for cash-reserve's property-tax-reserve KPI -- each independently,
+// Live-first for the church-report-derived figures (revenue mix, expense mix) and for
+// cash-reserve's property-tax-reserve KPI -- each independently,
 // matching the isLive/fallbackNote convention property-pages.js already uses for the 'property'
 // section. `churchReportLive` is resolveChurchReport()'s own result (shell.js now computes it for
 // 'charts' too, alongside 'church') and `propertyReservesLive` is resolvePropertyReserves()'s
@@ -36,8 +35,9 @@ export function renderFinancialMixRows(rows) {
 // remain the plain synthetic reads other sections (Financial Health, Board packet, Commercial
 // Property) still depend on, so this page reads them only as its own synthetic fallback, never
 // re-fetching. Cash runway independently resolves through its own aggregate contract and retains
-// the labeled synthetic fallback when Connect is unavailable.
-export function renderChartsPage(pageId, { churchReport, churchReportLive, cashRunway, propertyReserves, propertyReservesLive, giving, givingSource, canManageCashPolicy = false, cashPolicyStatus = null, cashPolicyMessage = null }) {
+// the labeled synthetic fallback when Connect is unavailable. Giving vs. pace is its own page now
+// (giving-analytics-pages.js's renderGivingPacePage), read live from giving-analytics-v1.
+export function renderChartsPage(pageId, { churchReport, churchReportLive, cashRunway, propertyReserves, propertyReservesLive, canManageCashPolicy = false, cashPolicyStatus = null, cashPolicyMessage = null }) {
   const isChurchLive = churchReportLive?.source === 'live';
   const mix = isChurchLive
     ? buildLiveFinancialMixView(churchReportLive.accounts, churchReportLive.fiscalYear, churchReportLive.totals)
@@ -70,21 +70,6 @@ export function renderChartsPage(pageId, { churchReport, churchReportLive, cashR
       ])}
       ${reserveFallbackNote}
     </section>${canManageCashPolicy && runway?.source === 'live' ? renderCashPolicyForm(runway.policySettings, cashPolicyStatus, cashPolicyMessage) : ''}`;
-  }
-  if (pageId === 'giving-pace') {
-    const church = isChurchLive
-      ? buildLiveChurchReportView(churchReportLive.accounts, churchReportLive.fiscalYear, churchReportLive.totals)
-      : buildChurchReportView(churchReport);
-    const monthlyPace = Math.round(church.totals.incomeActualCents / 12);
-    return `<section class="report" aria-label="${givingSource === 'live' ? 'Giving vs pace chart' : 'Synthetic giving vs pace chart'}">
-      ${renderSectionHeading({ eyebrow: 'Charts', heading: 'Giving vs. pace', badge: givingSource === 'live' ? 'Live from Connect' : 'Synthetic fixture' })}
-      ${renderKpiCards([
-        { label: 'Giving this period', value: formatCents(giving?.totals?.netCents ?? 0) },
-        { label: 'Naive monthly pace', value: formatCents(monthlyPace), hint: `1/12 of FY${church.fiscalYear} church income budget · ${isChurchLive ? 'live from Connect' : 'synthetic fixture'}` },
-      ])}
-      <p>"Pace" here is a naive 1/12-of-annual-budget average, not an official pacing model -- there is no stored giving-target or seasonality curve to compare against yet.</p>
-      ${churchFallbackNote}
-    </section>`;
   }
   // 'revenue-mix' (default)
   return `<section class="report" aria-label="${isChurchLive ? 'Revenue mix chart' : 'Synthetic revenue mix chart'}">
