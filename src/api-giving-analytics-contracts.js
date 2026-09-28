@@ -15,7 +15,7 @@
 // re-verified here and the person's real Connect role decides access.
 import { json } from './auth.js';
 import { verifyAccessJwt } from './access-jwt.js';
-import { getRolePermissions, permissionsForRole, resolveGeneralFundIds } from './api-utils.js';
+import { getRolePermissions, permissionsForRole, resolveGeneralFundIds, normalizeFundCategory, fundCategoryLabel } from './api-utils.js';
 
 const ONLINE_METHODS = "('online','card','ach')";
 const HOUSEHOLD_KEY = `CASE WHEN p.household_id IS NOT NULL AND p.household_id != 0
@@ -84,14 +84,37 @@ export function resolveAsOf(url, now = new Date()) {
 
 // Which slice of giving the totals describe: ?fund=all (the default), ?fund=general (every fund
 // Connect counts as the General Fund, the same resolveGeneralFundIds rule the board report's fund
-// lens uses), or ?fund=<fund id> for one fund. Anything unrecognized reads as all funds, never as
-// an empty slice. `ids` is null for all funds; otherwise the fund ids to filter on.
+// lens uses), ?fund=donor (every gift: the General Fund plus restricted and designated funds),
+// ?fund=revenue (every fund except MDO income: gifts plus earned and passive income), or
+// ?fund=<fund id> for one fund. Anything unrecognized reads as all funds, never as an empty
+// slice. `ids` is null for all funds; otherwise the fund ids to filter on.
+export const FUND_SCOPES = Object.freeze([
+  { key: 'general', label: 'General Fund' },
+  { key: 'donor', label: 'Donor giving' },
+  { key: 'revenue', label: 'All revenue except MDO' },
+]);
+
 export function resolveFundScope(requested, fundRows) {
   const rows = Array.isArray(fundRows) ? fundRows : [];
   const want = String(requested || '').trim().toLowerCase();
-  if (want === 'general') {
-    const { ids } = resolveGeneralFundIds(rows);
-    return { key: 'general', label: 'General Fund', ids: [...ids] };
+  const scoped = (key, label, keep) => {
+    const ids = [];
+    const notIds = [];
+    for (const f of rows) (keep(f) ? ids : notIds).push(f.id);
+    return { key, label, ids, notIds };
+  };
+  if (want === 'general' || want === 'donor') {
+    // The General Fund family comes from the shared rule (so a database that has not yet
+    // categorized anything still counts the legacy family); every other fund in it is a gift
+    // only when it is categorized restricted.
+    const { ids, catOf } = resolveGeneralFundIds(rows);
+    const label = FUND_SCOPES.find((x) => x.key === want).label;
+    return want === 'general'
+      ? scoped(want, label, (f) => ids.has(f.id))
+      : scoped(want, label, (f) => ids.has(f.id) || catOf.get(f.id) === 'restricted');
+  }
+  if (want === 'revenue') {
+    return scoped('revenue', 'All revenue except MDO', (f) => normalizeFundCategory(f.category) !== 'mdo');
   }
   if (/^\d{1,9}$/.test(want)) {
     const fund = rows.find((f) => String(f.id) === want);
@@ -100,12 +123,21 @@ export function resolveFundScope(requested, fundRows) {
   return { key: 'all', label: 'All funds', ids: null };
 }
 
-// SQL fragment and bindings restricting a giving query to the scope's funds. An empty General
-// Fund family matches nothing rather than everything.
+// SQL fragment and bindings restricting a giving query to the scope's funds. An empty slice
+// matches nothing rather than everything. Fund ids are integers read from the funds table, so they
+// are written into the SQL (inclusion or exclusion list, whichever is shorter) instead of bound:
+// a category can hold more funds than D1's ~100 bind parameters allow.
 function fundFilter(scope, column = 'fund_id') {
   if (!scope?.ids) return { sql: '', args: [] };
   if (!scope.ids.length) return { sql: ' AND 0', args: [] };
-  return { sql: ` AND ${column} IN (${scope.ids.map(() => '?').join(',')})`, args: scope.ids };
+  const list = (ids) => ids.map((id) => {
+    if (!Number.isSafeInteger(Number(id))) throw new Error('fund id is not an integer');
+    return String(Number(id));
+  }).join(',');
+  if (scope.notIds && scope.notIds.length < scope.ids.length) {
+    return { sql: scope.notIds.length ? ` AND ${column} NOT IN (${list(scope.notIds)})` : '', args: [] };
+  }
+  return { sql: ` AND ${column} IN (${list(scope.ids)})`, args: [] };
 }
 
 // One row per giving household (or single person without a household) with its totals in each
@@ -234,11 +266,13 @@ export async function respondWithGivingAnalyticsV1(url, db) {
          FROM giving_monthly_fund_totals WHERE month BETWEEN ? AND ?${plain.sql} GROUP BY month ORDER BY month`
     ).bind(`${year - 1}-01`, `${year}-12`, ...plain.args).all(),
     db.prepare(
-      `SELECT f.id AS fund_id, f.name AS fund_name, SUM(ge.amount) AS cents
+      `SELECT f.id AS fund_id, f.name AS fund_name, f.category AS category,
+              COALESCE(SUM(CASE WHEN ge.contribution_date BETWEEN ? AND ? THEN ge.amount END),0) AS cents,
+              COALESCE(SUM(CASE WHEN ge.contribution_date BETWEEN ? AND ? THEN ge.amount END),0) AS prior_cents
          FROM giving_entries ge JOIN funds f ON f.id=ge.fund_id
         WHERE ge.contribution_date BETWEEN ? AND ?
         GROUP BY f.id ORDER BY cents DESC`
-    ).bind(`${year}-01-01`, asOf).all(),
+    ).bind(`${year}-01-01`, asOf, `${year - 1}-01-01`, priorSameDay, `${year - 1}-01-01`, asOf).all(),
     // Weeks end on Sunday (Monday–Sunday), so each bar is "the Sunday" and the gifts around it.
     db.prepare(
       `SELECT date(contribution_date, 'weekday 0') AS week_ending, SUM(amount) AS cents, COUNT(*) AS gifts
@@ -278,6 +312,13 @@ export async function respondWithGivingAnalyticsV1(url, db) {
     not_started: pledgeRows.filter((r) => !r.received_cents).length,
   };
 
+  // Every fund given to this year, labeled with its category; the prior-year column stays on the
+  // category rollup only, where a fund given to last year but not yet this year still counts.
+  const { catOf } = resolveGeneralFundIds(fundRows);
+  const fundRowsYtd = (funds.results || []).map((f) => ({ ...f, category: catOf.get(f.fund_id) || normalizeFundCategory(f.category) }));
+  const fundYtd = fundRowsYtd.filter((f) => f.cents !== 0)
+    .map(({ fund_id, fund_name, category, cents }) => ({ fund_id, fund_name, category, cents }));
+
   const weekMap = new Map((weeks.results || []).map((w) => [w.week_ending, w]));
   const weekSeries = [];
   for (let i = 12; i >= 0; i -= 1) {
@@ -295,19 +336,34 @@ export async function respondWithGivingAnalyticsV1(url, db) {
     fund_options: fundOptions(fundRows, new Set((usedFunds.results || []).map((r) => r.fund_id)), scope),
     totals: { ...totals, first_time_givers: firstTime?.n || 0 },
     months: months.results || [],
-    funds: funds.results || [],
+    funds: fundYtd,
+    categories: summarizeCategories(fundRowsYtd),
     weeks: weekSeries,
     households: summarizeHouseholds(householdRows),
     pledges: pledgeSummary,
   });
 }
 
-// All funds, the General Fund, then each fund given to in the compared years (plus the chosen
-// fund, so the picker never loses the current selection).
+// Year-to-date and same-days-last-year totals for each fund category, in the order the revenue
+// is explained: gifts (unrestricted, then restricted), earned, passive, then MDO.
+const CATEGORY_ORDER = ['general', 'restricted', 'earned', 'passive', 'mdo'];
+function summarizeCategories(rows) {
+  const out = new Map(CATEGORY_ORDER.map((key) => [key, { key, label: fundCategoryLabel(key), cents: 0, prior_cents: 0, fund_count: 0 }]));
+  for (const r of rows) {
+    const c = out.get(normalizeFundCategory(r.category));
+    c.cents += r.cents || 0;
+    c.prior_cents += r.prior_cents || 0;
+    if (r.cents !== 0) c.fund_count += 1;
+  }
+  return [...out.values()];
+}
+
+// The three category scopes, all funds, then each fund given to in the compared years (plus the
+// chosen fund, so the picker never loses the current selection).
 function fundOptions(fundRows, usedIds, scope) {
   return [
+    ...FUND_SCOPES,
     { key: 'all', label: 'All funds' },
-    { key: 'general', label: 'General Fund' },
     ...fundRows.filter((f) => usedIds.has(f.id) || String(f.id) === scope.key)
       .map((f) => ({ key: String(f.id), label: f.name })),
   ];

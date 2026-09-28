@@ -172,13 +172,52 @@ describe('Giving analytics contracts (giving-analytics-*-v1, giving-followup-wri
     // The by-fund breakdown and first-time givers always cover every fund.
     expect(bf.funds).toEqual(all.funds);
     expect(bf.totals.first_time_givers).toBe(all.totals.first_time_givers);
-    expect(all.fund_options.map((o) => o.key)).toEqual(['all', 'general', String(building), String(general)]);
+    expect(all.fund_options.map((o) => o.key)).toEqual(['general', 'donor', 'revenue', 'all', String(building), String(general)]);
     // An unknown fund reads as all funds, never an empty page.
     for (const bogus of ['999', 'drop%20table', '-1']) {
       const r = await read(bogus);
       expect(r.fund.key).toBe('all');
       expect(r.totals.ytd_cents).toBe(all.totals.ytd_cents);
     }
+  });
+
+  it('scopes to donor giving and all revenue except MDO by fund category, and rolls up each category', async () => {
+    const { db, ids, general, building } = setup();
+    const raw = db._raw;
+    const rental = insertFund(db, 'Facility Rental');
+    const interest = insertFund(db, 'Interest Income');
+    const tuition = insertFund(db, 'MDO Tuition');
+    raw.prepare("UPDATE funds SET category='general' WHERE id=?").run(general);
+    raw.prepare("UPDATE funds SET category='earned' WHERE id=?").run(rental);
+    raw.prepare("UPDATE funds SET category='passive' WHERE id=?").run(interest);
+    raw.prepare("UPDATE funds SET category='mdo' WHERE id=?").run(tuition);
+    const add = (fund, day, dollars) => raw.prepare(
+      "INSERT INTO giving_entries (batch_id, person_id, fund_id, amount, method, contribution_date) VALUES (1,?,?,?,'check',?)"
+    ).run(ids.acme, fund, dollars * 100, day);
+    add(rental, '2026-04-01', 1000); add(rental, '2025-04-01', 400);
+    add(interest, '2026-06-30', 250);
+    add(tuition, '2026-09-01', 3000);
+    const read = async (fund) => (await call(db, '/api/contracts/giving-analytics-v1', { query: `?as_of=2026-09-20&fund=${fund}` })).json();
+    const [all, gf, donor, revenue] = await Promise.all(['all', 'general', 'donor', 'revenue'].map(read));
+    expect(donor.fund).toMatchObject({ key: 'donor', label: 'Donor giving', fund_count: 2 });
+    expect(revenue.fund).toMatchObject({ key: 'revenue', label: 'All revenue except MDO', fund_count: 4 });
+    expect(donor.totals.ytd_cents).toBe(gf.totals.ytd_cents + 50000);
+    expect(revenue.totals.ytd_cents).toBe(donor.totals.ytd_cents + 125000);
+    expect(all.totals.ytd_cents).toBe(revenue.totals.ytd_cents + 300000);
+    expect(revenue.totals.prior_ytd_cents).toBe(donor.totals.prior_ytd_cents + 40000);
+    const cat = Object.fromEntries(all.categories.map((c) => [c.key, c]));
+    expect(all.categories.map((c) => c.key)).toEqual(['general', 'restricted', 'earned', 'passive', 'mdo']);
+    expect(cat.general.cents).toBe(gf.totals.ytd_cents);
+    expect(cat.restricted).toMatchObject({ cents: 50000, fund_count: 1 });
+    expect(cat.earned).toMatchObject({ cents: 100000, prior_cents: 40000, fund_count: 1 });
+    expect(cat.passive).toMatchObject({ cents: 25000, fund_count: 1 });
+    expect(cat.mdo).toMatchObject({ cents: 300000, fund_count: 1 });
+    expect(all.categories.reduce((s, c) => s + c.cents, 0)).toBe(all.totals.ytd_cents);
+    expect(all.funds.find((f) => f.fund_id === tuition)).toMatchObject({ category: 'mdo', cents: 300000 });
+    expect(all.funds.find((f) => f.fund_id === building).category).toBe('restricted');
+    // The category scopes filter every figure, households included: Acme is an organization,
+    // so the category funds add no household.
+    expect(revenue.households.ytd_households).toBe(donor.households.ytd_households);
   });
 
   it('reports totals, weeks, funds, household bands and pledges without naming anyone', async () => {

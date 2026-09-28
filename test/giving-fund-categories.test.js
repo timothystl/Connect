@@ -292,7 +292,7 @@ describe('giving-board fund lens', () => {
     const byName = Object.fromEntries(b.funds.map(f => [f.name, f]));
     expect(byName['General Fund'].category).toBe('general');
     expect(byName['Rental'].category).toBe('earned');
-    expect(b.fund_categories.map(c => c.key)).toEqual(['general', 'earned', 'passive', 'restricted']);
+    expect(b.fund_categories.map(c => c.key)).toEqual(['general', 'earned', 'passive', 'restricted', 'mdo']);
   });
 });
 
