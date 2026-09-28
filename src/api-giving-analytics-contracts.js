@@ -17,7 +17,7 @@ import { json } from './auth.js';
 import { computeGivingBoard } from './api-reports.js';
 import { sendBrevoTransactionalEmail } from './api-emails.js';
 import { verifyAccessJwt } from './access-jwt.js';
-import { getRolePermissions, permissionsForRole, resolveGeneralFundIds, normalizeFundCategory, fundCategoryLabel } from './api-utils.js';
+import { getRolePermissions, permissionsForRole, resolveGeneralFundIds, normalizeFundCategory, fundCategoryLabel, sameDayLastYear, yearElapsedShare } from './api-utils.js';
 
 const ONLINE_METHODS = "('online','card','ach')";
 const HOUSEHOLD_KEY = `CASE WHEN p.household_id IS NOT NULL AND p.household_id != 0
@@ -71,12 +71,6 @@ function isDay(value) {
 // Connect's giving reports bucket a gift.
 function shiftDay(day, days) {
   return new Date(Date.parse(`${day}T00:00:00Z`) + days * 864e5).toISOString().slice(0, 10);
-}
-
-function sameDayLastYear(day) {
-  const [y, m, d] = day.split('-').map(Number);
-  const last = new Date(Date.UTC(y - 1, m, 0)).getUTCDate();
-  return `${y - 1}-${String(m).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
 }
 
 export function resolveAsOf(url, now = new Date()) {
@@ -371,12 +365,7 @@ function fundOptions(fundRows, usedIds, scope) {
   ];
 }
 
-export function yearElapsedShare(asOf) {
-  const year = Number(asOf.slice(0, 4));
-  const start = Date.UTC(year, 0, 1);
-  const end = Date.UTC(year + 1, 0, 1);
-  return Math.min(1, Math.max(0, (Date.parse(`${asOf}T00:00:00Z`) + 864e5 - start) / (end - start)));
-}
+export { yearElapsedShare };
 
 // ── Named detail: statements and nudges ──────────────────────────────────────────────────────
 

@@ -217,12 +217,46 @@ export function renderInsightsPage({ results, params: p, keep, namedHidden }) {
 }
 
 // ── Each giver, year over year ───────────────────────────────────────────────────────────────
+const signed = (cents) => `${cents > 0 ? '+' : cents < 0 ? '−' : ''}${money(Math.abs(cents))}`;
+const signedPct = (value) => (value == null ? '—' : `${value > 0 ? '+' : ''}${value}%`);
+const tone = (cents) => (cents > 0 ? 'gr-up' : cents < 0 ? 'gr-down' : '');
+const longDay = (iso) => {
+  const [y, m, d] = String(iso || '').split('-').map(Number);
+  return y ? `${['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][m - 1]} ${d}` : '';
+};
+
+// The year is not over: compare this year so far with last year to the same day, so September
+// is not "gave less" for everyone, and project each giver's year-end from that comparison.
+function renderPartialGiverTrends(form, d) {
+  const base = d.base_year; const prior = base - 1;
+  const through = longDay(d.as_of);
+  const people = (d.people || []).filter((x) => (x.curr_ytd || 0) > 0 || (x.prior_ytd || 0) > 0 || (x.prior_total || 0) > 0);
+  const byChange = (list) => list.slice().sort((a, b) => Math.abs(b.ytd_change_cents) - Math.abs(a.ytd_change_cents));
+  const groups = [
+    ['Gave more', `so far in ${base} than by ${through}, ${prior}`, byChange(people.filter((x) => x.prior_total > 0 && x.curr_ytd > x.prior_ytd))],
+    ['Gave less', `so far in ${base} than by ${through}, ${prior}`, byChange(people.filter((x) => x.curr_ytd > 0 && x.curr_ytd < x.prior_ytd))],
+    ['New this year', `gave in ${base}, nothing in ${prior}`, byChange(people.filter((x) => x.prior_total === 0 && x.curr_ytd > 0))],
+    ['Stopped', `gave by ${through}, ${prior}; nothing yet in ${base}`, byChange(people.filter((x) => x.prior_ytd > 0 && x.curr_ytd === 0))],
+  ];
+  const head = `<th>Name</th><th>Type</th><th>${e(prior)} full year</th><th>${e(prior)} to ${e(through)}</th><th>${e(base)} to ${e(through)}</th><th>Change</th><th>%</th><th>Projected ${e(base)}</th><th>vs. ${e(prior)}</th>`;
+  const row = (x) => `<tr><td>${e(nameOf(x))}</td><td>${e(typeOf(x))}</td><td>${money(x.prior_total)}</td><td>${money(x.prior_ytd)}</td><td>${money(x.curr_ytd)}</td>`
+    + `<td class="${tone(x.ytd_change_cents)}">${signed(x.ytd_change_cents)}</td><td>${signedPct(x.ytd_change_pct)}</td><td>${money(x.projected_cents)}</td><td class="${tone(x.projected_change_cents)}">${signed(x.projected_change_cents)}</td></tr>`;
+  const block = ([title, sub, list]) => (list.length ? `<section class="gr-card"><h2>${e(title)} <small>${e(sub)} · ${list.length}</small></h2><div class="table-wrap gr-scroll"><table class="gr-num"><thead><tr>${head}</tr></thead>
+    <tbody>${list.map(row).join('')}</tbody></table></div></section>` : '');
+  const shown = groups.map(block).join('');
+  const sum = (list, key) => list.reduce((s, x) => s + (x[key] || 0), 0);
+  const note = `<p class="gr-caption gr-method"><b>How this is figured.</b> ${e(base)} is not over, so each person’s giving from January 1 through ${e(through)} is compared with their giving from January 1 through ${e(through)}, ${e(prior)} (the same days of the year), and the groups follow that comparison. The projected ${e(base)} total is their whole ${e(prior)} total scaled by how this year compares so far (this year to date ÷ last year to the same day); for someone who had not given by this point last year, it is this year’s giving so far spread over the whole year (${Math.round((d.year_elapsed || 0) * 100)}% of the year has gone by). People who gave in ${e(prior)} only after ${e(through)} and have not given yet this year are on the same schedule, so they are in no group. Counted per person; voided and refunded gifts count at what was kept.</p>`;
+  return `${form}<div class="grid">${groups.map(([t, , list]) => card(t, String(list.length), `${signed(sum(list, 'ytd_change_cents'))} vs. ${e(prior)} to date`)).join('')}</div>
+    ${note}${shown || `<p class="muted">No giving found for ${e(base)} or ${e(prior)}.</p>`}`;
+}
+
 export function renderGiverTrendsPage({ results, params: p, keep, namedHidden }) {
   if (namedHidden) return namedRefusal('Each giver, year over year');
   const [res] = results;
   const form = controls('giver-trends', yearSelect(p), keep);
   if (!res.ok) return form + unavailable('Each giver’s year over year', res.data?.error || res.message);
   const d = res.data;
+  if (d.partial && d.as_of) return renderPartialGiverTrends(form, d);
   const years = d.years || [];
   const base = d.base_year; const prior = base - 1;
   const people = d.people || [];
@@ -384,6 +418,7 @@ export const GIVING_REPORTS_STYLES = `
     .gr-hist { display:flex; align-items:flex-end; gap:2px; height:120px; margin-top:10px; border-bottom:1px solid #D5DAE3; }
     .gr-hist span { flex:1; min-height:1px; background:var(--gold); border-radius:2px 2px 0 0; }
     .gr-axisrow { display:flex; justify-content:space-between; margin-top:6px; color:var(--muted); font-size:12px; }
+    .gr-method { max-width:72rem; line-height:1.5; }
     .gr-impacts { margin:.4rem 0 0; padding-left:20px; color:var(--ink); font-size:14px; line-height:1.6; }
     .gr-edit { margin-top:12px; }
     .gr-edit summary { cursor:pointer; font-weight:600; color:var(--navy); }

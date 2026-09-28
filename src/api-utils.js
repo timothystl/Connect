@@ -697,6 +697,22 @@ export function defaultFundCategories(funds) {
 // Extracted from the giving-board handler so the Financial Health page's giving-pace chart asks
 // the same question the board report does. A second copy of this rule is the shape of bug where
 // two screens quote different "General Fund giving" totals and both look right.
+// How much of the calendar year has gone by through the end of `asOf` (YYYY-MM-DD), 0 to 1.
+export function yearElapsedShare(asOf) {
+  const year = Number(asOf.slice(0, 4));
+  const start = Date.UTC(year, 0, 1);
+  const end = Date.UTC(year + 1, 0, 1);
+  return Math.min(1, Math.max(0, (Date.parse(`${asOf}T00:00:00Z`) + 864e5 - start) / (end - start)));
+}
+
+// The same calendar day a year earlier (Feb 29 becomes Feb 28), as YYYY-MM-DD. Shared by the
+// giving reports that compare "this year so far" with "last year to the same day".
+export function sameDayLastYear(day) {
+  const [y, m, d] = String(day).split('-').map(Number);
+  const last = new Date(Date.UTC(y - 1, m, 0)).getUTCDate();
+  return `${y - 1}-${String(m).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
+}
+
 export function resolveGeneralFundIds(fundRows) {
   const rows = Array.isArray(fundRows) ? fundRows : [];
   const catOf = new Map(rows.map(f => [f.id, normalizeFundCategory(f.category)]));

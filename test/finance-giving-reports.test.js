@@ -37,6 +37,8 @@ const REPORTS = {
   impact: { statements: [{ monthly_cents: 5000, label: 'a month of Sunday school supplies' }], can_edit: true },
 };
 
+const YOY_FULL = REPORTS.yoy;
+
 function env(role = 'finance', permissions = { finance: 'edit', giving: 'edit' }) {
   const calls = [];
   return { ENVIRONMENT: 'production', FINANCE_CONTRACT_API_KEY: 'key', RELEASE_SHA: 'test', calls,
@@ -100,6 +102,36 @@ describe('Finance › Giving reports', () => {
     expect(trends).toContain('Gave more');
     expect(trends).toContain('Stopped');
     expect(trends).toContain('+33.3%');
+  });
+
+  it('prorates the current year: to date against last year to the same day, with a projected year-end', async () => {
+    const e = env();
+    const base = { first_name: 'Ada', last_name: 'Sample', member_type: 'member', by_year: {}, curr_total: 0, change_cents: 0, change_pct: null };
+    REPORTS.yoy = { base_year: 2026, years: ['2024', '2025', '2026'], partial: true, as_of: '2026-09-28', prior_as_of: '2025-09-28', year_elapsed: 0.742, people: [
+      // Behind last year's whole year, but ahead of where they were by September 28 last year.
+      { ...base, id: 1, prior_total: 400000, curr_total: 330000, prior_ytd: 300000, curr_ytd: 330000, ytd_change_cents: 30000, ytd_change_pct: 10, projected_cents: 440000, projected_change_cents: 40000, projected_change_pct: 10 },
+      { ...base, id: 2, first_name: 'Ben', prior_total: 100000, prior_ytd: 80000, curr_ytd: 40000, ytd_change_cents: -40000, ytd_change_pct: -50, projected_cents: 50000, projected_change_cents: -50000, projected_change_pct: -50 },
+      { ...base, id: 3, first_name: 'Cara', last_name: 'Example', prior_total: 0, prior_ytd: 0, curr_ytd: 74200, ytd_change_cents: 74200, ytd_change_pct: null, projected_cents: 100000, projected_change_cents: 100000, projected_change_pct: null },
+      { ...base, id: 4, first_name: 'Dana', last_name: 'Example', prior_total: 90000, prior_ytd: 90000, curr_ytd: 0, ytd_change_cents: -90000, ytd_change_pct: -100, projected_cents: 0, projected_change_cents: -90000, projected_change_pct: -100 },
+      // Gave only in December last year: on the same schedule, so in no group.
+      { ...base, id: 5, first_name: 'Eli', last_name: 'Example', prior_total: 50000, prior_ytd: 0, curr_ytd: 0, ytd_change_cents: 0, ytd_change_pct: null, projected_cents: 0, projected_change_cents: -50000, projected_change_pct: -100 },
+    ] };
+    try {
+      const html = await page(e, 'giver-trends', '&year=2026');
+      expect(html).toContain('<th>2025 full year</th><th>2025 to September 28</th><th>2026 to September 28</th><th>Change</th><th>%</th><th>Projected 2026</th><th>vs. 2025</th>');
+      const section = (title) => html.slice(html.indexOf(`<h2>${title} `), html.indexOf('</section>', html.indexOf(`<h2>${title} `)));
+      expect(section('Gave more')).toContain('Ada Sample');
+      expect(section('Gave more')).toContain('<td>$4,000</td><td>$3,000</td><td>$3,300</td><td class="gr-up">+$300</td><td>+10%</td><td>$4,400</td><td class="gr-up">+$400</td>');
+      expect(section('Gave less')).toContain('Ben Sample');
+      expect(section('New this year')).toContain('Cara Example');
+      expect(section('Stopped')).toContain('Dana Example');
+      expect(html).not.toContain('Eli Example');
+      expect(html).toContain('How this is figured.');
+      expect(html).toContain('compared with their giving from January 1 through September 28, 2025');
+      expect(html).toContain('74% of the year has gone by');
+    } finally {
+      REPORTS.yoy = YOY_FULL;
+    }
   });
 
   it('shows plateaus with each step, impact statements, and bands with the uplift', async () => {

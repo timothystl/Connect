@@ -22,7 +22,7 @@ export const GIVING_REPORTS = Object.freeze({
   'by-method': { seg: 'reports/giving-by-method', level: 'aggregate', params: ['from', 'to'] },
   'vs-attendance': { seg: 'reports/giving-vs-attendance', level: 'aggregate', params: ['from', 'to'] },
   insights: { seg: 'reports/giving-insights', level: 'people', params: ['year', 'top'] },
-  yoy: { seg: 'reports/giving-yoy', level: 'people', params: ['year'] },
+  yoy: { seg: 'reports/giving-yoy', level: 'people', params: ['year', 'as_of'] },
   plateaus: { seg: 'reports/giving-plateaus', level: 'people', params: ['year', 'scope', 'fund_id', 'low_frequency_max'] },
   bands: { seg: 'reports/giving-bands', level: 'people', params: ['year', 'scope', 'freq', 'uplift_cents', 'fund_id'] },
   funds: { level: 'aggregate' },
