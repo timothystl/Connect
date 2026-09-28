@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { handleContractsServiceApi } from '../src/api-contracts-service.js';
+import { handleChmsApi } from '../src/api-chms.js';
 import { resetAccessJwtCacheForTests } from '../src/access-jwt.js';
 import { TUITION_FINANCE_SCHEMA, tuitionManifest } from '../src/tuition-storage.js';
 
@@ -95,10 +96,16 @@ describe('Tuition Aid storage move (TUITION_STORAGE_MODE)', () => {
   });
   afterEach(() => { globalThis.fetch = originalFetch; });
   const envFor = (mode, extra = {}) => ({ DB: db, FINANCE_DB: fdb, TUITION_STORAGE_MODE: mode, FINANCE_CONTRACT_API_KEY: 'key', FINANCE_ACCESS_TEAM_DOMAIN: TEAM, FINANCE_ACCESS_AUD: AUD, ...extra });
+  // Connect's own tuition routes, as its Tuition Aid tab calls them (finance role: edit).
   function call(env, path, method = 'GET', body) {
+    const url = new URL('https://connect.example/admin/api/' + path);
+    const req = new Request(url, { method, headers: { 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return handleChmsApi(req, env, url, method, path, 'finance', { username: 'sarah', role: 'finance' });
+  }
+  // What Finance asks Connect, through the tuition-aid-workspace-v1 contract.
+  function contract(env, path, method = 'GET') {
     const req = new Request('https://connect.example' + PATH + '?path=' + encodeURIComponent(path), {
       method, headers: { 'X-Contract-Key': 'key', 'Cf-Access-Jwt-Assertion': token, 'Content-Type': 'application/json' },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     return handleContractsServiceApi(req, env, PATH);
   }
@@ -107,16 +114,16 @@ describe('Tuition Aid storage move (TUITION_STORAGE_MODE)', () => {
   it('connect mode keeps using Connect and never touches Finance', async () => {
     const env = envFor('connect');
     expect((await (await call(env, 'tuition-aid/students')).json()).students).toHaveLength(2);
-    expect((await call(env, 'tuition-aid/config', 'PATCH', { key: 'growth_pct', value: '4' })).status).toBeLessThan(400);
+    expect((await call(env, 'tuition-aid/config', 'PATCH', { values: { growth_pct: '4' } })).status).toBeLessThan(400);
     expect(fdb._raw.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name LIKE 'tuition_%'").get().n).toBe(0);
-    expect(await (await call(env, 'tuition-aid/storage')).json()).toEqual({ mode: 'connect' });
+    expect(await (await contract(env, 'tuition-aid/storage')).json()).toEqual({ mode: 'connect' });
   });
 
   it('copying mode reads from Connect and refuses every change', async () => {
     const env = envFor('copying');
     const before = await connectManifest();
     expect((await (await call(env, 'tuition-aid/students')).json()).students).toHaveLength(2);
-    for (const [path, method, body] of [['tuition-aid/students', 'POST', { family: 'X', child: 'Y' }], ['tuition-aid/students/1', 'PATCH', { note: 'x' }], ['tuition-aid/config', 'PATCH', { key: 'a', value: 'b' }]]) {
+    for (const [path, method, body] of [['tuition-aid/students', 'POST', { family: 'X', child: 'Y' }], ['tuition-aid/students/1', 'PATCH', { note: 'x' }], ['tuition-aid/config', 'PATCH', { values: { a: 'b' } }]]) {
       const r = await call(env, path, method, body);
       expect(r.status).toBe(503);
       expect((await r.json()).error).toContain('Changes are paused');
@@ -124,30 +131,37 @@ describe('Tuition Aid storage move (TUITION_STORAGE_MODE)', () => {
     expect(await connectManifest()).toEqual(before);
   });
 
-  it('finance mode copies every row once, checks it, and then reads and writes only Finance', async () => {
+  it('finance mode copies every row once, checks it, and leaves Tuition Aid to Finance', async () => {
     const env = envFor('finance');
     const before = await connectManifest();
-    const bundle = await (await call(env, 'tuition-aid/students')).json();
-    expect(bundle.students.map((s) => s.child)).toEqual(['Ada', 'Ben']);
-    expect(bundle.studentYears).toHaveLength(1);
-    expect(bundle.config.k8_budget_cents).toBe('7500000');
+    // Finance asks for the move through the contract; Connect runs the checked copy.
+    const moved = await contract(env, 'tuition-aid/storage');
+    expect(moved.status).toBe(200);
+    expect(await moved.json()).toMatchObject({ mode: 'finance', status: 'verified' });
     expect(await tuitionManifest(fdb)).toEqual(before);
     const log = fdb._raw.prepare('SELECT status, manifest FROM tuition_storage_migration').all();
     expect(log.map((r) => r.status)).toEqual(['verified']);
     expect(log[0].manifest).not.toContain('Ada');
 
-    // A change after the move lands in Finance; Connect's rows stay exactly as they were.
-    expect((await call(env, 'tuition-aid/students/1', 'PATCH', { outside_aid_cents: 200000, person_id: 1 })).status).toBe(200);
-    expect(fdb._raw.prepare('SELECT outside_aid_cents, family, child FROM tuition_students WHERE id=1').get())
-      .toEqual({ outside_aid_cents: 200000, family: 'Person', child: 'Linked' });
+    // Finance is the only writer now: Connect answers neither reads nor changes.
+    for (const [path, method, body] of [['tuition-aid/students', 'GET'], ['tuition-aid/students/1', 'PATCH', { outside_aid_cents: 200000 }], ['tuition-aid/config', 'PATCH', { values: { a: 'b' } }]]) {
+      const r = await call(env, path, method, body);
+      expect(r.status).toBe(410);
+      expect((await r.json()).error).toContain('Finance');
+    }
     expect(await connectManifest()).toEqual(before);
-    // Only once: a second request does not copy again.
-    await call(env, 'tuition-aid/students');
+    // Only once: asking again does not copy again.
+    await contract(env, 'tuition-aid/storage');
     expect(fdb._raw.prepare('SELECT COUNT(*) n FROM tuition_storage_migration').get().n).toBe(1);
-
-    const status = await (await call(env, 'tuition-aid/storage')).json();
-    expect(status).toMatchObject({ mode: 'finance', status: 'verified' });
+    const status = await (await contract(env, 'tuition-aid/storage')).json();
     expect(status.tables.find((t) => t.table === 'tuition_students').count).toBe(2);
+  });
+
+  it('the contract answers Finance only the move and the people search', async () => {
+    const env = envFor('finance');
+    expect((await contract(env, 'tuition-aid/students')).status).toBe(404);
+    expect((await contract(env, 'tuition-aid/students/1', 'PATCH')).status).toBe(404);
+    expect((await contract(env, 'people?q=Pe')).status).toBe(200);
   });
 
   it('removes a copy that does not match row for row, pauses, and does not retry on its own', async () => {
@@ -155,12 +169,12 @@ describe('Tuition Aid storage move (TUITION_STORAGE_MODE)', () => {
     // Something on the Finance side changes a value as it is written.
     fdb._raw.exec("CREATE TRIGGER garble AFTER INSERT ON tuition_config BEGIN UPDATE tuition_config SET value='x' WHERE key=NEW.key; END");
     const env = envFor('finance');
-    const r = await call(env, 'tuition-aid/students');
+    const r = await contract(env, 'tuition-aid/storage');
     expect(r.status).toBe(503);
     expect((await r.json()).error).toContain('Connect still has every record');
     expect(fdb._raw.prepare('SELECT COUNT(*) n FROM tuition_students').get().n).toBe(0);
     expect(fdb._raw.prepare('SELECT status FROM tuition_storage_migration').all().map((x) => x.status)).toEqual(['failed']);
-    expect((await call(envFor('finance'), 'tuition-aid/students')).status).toBe(503);
+    expect((await contract(envFor('finance'), 'tuition-aid/storage')).status).toBe(503);
     expect(fdb._raw.prepare('SELECT COUNT(*) n FROM tuition_storage_migration').get().n).toBe(1);
     // Back to Connect restores the planner from Connect's untouched rows.
     expect((await (await call(envFor('connect'), 'tuition-aid/students')).json()).students).toHaveLength(2);
@@ -168,7 +182,7 @@ describe('Tuition Aid storage move (TUITION_STORAGE_MODE)', () => {
 
   it('refuses to move a table with a column the copy does not know about', async () => {
     db._raw.exec("ALTER TABLE tuition_config ADD COLUMN surprise TEXT NOT NULL DEFAULT ''");
-    const r = await call(envFor('finance'), 'tuition-aid/students');
+    const r = await contract(envFor('finance'), 'tuition-aid/storage');
     expect(r.status).toBe(503);
     expect(fdb._raw.prepare('SELECT error FROM tuition_storage_migration').get().error).toContain('surprise');
     expect(fdb._raw.prepare('SELECT COUNT(*) n FROM tuition_students').get().n).toBe(0);
@@ -177,14 +191,14 @@ describe('Tuition Aid storage move (TUITION_STORAGE_MODE)', () => {
   it('never copies over, or deletes, rows it did not write', async () => {
     for (const sql of TUITION_FINANCE_SCHEMA) fdb._raw.exec(sql);
     fdb._raw.exec("INSERT INTO tuition_config (key, value) VALUES ('in_progress','1')");
-    const r = await call(envFor('finance'), 'tuition-aid/students');
+    const r = await contract(envFor('finance'), 'tuition-aid/storage');
     expect(r.status).toBe(503);
     expect((await r.json()).error).toContain('finishing its move');
     expect(fdb._raw.prepare('SELECT COUNT(*) n FROM tuition_config').get().n).toBe(1);
   });
 
   it('refuses rather than falls back when Finance’s database is not connected', async () => {
-    const r = await call(envFor('finance', { FINANCE_DB: undefined }), 'tuition-aid/students');
+    const r = await contract(envFor('finance', { FINANCE_DB: undefined }), 'tuition-aid/storage');
     expect(r.status).toBe(503);
     expect((await call(envFor('sideways'), 'tuition-aid/students')).status).toBe(503);
   });

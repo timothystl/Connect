@@ -1,7 +1,8 @@
-// The Tuition Aid planner hosted in Finance reaches Connect's own tuition-aid handlers here, with
-// an independently verified Access identity. The caller cannot supply a role or username; the
-// verified user's Connect role goes through the same ACCESS_GATE (tuitionaid view/edit, and the
-// directory permission for the people search) as Connect's own Tuition Aid tab.
+// What Finance's Tuition Aid planner still asks Connect (apps/finance/tuition-service.js): the
+// checked move of the tuition_* tables into Finance's D1 (tuition-aid/storage) and the link-a-person
+// search. Finance reads and writes the tuition records itself. The caller cannot supply a role or
+// username; the verified user's Connect role goes through the same ACCESS_GATE (tuitionaid, and the
+// directory permission for the people search) as Connect's own routes.
 import { json } from './auth.js';
 import { verifyAccessJwt } from './access-jwt.js';
 import { handleChmsApi } from './api-chms.js';

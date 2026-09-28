@@ -1,5 +1,7 @@
 import { ACCOUNTING_JS, ACCOUNTING_CSS, ACCOUNTING_CSP, accountingViewer, renderAccountingWorkspace, relayAccountingWorkspace } from './accounting-workspace.js';
-import { fetchTuitionStorageStatus, relayTuitionAidWorkspace, renderTuitionAidWorkspace, tuitionAidViewer } from './tuition-aid-workspace.js';
+import { handleTuitionApi, tuitionAidViewer } from './tuition-service.js';
+import { renderTuitionPage } from './tuition-pages.js';
+import { TUITION_PLANNER_JS } from './tuition-planner/bundle.generated.js';
 import { FINANCE_RELEASE_CHANNEL, FINANCE_VERSION } from './version.js';
 import givingFixture from '../../contracts/examples/giving-summary-v1.synthetic.json';
 import { acceptConnectGivingSummaryV1 } from '../../contracts/validators/connect-giving-consumer.js';
@@ -1274,11 +1276,16 @@ function renderSectionBody(ctx) {
     return renderGiftEntryPage(page.id, { giving, givingSource, givingEntryStatus, givingEntryMessage });
   }
   if (section.id === 'tuition') {
-    // The planner runs Connect's own scripts, so it lives on its own page (/tuition-aid) under a
-    // stricter policy and is shown here in a frame; the Finance sidebar stays around it.
-    return `<p class="lede">Plan K–8 and Lutheran High School tuition aid against the aid budget. The tuition records are still stored in Connect until they move to Finance’s database; every change is checked against your Tuition Aid access.</p>
-      <p><a class="button-outline" href="/tuition-aid">Open full screen</a></p>
-      <iframe class="tuition-frame" src="/tuition-aid" title="Tuition Aid planner"></iframe>`;
+    // Finance's own planner (tuition-planner/): the page carries its settings and script; every
+    // read and save re-checks Tuition Aid access on the server (tuition-service.js).
+    const viewer = tuitionAidViewer(roleResult);
+    if (!viewer) return '<p class="status status-error">Tuition Aid needs a role with Tuition Aid access.</p>';
+    const year = Number(ctx.searchParams?.get('year'));
+    return renderTuitionPage(page.id, {
+      viewer: councilPreview ? { role: viewer.role, permissions: { tuitionaid: 'view' } } : viewer,
+      version: ctx.metadata?.releaseSha || 'local',
+      year: Number.isInteger(year) && year >= -30 && year <= 5 ? year : null,
+    });
   }
   if (section.id === 'giving-analytics') {
     const asResult = (r) => (r?.ok ? { ok: true, data: r.result } : { ok: false, message: describeGivingBatchFailure(r) });
@@ -1638,7 +1645,7 @@ function renderShell(ctx) {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Timothy Finance${production ? '' : ' — Staging'}</title>
   <link rel="icon" href="/assets/finance-mark.png"><link rel="apple-touch-icon" href="/assets/finance-icon.png">
-  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${COUNCIL_REPORT_STYLES} .tuition-frame{display:block;width:100%;height:calc(100vh - 170px);min-height:720px;border:1px solid var(--line);border-radius:10px;background:#fff;margin-top:12px;}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}</style>
+  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${COUNCIL_REPORT_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}</style>
 </head>
 <body${councilPreview ? ' class="council-preview"' : ''}>
   <header class="app-header">
@@ -1800,17 +1807,15 @@ export default {
       }, { cacheControl: 'private, max-age=86400' });
     }
     if (route.id === 'accounting-workspace-api') return relayAccountingWorkspace(request, rawEnv, url);
-    if (route.id === 'tuition-aid-workspace-api') return relayTuitionAidWorkspace(request, rawEnv, url);
-    if (route.id === 'tuition-aid-workspace-page') {
-      const viewer = tuitionAidViewer(await fetchVerifiedRole(rawEnv, request.headers.get('Cf-Access-Jwt-Assertion') || ''));
-      if (!viewer) return response('Access denied: Tuition Aid access could not be verified', { status: 403 });
-      const storageStatus = request.method === 'HEAD' ? null : await fetchTuitionStorageStatus(rawEnv, request.headers.get('Cf-Access-Jwt-Assertion') || '');
-      const res = response(request.method === 'HEAD' ? null : renderTuitionAidWorkspace(viewer, env.RELEASE_SHA, storageStatus), {
-        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
-      });
-      res.headers.set('Content-Security-Policy', ACCOUNTING_CSP);
-      res.headers.set('X-Frame-Options', 'SAMEORIGIN');
-      return res;
+    // Tuition Aid: Finance's own planner script, its records API, and the old full-screen address.
+    if (route.id === 'tuition-planner-asset') {
+      return response(request.method === 'HEAD' ? null : TUITION_PLANNER_JS, {
+        headers: { 'Content-Type': 'text/javascript; charset=utf-8' },
+      }, { cacheControl: 'private, max-age=86400' });
+    }
+    if (route.id === 'tuition-api-v1') return handleTuitionApi(request, rawEnv, url);
+    if (route.id === 'tuition-aid-legacy-page') {
+      return response(null, { status: 302, headers: { Location: '/?section=tuition&page=planner' } });
     }
     if (route.id === 'accounting-workspace-page') {
       const viewer = accountingViewer(await fetchVerifiedRole(rawEnv, request.headers.get('Cf-Access-Jwt-Assertion') || ''));
@@ -4280,7 +4285,7 @@ export default {
         const [balancePropertyValue, balanceMortgageHistory, propertyMortgageHistory] = await Promise.all([balancePropertyValueLoad, balanceMortgageHistoryLoad, propertyMortgageHistoryLoad]);
         const printMode = url.searchParams.get('print') === '1';
         // The Planner is the one Finance page that runs script (its own, from this Worker only).
-        const plannerPage = section.id === 'compensation' && effectivePageId === 'planner';
+        const plannerPage = (section.id === 'compensation' && effectivePageId === 'planner') || section.id === 'tuition';
         const shellResponse = response((printMode ? renderPrintPage : renderShell)({
           printFragment: printMode && url.searchParams.get('fragment') === '1',
           healthView: url.searchParams.get('view'), healthAppeal: url.searchParams.get('appeal'), healthFlow: url.searchParams.get('flow'), financeHealth, facilities, hr, givingBatch, givingAnalytics, givingAnalyticsPeople, gymIncome, accessRoles, budgetBuilder, boardLayout, planningBasis, planningScenarios, planningRunway, propertyBooks, searchParams: url.searchParams,

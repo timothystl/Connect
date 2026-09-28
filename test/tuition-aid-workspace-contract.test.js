@@ -92,15 +92,11 @@ describe('Tuition Aid planner contract (tuition-aid-workspace-v1)', () => {
     return handleContractsServiceApi(req, env, PATH);
   }
 
-  it('reads the planner bundle and saves a student through Connect’s own handlers', async () => {
-    const add = await call('tuition-aid/students', 'POST', { family: 'Test', child: 'Child', base_grade: 3, outside_aid_cents: 0 });
-    expect(add.status).toBe(200);
-    const bundle = await (await call('tuition-aid/students')).json();
-    expect(bundle.students.map((s) => s.child)).toContain('Child');
-    const id = bundle.students.find((s) => s.child === 'Child').id;
-    expect((await call(`tuition-aid/students/${id}`, 'PATCH', { outside_aid_cents: 50000 })).status).toBe(200);
-    expect(db._raw.prepare('SELECT outside_aid_cents FROM tuition_students WHERE id=?').get(id).outside_aid_cents).toBe(50000);
-    expect((await call('tuition-aid/config', 'PATCH', { key: 'growth_pct', value: '3' })).status).toBeLessThan(500);
+  it('answers the move’s status, and no longer the planner’s own reads or saves', async () => {
+    expect(await (await call('tuition-aid/storage')).json()).toEqual({ mode: 'connect' });
+    for (const [p, m] of [['tuition-aid/students', 'GET'], ['tuition-aid/students', 'POST'], ['tuition-aid/students/1', 'PATCH'], ['tuition-aid/config', 'PATCH'], ['tuition-aid/import-history', 'POST']]) {
+      expect((await call(p, m, m === 'GET' ? undefined : {})).status).toBe(404);
+    }
   });
 
   it('lets the link-a-person search through, and nothing else about people', async () => {
@@ -111,20 +107,19 @@ describe('Tuition Aid planner contract (tuition-aid-workspace-v1)', () => {
   });
 
   it('is not a general proxy', async () => {
-    for (const p of ['../giving', 'finance/status', 'giving', 'tuition-aid/students/1/../../people', 'tuition-aid/students/abc']) {
+    for (const p of ['../giving', 'finance/status', 'giving', 'tuition-aid/students', 'tuition-aid/students/1/../../people', 'tuition-aid/students/abc']) {
       expect((await call(p)).status).toBe(404);
     }
-    expect((await call('tuition-aid/config')).status).toBe(404); // PATCH only
+    expect((await call('tuition-aid/storage', 'POST', {})).status).toBe(404); // GET only
   });
 
   it('keeps Connect’s Tuition Aid permission in charge, ignoring forged headers', async () => {
     db._raw.exec("UPDATE app_users SET role='council'");
-    expect((await call('tuition-aid/students', 'GET', undefined, { 'X-Role': 'admin' })).status).toBe(403);
+    expect((await call('tuition-aid/storage', 'GET', undefined, { 'X-Role': 'admin' })).status).toBe(403);
     db._raw.prepare("INSERT OR REPLACE INTO chms_config(key,value) VALUES('role_permissions_json',?)").run(JSON.stringify({ council: { tuitionaid: 'view' } }));
-    expect((await call('tuition-aid/students')).status).toBe(200);
-    expect((await call('tuition-aid/students', 'POST', { family: 'X', child: 'Y' })).status).toBe(403);
+    expect((await call('tuition-aid/storage')).status).toBe(200);
     db._raw.exec('UPDATE app_users SET active=0');
-    expect((await call('tuition-aid/students')).status).toBe(403);
-    expect((await call('tuition-aid/students', 'GET', undefined, { 'Cf-Access-Jwt-Assertion': 'bad' })).status).toBe(401);
+    expect((await call('tuition-aid/storage')).status).toBe(403);
+    expect((await call('tuition-aid/storage', 'GET', undefined, { 'Cf-Access-Jwt-Assertion': 'bad' })).status).toBe(401);
   });
 });
