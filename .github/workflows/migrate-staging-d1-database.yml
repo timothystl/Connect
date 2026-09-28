@@ -1,0 +1,120 @@
+name: Migrate tlc-volunteer-db-staging to timothy-connect-db-staging
+
+# Staging counterpart of migrate-d1-database.yml, for the naming cleanup: Cloudflare cannot rename a
+# D1 database in place, so tlc-volunteer-db-staging -> timothy-connect-db-staging is: create the new
+# database (this workflow does it if missing) -> copy data (this workflow) -> repoint
+# wrangler.staging.toml in a separate PR -> redeploy staging -> verify -> delete the old database.
+# This workflow only creates and fills the new database; it never deletes or touches the old one
+# or staging's live binding, so it is safe to re-run.
+#
+# CRITICAL: the destination must never be bound to a Worker until after a clean run -- see
+# scripts/migrate-d1-database.sh's own header for why.
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Full main commit SHA approved for this data-copy exercise
+        required: true
+        type: string
+      reason:
+        description: Reason for this migration run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: d1-staging-database-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Copy tlc-volunteer-db-staging into timothy-connect-db-staging
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SOURCE_DB: tlc-volunteer-db-staging
+      SOURCE_DB_ID: d1d2a73f-67f2-4780-8b96-c97ec6bc2df3
+      DEST_DB: timothy-connect-db-staging
+      RESULT_FILE: /tmp/d1-migration-result.json
+    steps:
+      - name: Check out the approved commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.expected_sha }}
+
+      - name: Verify the approved commit is on main
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git merge-base --is-ancestor "$EXPECTED_SHA" origin/main
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The destination is created empty and left unbound. If the token cannot create databases,
+      # create timothy-connect-db-staging by hand in the dashboard and re-run.
+      - name: Create the destination database if it does not exist yet
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! npx wrangler d1 info "$DEST_DB" --json >/dev/null 2>&1; then
+            npx wrangler d1 create "$DEST_DB"
+          fi
+          dest_id="$(npx wrangler d1 info "$DEST_DB" --json | jq -r '(if type == "array" then .[0] else . end) | (.uuid // .id)')"
+          test -n "$dest_id" -a "$dest_id" != "null"
+          echo "DEST_DB_ID=$dest_id" >> "$GITHUB_ENV"
+
+      - name: Copy tlc-volunteer-db-staging into timothy-connect-db-staging and reconcile
+        run: bash scripts/migrate-d1-database.sh
+
+      - name: Record migration summary
+        if: always()
+        shell: bash
+        env:
+          MIGRATION_REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          if [[ ! -s "$RESULT_FILE" ]]; then
+            echo '## tlc-volunteer-db-staging -> timothy-connect-db-staging data copy' >> "$GITHUB_STEP_SUMMARY"
+            echo >> "$GITHUB_STEP_SUMMARY"
+            echo '- The copy script did not produce a result file (failed before completing any phase). Check the job logs.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo '## tlc-volunteer-db-staging -> timothy-connect-db-staging data copy'
+            echo
+            echo "- Approved commit: \`${GITHUB_SHA}\`"
+            echo "- Reason: ${MIGRATION_REASON}"
+            jq -r '
+              "- Destination database id (for wrangler.staging.toml): `" + .dest_db_id_verified + "`",
+              "- Source database UUID verified: `" + .source_db_id_verified + "`; destination UUID verified: `" + .dest_db_id_verified + "`",
+              "- Export: " + (.export_bytes | tostring) + " bytes; SHA-256 `" + .export_sha256 + "`",
+              "- Oversized export handling: " + (.oversized_export_statements_rewritten | tostring) + " statement rewritten; " + (.large_cells_length_verified | tostring) + " large value length-verified",
+              "- Destination cleared before import (safe re-run): " + (.destination_cleared_before_import | tostring),
+              "- Schema: " + (.schema_objects_matched | tostring) + " objects matched; control SHA-256 `" + .schema_control_sha256 + "`",
+              "- Integrity: " + .integrity_check + "; foreign-key violations " + (.foreign_key_violations | tostring),
+              "- Rows: " + (.tables_matched | tostring) + " tables matched; control SHA-256 `" + .row_control_sha256 + "`",
+              "- Monetary controls: " + (.monetary_controls_matched | tostring) + " columns matched; control SHA-256 `" + .monetary_control_sha256 + "`",
+              "- AUTOINCREMENT sequences: " + (.autoincrement_sequences_matched | tostring) + " matched; control SHA-256 `" + .sequence_control_sha256 + "`",
+              "- Source database left unmodified: " + (.source_database_modified | tostring) + "; destination never bound to a Worker: " + (.destination_never_bound_to_a_worker | tostring),
+              "- Sensitive rows and monetary values were not printed or retained as artifacts"
+            ' "$RESULT_FILE"
+          } >> "$GITHUB_STEP_SUMMARY"
