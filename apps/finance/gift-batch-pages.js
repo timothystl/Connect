@@ -145,7 +145,7 @@ function renderBatchDetail(ws, batch, params, today) {
       <h2>Batch closed</h2>
       <p class="muted-line">Closing locked this batch. ${batch.deposit_status ? `Deposit status: ${e(batch.deposit_status.label)}.` : ''} Reopen it to change a gift.</p>
       <form method="POST" action="/api/v1/gift-batch-write" class="inline-form"><input type="hidden" name="op" value="reopen_batch"><input type="hidden" name="batch_id" value="${batch.id}"><button type="submit" class="button-outline">Reopen batch</button></form>
-      ${batch.deposit_status?.key === 'needs_deposit' ? depositForm(batch, today, 'batch') : ''}
+      ${['needs_deposit', 'split'].includes(batch.deposit_status?.key) ? depositForm(batch, today, 'batch') : ''}
     </div>`;
 
   const giftRows = batch.entries.map((x, i) => `<li>
@@ -175,14 +175,24 @@ function renderBatchDetail(ws, batch, params, today) {
     </div>`;
 }
 
-function depositForm(batch, today, returnPage) {
-  const remaining = batch.deposit_status?.remaining_cents ?? batch.total_cents;
+const SOURCE_LABELS = { mixed: 'Checks & cash', check: 'Checks', cash: 'Cash', online: 'Online' };
+const sourceSelect = (value = 'mixed') => `<select name="source" aria-label="Deposit type">${Object.entries(SOURCE_LABELS).map(([k, l]) => `<option value="${k}"${k === value ? ' selected' : ''}>${e(l)}</option>`).join('')}</select>`;
+const dollarsIn = (cents) => ((Number(cents) || 0) / 100).toFixed(2);
+
+// Deposit a closed batch: all of what is left, or part of it (a batch split across bank runs),
+// on a new deposit or added to an open one.
+function depositForm(batch, today, returnPage, openDeposits = []) {
+  const remaining = batch.deposit_status?.remaining_cents ?? (batch.total_cents - (batch.linked_cents || 0));
+  const existing = openDeposits.length
+    ? `<select name="deposit_id" aria-label="Which deposit"><option value="">New deposit</option>${openDeposits.map((d) => `<option value="${d.id}">Add to ${e(shortDate(d.deposit_date))} deposit${d.external_ref ? ` · ${e(d.external_ref)}` : ''} (${money(d.given_cents ?? d.line_cents)})</option>`).join('')}</select>` : '';
   return `<form method="POST" action="/api/v1/gift-batch-write" class="inline-form deposit-form">
     <input type="hidden" name="op" value="deposit_batch"><input type="hidden" name="batch_id" value="${batch.id}"><input type="hidden" name="return" value="${returnPage}">
+    ${existing}
     <input type="date" name="deposit_date" value="${today}" aria-label="Deposit date" required>
     <input name="external_ref" maxlength="80" placeholder="Bank reference (optional)" aria-label="Bank reference">
-    <select name="source" aria-label="Deposit type"><option value="mixed">Checks &amp; cash</option><option value="check">Checks</option><option value="cash">Cash</option><option value="online">Online</option></select>
-    <button type="submit" class="button-outline">Deposit ${money(remaining)}</button>
+    ${sourceSelect()}
+    <label class="amount-in">$<input name="amount" inputmode="decimal" value="${dollarsIn(remaining)}" aria-label="Amount on this deposit"></label>
+    <button type="submit" class="button-outline">Deposit</button>
   </form>`;
 }
 
@@ -207,36 +217,106 @@ export function renderBatchPage({ result, params, status, today }) {
 
 // ── Reconciliation to bank ────────────────────────────────────────────────────────────────────
 
-export function renderReconciliationPage({ result, status, today }) {
+function workQueue(summary) {
+  if (!summary) return '';
+  const q = summary;
+  return kpis([
+    ['Open batches', String(q.open_batches.count), q.open_batches.count ? `${money(q.open_batches.cents)} counted, not closed` : 'Nothing still open', q.open_batches.count ? 'warn' : 'good'],
+    ['Awaiting deposit', money(q.awaiting_deposit.cents), q.awaiting_deposit.count ? `${q.awaiting_deposit.count} batch${q.awaiting_deposit.count === 1 ? '' : 'es'} in the last ${q.awaiting_deposit.days} days` : 'Every recent batch is on a deposit', q.awaiting_deposit.count ? 'warn' : 'good'],
+    ['Deposits to match', String(q.unreconciled_deposits.count), q.unreconciled_deposits.count ? `Oldest ${e(shortDate(q.unreconciled_deposits.earliest_date))}` : 'All matched to the bank', q.unreconciled_deposits.count ? 'warn' : 'good'],
+    ['Fees this year', money(q.fees_ytd.cents), 'Given minus what the bank received'],
+  ]);
+}
+
+const hidden = (name, value) => `<input type="hidden" name="${e(name)}" value="${e(value)}">`;
+
+// One deposit: what it holds, what the bank should show, and the tools to change it.
+function renderDepositDetail(detail, today) {
+  if (!detail.ok) return `<p class="status status-error">That deposit could not be read from Connect: ${e(detail.message)}</p>`;
+  const { deposit: d, lines, gifts, totals, bank_gap_cents: bankGap, batches_to_add: batchesToAdd, unassigned, unassigned_from: from, unassigned_to: to } = detail.data;
+  const open = d.status !== 'reconciled';
+  const id = hidden('deposit_id', d.id);
+  const post = (op, inner, cls = 'inline-form') => `<form method="POST" action="/api/v1/gift-batch-write" class="${cls}">${hidden('op', op)}${id}${inner}</form>`;
+  const fees = totals.fee_cents || 0;
+  const expected = d.given_cents - fees;
+  const hasBank = d.bank_cents !== null && d.bank_cents !== undefined;
+  const figures = kpis([
+    ['Given', money(d.given_cents), lines.length ? `${lines.length} batch${lines.length === 1 ? '' : 'es'}` : `${gifts.length} gift${gifts.length === 1 ? '' : 's'}`],
+    ['Processor fees reported', money(fees), fees ? 'On this deposit’s online gifts' : 'None recorded'],
+    ['Expected at the bank', money(expected), 'Given minus reported fees'],
+    ['Bank amount', hasBank ? money(d.bank_cents) : '—', hasBank ? (bankGap ? `Given − bank = ${money(bankGap)} in fees${bankGap - fees ? `; ${money(Math.abs(bankGap - fees))} ${bankGap > fees ? 'more' : 'less'} than reported` : ''}` : 'Matches what was given') : 'Not matched yet', hasBank && bankGap !== fees ? 'warn' : ''],
+  ]);
+  const lineRows = lines.map((l) => `<tr><td>${e(shortDate(l.batch_date))} · ${e(l.description || `Batch #${l.batch_id}`)}<small>Batch total ${money(l.batch_total_cents)}${l.batch_linked_cents < l.batch_total_cents ? ` · ${money(l.batch_total_cents - l.batch_linked_cents)} not on any deposit` : ''}</small></td>
+    <td>${open ? post('set_deposit_line', `${hidden('batch_id', l.batch_id)}<label class="amount-in">$<input name="amount" inputmode="decimal" value="${dollarsIn(l.amount_cents)}" aria-label="Amount of this batch on the deposit"></label><button type="submit" class="button-outline">Save</button>`) : money(l.amount_cents)}</td>
+    <td class="actions">${open ? post('remove_deposit_line', `${hidden('batch_id', l.batch_id)}<button type="submit" class="link-button">Take off</button>`) : ''}</td></tr>`).join('');
+  const addBatch = open && batchesToAdd.length ? post('set_deposit_line', `<select name="batch_id" aria-label="Batch to add">${batchesToAdd.map((b) => `<option value="${b.id}">${e(shortDate(b.batch_date))} · ${e(b.description || `Batch #${b.id}`)} · ${money(b.total_cents - b.linked_cents)} left</option>`).join('')}</select>
+      <label class="amount-in">$<input name="amount" inputmode="decimal" placeholder="All that is left" aria-label="Amount to add (blank for all that is left)"></label><button type="submit" class="button-outline">Add batch</button>`, 'inline-form add-line') : '';
+  const giftRow = (g, box) => `<tr><td>${box}</td><td>${e(shortDate(g.gift_date))}</td><td>${e(g.person_name)}</td><td>${e(g.fund_name)}</td><td>${e(METHOD_LABELS[g.method] || g.method || '')}</td><td class="num">${money(g.amount)}</td><td class="num">${g.fee_cents ? money(g.fee_cents) : '—'}</td></tr>`;
+  const giftHead = '<thead><tr><th></th><th>Date</th><th>Giver</th><th>Fund</th><th>Method</th><th class="num">Amount</th><th class="num">Fee</th></tr></thead>';
+  const giftsHeld = gifts.length ? `<h3>Gifts on this deposit</h3>${open ? `<form method="POST" action="/api/v1/gift-batch-write">${hidden('op', 'unassign_gifts')}${id}` : ''}<div class="table-scroll"><table class="pm-table dep-gifts">${giftHead}<tbody>${gifts.map((g) => giftRow(g, open ? `<input type="checkbox" name="gift" value="${g.id}" aria-label="Select this gift">` : '')).join('')}</tbody></table></div>${open ? '<button type="submit" class="button-outline">Take the checked gifts off</button></form>' : ''}` : '';
+  const addGifts = open ? `<details class="dep-add"${lines.length ? '' : ' open'}><summary>Add online or other gifts not in a deposited batch</summary>
+      <form method="GET" action="/" class="inline-form">${hidden('section', 'giving')}${hidden('page', 'reconciliation')}${id}<label>From <input type="date" name="from" value="${e(from)}"></label><label>To <input type="date" name="to" value="${e(to)}"></label><button type="submit" class="button-outline">Show</button></form>
+      ${unassigned.length ? `<form method="POST" action="/api/v1/gift-batch-write">${hidden('op', 'assign_gifts')}${id}<div class="table-scroll"><table class="pm-table dep-gifts">${giftHead}<tbody>${unassigned.map((g) => giftRow(g, `<input type="checkbox" name="gift" value="${g.id}" aria-label="Select this gift">`)).join('')}</tbody></table></div><button type="submit" class="button-outline">Add the checked gifts</button></form>`
+        : '<p class="muted-line">No gifts in these dates are waiting for a deposit.</p>'}</details>` : '';
+  const edit = open ? `<details class="dep-add"><summary>Change the date, type, reference or notes</summary>${post('update_deposit', `<input type="date" name="deposit_date" value="${e(d.deposit_date)}" aria-label="Deposit date" required>${sourceSelect(d.source || 'mixed')}<input name="external_ref" maxlength="80" value="${e(d.external_ref || '')}" placeholder="Bank reference" aria-label="Bank reference"><input name="notes" maxlength="500" value="${e(d.notes || '')}" placeholder="Notes" aria-label="Notes"><button type="submit" class="button-outline">Save</button>`)}</details>` : '';
+  const match = open
+    ? post('reconcile_deposit', `${hidden('stay', '1')}<label class="amount-in">Bank statement $<input name="bank_amount" inputmode="decimal" value="${dollarsIn(expected)}" aria-label="Amount on the bank statement"></label><button type="submit">Match to the bank</button>`)
+    : `<span class="tone-good">Matched to the bank</span> ${post('reopen_deposit', `${hidden('stay', '1')}<button type="submit" class="link-button">Reopen</button>`)}`;
+  const remove = open ? post('delete_deposit', '<button type="submit" class="link-button tone-bad">Delete this deposit</button>') : '';
+  return `<div class="panel panel-spaced dep-detail">
+    <div class="panel-head"><h2>Deposit of ${e(longDate(d.deposit_date))}${d.external_ref ? ` · ${e(d.external_ref)}` : ''}</h2><a href="${href('reconciliation')}">Back to all deposits</a></div>
+    <p class="muted-line">${e(SOURCE_LABELS[d.source] || 'Deposit')}${d.notes ? ` · ${e(d.notes)}` : ''}</p>
+    ${figures}
+    <div class="dep-actions">${match}${remove}</div>
+    <h3>Batches on this deposit</h3>
+    ${lineRows ? `<div class="table-scroll"><table class="pm-table"><thead><tr><th>Batch</th><th>On this deposit</th><th></th></tr></thead><tbody>${lineRows}</tbody></table></div>` : '<p class="muted-line">No batches on this deposit.</p>'}
+    ${addBatch}
+    ${giftsHeld}
+    ${addGifts}
+    ${edit}
+    ${lines.length && gifts.length ? '<p class="muted-line">This deposit holds both batches and separate gifts; its total is the batches, as in Connect.</p>' : ''}
+  </div>`;
+}
+
+export function renderReconciliationPage({ result, status, today, deposit = null }) {
   if (!result.ok) return `${statusBanner(status)}${unavailable('Deposits', result.message)}`;
-  const { batches, deposits, lines } = result.data;
+  const { batches, deposits, lines, summary } = result.data;
   const batchById = new Map(batches.map((b) => [b.id, b]));
-  const waiting = batches.filter((b) => b.closed && b.deposit_status?.key === 'needs_deposit' && b.total_cents > 0);
+  const waiting = batches.filter((b) => b.closed && ['needs_deposit', 'split'].includes(b.deposit_status?.key) && b.total_cents > 0 && b.total_cents > (b.linked_cents || 0));
   const openDeposits = deposits.filter((d) => d.status !== 'reconciled');
   const lastMatched = deposits.filter((d) => d.status === 'reconciled').map((d) => d.deposit_date).sort().at(-1);
-  const top = kpis([
+  const top = summary ? workQueue(summary) : kpis([
     ['Matched through', lastMatched ? e(shortDate(lastMatched)) : '—', 'Latest deposit reconciled to the bank'],
     ['Deposits to match', String(openDeposits.length), openDeposits.length ? 'Waiting on the bank statement' : 'All matched', openDeposits.length ? 'warn' : 'good'],
-    ['Batches waiting for a deposit', String(waiting.length), waiting.length ? money(waiting.reduce((s, b) => s + b.total_cents, 0)) : 'Nothing waiting', waiting.length ? 'warn' : ''],
+    ['Batches waiting for a deposit', String(waiting.length), waiting.length ? money(waiting.reduce((s, b) => s + b.total_cents - (b.linked_cents || 0), 0)) : 'Nothing waiting', waiting.length ? 'warn' : ''],
   ]);
   const rows = deposits.slice(0, 40).map((d) => {
     const names = lines.filter((l) => l.deposit_id === d.id).map((l) => batchById.get(l.batch_id)).filter(Boolean)
       .map((b) => `${shortDate(b.batch_date)}${b.description ? ` · ${b.description}` : ''}`);
-    const given = d.batch_count > 0 ? d.line_cents : 0;
+    const given = d.given_cents ?? (d.batch_count > 0 ? d.line_cents : 0);
+    const holds = names.join('; ') || (d.gift_count ? `${d.gift_count} gift${d.gift_count === 1 ? '' : 's'}` : '—');
     const diff = d.bank_cents === null || d.bank_cents === undefined ? null : d.bank_cents - given;
     const action = d.status === 'reconciled'
       ? `<span class="tone-good">Matched</span> <form method="POST" action="/api/v1/gift-batch-write" class="inline-form matched-reopen"><input type="hidden" name="op" value="reopen_deposit"><input type="hidden" name="deposit_id" value="${d.id}"><button type="submit" class="link-button">Reopen</button></form>`
-      : `<form method="POST" action="/api/v1/gift-batch-write" class="inline-form"><input type="hidden" name="op" value="reconcile_deposit"><input type="hidden" name="deposit_id" value="${d.id}"><input name="bank_amount" inputmode="decimal" value="${(given / 100).toFixed(2)}" aria-label="Amount on the bank statement" class="bank-in"><button type="submit" class="button-outline">Match</button></form>`;
-    return `<tr><td>${e(shortDate(d.deposit_date))}</td><td>${e(names.join('; ') || '—')}<small>${e(d.external_ref || '')}</small></td><td>${money(given)}</td>
+      : `<form method="POST" action="/api/v1/gift-batch-write" class="inline-form"><input type="hidden" name="op" value="reconcile_deposit"><input type="hidden" name="deposit_id" value="${d.id}"><input name="bank_amount" inputmode="decimal" value="${dollarsIn(given - (d.fee_cents || 0))}" aria-label="Amount on the bank statement" class="bank-in"><button type="submit" class="button-outline">Match</button></form>`;
+    return `<tr><td><a href="${href('reconciliation', { deposit_id: String(d.id) })}">${e(shortDate(d.deposit_date))}</a></td><td>${e(holds)}<small>${e(d.external_ref || '')}</small></td><td>${money(given)}</td>
+      <td>${d.fee_cents ? money(d.fee_cents) : '—'}</td>
       <td>${d.bank_cents === null || d.bank_cents === undefined ? '—' : money(d.bank_cents)}</td>
       <td class="${diff ? 'tone-bad' : 'tone-muted'}">${diff === null ? '—' : `${diff < 0 ? '−' : ''}${money(Math.abs(diff))}`}</td><td class="actions">${action}</td></tr>`;
   }).join('');
+  const newDeposit = `<details class="panel panel-spaced edit-panel"><summary>Start a deposit for online or other gifts</summary>
+    <form method="POST" action="/api/v1/gift-batch-write" class="inline-form deposit-form"><input type="hidden" name="op" value="create_deposit">
+      <input type="date" name="deposit_date" value="${today}" aria-label="Deposit date" required>${sourceSelect('online')}
+      <input name="external_ref" maxlength="80" placeholder="Bank or processor reference (optional)" aria-label="Bank reference"><button type="submit" class="button-outline">Start deposit</button></form>
+    <p class="muted-line">Then add its gifts. A processor payout is matched net of fees; the fees each gift carries are shown beside the bank amount.</p></details>`;
   return `${statusBanner(status)}
-    <p class="lede">Closed batches go on a bank deposit; each deposit is matched against the amount on the operating checking statement.</p>
+    <p class="lede">Closed batches go on a bank deposit (all at once, or split across bank runs); each deposit is matched against the amount on the operating checking statement.</p>
     ${top}
-    ${waiting.length ? `<div class="panel panel-spaced"><h2>Closed batches waiting for a deposit</h2><ul class="row-list">${waiting.map((b) => `<li><div><b>${e(shortDate(b.batch_date))} · ${e(b.description || `Batch #${b.id}`)}</b><small>${b.entry_count} gifts · ${money(b.total_cents)}</small></div><div class="right">${depositForm(b, today, 'reconciliation')}</div></li>`).join('')}</ul></div>` : ''}
-    <div class="panel panel-spaced list-panel">${rows ? `<div class="table-scroll"><table class="pm-table"><thead><tr><th>Date</th><th>Batches</th><th>Deposit total</th><th>Bank amount</th><th>Diff.</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty-note">No deposits yet.</div>'}</div>
-    <p class="muted-line">Online giving deposited net of processor fees is matched in Connect’s Giving tab, where fees are recorded per gift.</p>`;
+    ${deposit ? renderDepositDetail(deposit, today) : ''}
+    ${waiting.length ? `<div class="panel panel-spaced"><h2>Closed batches waiting for a deposit</h2><ul class="row-list">${waiting.map((b) => `<li><div><b>${e(shortDate(b.batch_date))} · ${e(b.description || `Batch #${b.id}`)}</b><small>${b.entry_count} gifts · ${money(b.total_cents)}${b.linked_cents ? ` · ${money(b.total_cents - b.linked_cents)} not yet deposited` : ''}</small></div><div class="right">${depositForm(b, today, 'reconciliation', openDeposits)}</div></li>`).join('')}</ul></div>` : ''}
+    <div class="panel panel-spaced list-panel">${rows ? `<div class="table-scroll"><table class="pm-table"><thead><tr><th>Date</th><th>Holds</th><th>Deposit total</th><th>Fees</th><th>Bank amount</th><th>Diff.</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty-note">No deposits yet.</div>'}
+      <p class="muted-line">Open a deposit by its date to split batches, add gifts, see fees, change it or delete it.</p></div>
+    ${newDeposit}`;
 }
 
 // ── Batch reports ─────────────────────────────────────────────────────────────────────────────
@@ -261,6 +341,14 @@ export function renderBatchReportsPage({ result, today }) {
 }
 
 export const GIFT_BATCH_STYLES = `
+  .amount-in { display:inline-flex; align-items:center; gap:2px; }
+  .amount-in input { width:7rem; }
+  .dep-detail h3 { margin:18px 0 6px; font-size:15px; }
+  .dep-actions { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-top:12px; }
+  .dep-add { margin-top:14px; }
+  .dep-add summary { cursor:pointer; font-weight:600; }
+  .dep-gifts .num { text-align:right; white-space:nowrap; }
+  .add-line { margin-top:10px; }
     .matched-reopen { display:inline-flex; margin-left:10px; }
     .batch-hero { display:flex; flex-wrap:wrap; align-items:flex-end; gap:18px 36px; margin-top:16px; padding:20px 22px; border-radius:10px; background:var(--navy); color:#fff; position:relative; }
     .batch-hero small { display:block; color:#C9D2E2; font-size:12px; letter-spacing:.08em; }

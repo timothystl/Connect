@@ -61,6 +61,14 @@ export function fetchOnlineGiving(env, accessJwt) {
   return callConnectContract(env, accessJwt, 'giving-online-v1');
 }
 
+// One deposit's lines, gifts and totals, and what could be added to it (Reconciliation to bank).
+export function fetchGivingDeposit(env, accessJwt, { id, from, to } = {}) {
+  const query = { id: String(id) };
+  if (/^\d{4}-\d{2}-\d{2}$/.test(from || '')) query.from = from;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(to || '')) query.to = to;
+  return callConnectContract(env, accessJwt, 'giving-deposit-v1', { query });
+}
+
 export function postGivingBatchWrite(env, accessJwt, body) {
   return callConnectContract(env, accessJwt, 'giving-batch-write-v1', { method: 'POST', body });
 }

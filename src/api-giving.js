@@ -2,6 +2,7 @@
 import { json, getAuthInfo } from './auth.js';
 import { isoWeekKey, LETTER_TYPES, mergeLetterRecipients, computeReceiptQueue, computeGivingPlateaus, fetchGivingPlateauRows, plateauWeeksElapsed, computeDepositTotals, batchDepositStatus, batchDepositStatusFromCounts } from './api-utils.js';
 import { ensureGivingYearRollups } from './giving-rollups.js';
+import { readOfferingsSummary } from './giving-deposits.js';
 import { applyGiftReduction } from './giving-gift-corrections.js';
 import { linkOnlineGift, ignoreOnlineGift, cancelRecurringSchedule, updateRecurringSchedule } from './giving-online.js';
 import { staxRequest, staxMockupConfigured, loadEstimatedFeeRate, saveFeePercent, feeRateToPercent } from './stax-giving-mockup.js';
@@ -104,66 +105,8 @@ if (seg === 'giving/batches' && method === 'GET') {
 // live re-read of the same batches/deposits the panels below it show, so the queue can't claim
 // work that has already been done (or miss work that was just created).
 if (seg === 'giving/offerings-summary' && method === 'GET') {
-  const yearStart = new Date().toISOString().slice(0, 4) + '-01-01';
-  // "Awaiting deposit" is scoped to a recent window. Batch-to-deposit links only start existing
-  // from this feature onward, so every historical batch is technically undeposited — counting
-  // them would have the card announce years of money still in the safe on the day it ships.
   const awaitingDays = Math.min(365, Math.max(7, parseInt(url.searchParams.get('awaiting_days') || '90')));
-  const awaitingSince = new Date(Date.now() - awaitingDays * 86400000).toISOString().slice(0, 10);
-  const [openRes, awaitingRes, unrecRes, feeRes] = await Promise.all([
-    // Counted but not posted — batches still open.
-    db.prepare(
-      `SELECT COUNT(*) AS n, COALESCE(SUM(t.cents),0) AS cents FROM (
-         SELECT gb.id, COALESCE(bt.total_cents,0) AS cents
-           FROM giving_batches gb LEFT JOIN giving_batch_totals bt ON bt.batch_id=gb.id
-          WHERE gb.closed=0) t`
-    ).first(),
-    // Counted, but not all of it has reached a deposit yet (no line at all, or lines that don't
-    // cover the batch total — a partial bank run leaves the remainder here too).
-    db.prepare(
-      `SELECT COUNT(*) AS n, COALESCE(SUM(t.gap),0) AS cents FROM (
-         SELECT gb.id, COALESCE(bt.total_cents,0) - COALESCE(dc.linked_cents,0) AS gap
-           FROM giving_batches gb
-           LEFT JOIN giving_batch_totals bt ON bt.batch_id=gb.id
-           LEFT JOIN (
-             SELECT batch_id, SUM(amount_cents) AS linked_cents
-               FROM giving_deposit_lines GROUP BY batch_id
-           ) dc ON dc.batch_id=gb.id
-          WHERE gb.batch_date >= ?) t
-        WHERE t.gap > 50`
-    ).bind(awaitingSince).first(),
-    // At the bank, but nobody has entered what the bank actually received. Windowed like
-    // awaiting_deposit above: an old deposit left unreconciled under the earlier per-gift flow
-    // would otherwise pin this card open forever and hold `earliest` at its date.
-    db.prepare(
-      `SELECT COUNT(*) AS n, MIN(deposit_date) AS earliest FROM giving_deposits
-        WHERE bank_cents IS NULL AND deposit_date >= ?`
-    ).bind(awaitingSince).first(),
-    // Given - deposited across every deposit with a bank figure this year. Two rules matter:
-    // a deposit with no bank figure is skipped entirely rather than counted as $0 fees (which
-    // would read as a windfall), and "given" follows the same lines-else-gifts rule as the
-    // deposit list — a deposit built the old per-gift way has no batch lines, and subtracting
-    // its bank amount from zero would report a large negative fee. A deposit that holds NOTHING
-    // is skipped outright for the same reason — there is no giving behind it to derive a fee
-    // from, only a bank figure, and "given − bank" would be that figure negated.
-    db.prepare(
-      `SELECT COALESCE(SUM(
-                CASE WHEN (SELECT COUNT(*) FROM giving_deposit_lines dl WHERE dl.deposit_id=d.id) > 0
-                     THEN (SELECT COALESCE(SUM(dl.amount_cents),0) FROM giving_deposit_lines dl WHERE dl.deposit_id=d.id)
-                     ELSE (SELECT COALESCE(SUM(ge.amount),0) FROM giving_entries ge WHERE ge.deposit_id=d.id)
-                END - d.bank_cents),0) AS cents
-         FROM giving_deposits d
-        WHERE d.bank_cents IS NOT NULL AND d.deposit_date >= ?
-          AND ((SELECT COUNT(*) FROM giving_deposit_lines dl WHERE dl.deposit_id=d.id) > 0
-            OR (SELECT COUNT(*) FROM giving_entries ge WHERE ge.deposit_id=d.id) > 0)`
-    ).bind(yearStart).first(),
-  ]);
-  return json({
-    open_batches:          { count: openRes?.n || 0, cents: openRes?.cents || 0 },
-    awaiting_deposit:      { count: awaitingRes?.n || 0, cents: awaitingRes?.cents || 0, days: awaitingDays },
-    unreconciled_deposits: { count: unrecRes?.n || 0, earliest_date: unrecRes?.earliest || '' },
-    fees_ytd:              { cents: feeRes?.cents || 0 },
-  });
+  return json(await readOfferingsSummary(db, awaitingDays));
 }
 
 // ── Giving tab overview stat tiles (This Week / This Month / YTD / Givers) ──

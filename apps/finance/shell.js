@@ -26,7 +26,7 @@ import { GIFT_BATCH_STYLES, renderBatchPage, renderBatchReportsPage, renderRecon
 import { renderOnlineFormSettingsPage } from './online-giving-pages.js';
 import { renderGymIncomePage } from './gym-income-pages.js';
 import { fetchGymIncome, describeGymIncomeFailure } from './gym-income-client.js';
-import { describeGivingBatchFailure, fetchGivingBatchLedger, fetchGivingBatchWorkspace, fetchGivingTransactions, fetchOnlineGiving, postGivingBatchWrite, fetchGivingOnlineSettings, postGivingOnlineSettingsWrite } from './connect-giving-batch-client.js';
+import { describeGivingBatchFailure, fetchGivingDeposit, fetchGivingBatchLedger, fetchGivingBatchWorkspace, fetchGivingTransactions, fetchOnlineGiving, postGivingBatchWrite, fetchGivingOnlineSettings, postGivingOnlineSettingsWrite } from './connect-giving-batch-client.js';
 import { GIFT_TRANSACTIONS_STYLES, buildTransactionsCsv, normalizeTransactionParams, renderOnlineGivingPage, renderTransactionsPage, transactionsCsvFilename, transactionsCsvParams } from './gift-transactions-pages.js';
 import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, fetchGivingBoard, fetchGivingReport, postGivingBoardEmail, postGivingFollowupWrite, postGivingImpactWrite } from './connect-giving-analytics-client.js';
 import { GIVING_REPORTS_STYLES, givingReportParams, givingReportRequests, impactStatementsFromForm, renderGivingReportPage } from './giving-reports-pages.js';
@@ -899,12 +899,17 @@ function resolveIncomeVsBudget(churchReportLive) {
 const GIFT_BATCH_OPS = new Set([
   'create_batch', 'add_gift', 'remove_gift', 'close_batch', 'reopen_batch', 'deposit_batch', 'reconcile_deposit', 'reopen_deposit',
   'correct_gift', 'void_gift', 'restore_gift', 'link_online_gift', 'ignore_online_gift', 'update_recurring', 'cancel_recurring',
+  'create_deposit', 'set_deposit_line', 'remove_deposit_line', 'assign_gifts', 'unassign_gifts', 'update_deposit', 'delete_deposit',
 ]);
+// Deposit tools (Reconciliation to bank): these return to the deposit they changed.
+const DEPOSIT_OPS = new Set(['create_deposit', 'set_deposit_line', 'remove_deposit_line', 'assign_gifts', 'unassign_gifts', 'update_deposit', 'delete_deposit']);
 const GIFT_BATCH_MESSAGES = {
   create_batch: 'Batch started.', add_gift: 'Gift added.', remove_gift: 'Gift removed.', close_batch: 'Batch closed and locked for deposit.',
   reopen_batch: 'Batch reopened.', deposit_batch: 'Batch put on a deposit.', reconcile_deposit: 'Deposit matched to the bank.', reopen_deposit: 'Deposit reopened.',
   correct_gift: 'Gift corrected. The change is in its history.', void_gift: 'Recorded. The gift’s totals and statement now reflect it.', restore_gift: 'Void undone.',
   link_online_gift: 'Online gift matched to the giver.', ignore_online_gift: 'Left anonymous.', update_recurring: 'Recurring gift changed.', cancel_recurring: 'Recurring gift cancelled.',
+  create_deposit: 'Deposit started. Add its batches or gifts below.', set_deposit_line: 'Batch amount on this deposit saved.', remove_deposit_line: 'Batch taken off this deposit.',
+  assign_gifts: 'Gifts added to this deposit.', unassign_gifts: 'Gifts taken off this deposit.', update_deposit: 'Deposit details saved.', delete_deposit: 'Deposit deleted. Its batches and gifts are waiting for a deposit again.',
 };
 // A correction sends only what its form carries, blank fields included (clearing a memo is a
 // correction); the other ops send what was filled in.
@@ -917,7 +922,9 @@ async function handleGiftBatchWrite(request, env, url) {
   if (!isSameOriginPost(request, url)) return back('batch', { status: 'error', message: 'That form did not come from Timothy Finance.' });
   let form;
   try { form = await request.formData(); } catch { return back('batch', { status: 'error', message: 'The form could not be read.' }); }
-  const op = String(form.get('op') || '');
+  let op = String(form.get('op') || '');
+  // "Deposit" on a waiting batch with an open deposit chosen adds the batch to that deposit.
+  if (op === 'deposit_batch' && /^\d{1,9}$/.test(String(form.get('deposit_id') || ''))) op = 'set_deposit_line';
   if (!GIFT_BATCH_OPS.has(op)) return back('batch', { status: 'error', message: 'Unknown action.' });
   const field = (name) => String(form.get(name) || '').trim();
   const body = { op };
@@ -928,6 +935,15 @@ async function handleGiftBatchWrite(request, env, url) {
   if (op === 'correct_gift') {
     for (const name of GIFT_CORRECTION_FIELDS) if (form.has(name)) body[name] = field(name);
     if (body.person_id === 'anonymous') body.person_id = '';
+  }
+  if (op === 'assign_gifts' || op === 'unassign_gifts') body.entry_ids = form.getAll('gift').map((v) => String(v)).filter((v) => /^\d{1,12}$/.test(v)).slice(0, 500);
+  if (op === 'update_deposit') body.notes = field('notes');
+  if (DEPOSIT_OPS.has(op)) {
+    const result = await postGivingBatchWrite(env, request.headers.get('Cf-Access-Jwt-Assertion') || '', body);
+    const depositId = String(result.ok ? (result.result.deposit_id ?? '') : (body.deposit_id ?? ''));
+    const keep = depositId && /^\d+$/.test(depositId) ? { deposit_id: depositId } : {};
+    if (!result.ok) return back('reconciliation', { ...keep, status: 'error', message: describeGivingBatchFailure(result).slice(0, 200) });
+    return back('reconciliation', { ...keep, status: 'ok', msg: GIFT_BATCH_MESSAGES[op] });
   }
   const returnTo = field('return');
   if (['transactions', 'online'].includes(returnTo)) {
@@ -949,7 +965,8 @@ async function handleGiftBatchWrite(request, env, url) {
   const onReconcilePage = ['reconcile_deposit', 'reopen_deposit'].includes(op) || field('return') === 'reconciliation';
   const page = onReconcilePage ? 'reconciliation' : 'batch';
   const batchId = String(result.ok ? (result.result.batch_id ?? body.batch_id ?? '') : (body.batch_id ?? ''));
-  const keep = page === 'batch' && batchId ? { batch_id: batchId } : {};
+  const keep = page === 'batch' && batchId ? { batch_id: batchId }
+    : page === 'reconciliation' && field('stay') === '1' && /^\d{1,9}$/.test(body.deposit_id || '') ? { deposit_id: body.deposit_id } : {};
   if (!result.ok) return back(page, { ...keep, status: 'error', message: describeGivingBatchFailure(result).slice(0, 200) });
   return back(page, { ...keep, status: 'ok', msg: GIFT_BATCH_MESSAGES[op] });
 }
@@ -1366,7 +1383,13 @@ function renderSectionBody(ctx) {
       const today = isoDay(new Date());
       const batchStatus = ctx.searchParams.get('status') === 'ok' ? { ok: true, message: ctx.searchParams.get('msg') || 'Saved in Connect.' }
         : ctx.searchParams.get('status') === 'error' ? { ok: false, message: `Not saved: ${ctx.searchParams.get('message') || 'the request did not complete.'}` } : null;
-      if (page.id === 'reconciliation') return renderReconciliationPage({ result: batchResult, status: batchStatus, today });
+      if (page.id === 'reconciliation') {
+        const d = ctx.givingBatch?.deposit;
+        return renderReconciliationPage({
+          result: batchResult, status: batchStatus, today,
+          deposit: d ? (d.ok ? { ok: true, data: d.result } : { ok: false, message: describeGivingBatchFailure(d) }) : null,
+        });
+      }
       if (page.id === 'transactions') return renderTransactionsPage({ result: batchResult, params: normalizeTransactionParams(ctx.searchParams), status: batchStatus });
       if (page.id === 'online') return renderOnlineGivingPage({ result: batchResult, params: ctx.searchParams, status: batchStatus, people: ctx.givingBatch?.people || [] });
       if (page.id === 'reports') return renderBatchReportsPage({ result: batchResult, today });
@@ -4414,6 +4437,11 @@ export default {
         const givingPageId = section.id === 'giving' ? resolveFinancePage(section, pageId).id : null;
         let givingBatch = givingPageId === 'batch'
           ? fetchGivingBatchWorkspace(env, accessJwt, { batchId: url.searchParams.get('batch_id'), q: url.searchParams.get('q') })
+          : givingPageId === 'reconciliation' && /^\d{1,9}$/.test(url.searchParams.get('deposit_id') || '')
+            ? Promise.all([
+              fetchGivingBatchLedger(env, accessJwt),
+              fetchGivingDeposit(env, accessJwt, { id: url.searchParams.get('deposit_id'), from: url.searchParams.get('from'), to: url.searchParams.get('to') }),
+            ]).then(([ledger, deposit]) => ({ ...ledger, deposit }))
           : ['reconciliation', 'reports'].includes(givingPageId) ? fetchGivingBatchLedger(env, accessJwt)
             : givingPageId === 'transactions' ? fetchGivingTransactions(env, accessJwt, normalizeTransactionParams(url.searchParams))
               : givingPageId === 'online' ? Promise.all([

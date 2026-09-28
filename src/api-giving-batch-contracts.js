@@ -11,6 +11,7 @@ import { verifyAccessJwt } from './access-jwt.js';
 import { getRolePermissions, permissionsForRole, batchDepositStatusFromCounts, computeDepositTotals } from './api-utils.js';
 import { correctGift, voidGift, restoreGift } from './giving-gift-corrections.js';
 import { respondWithGivingTransactionsV1 } from './api-giving-transactions-contract.js';
+import { DEPOSIT_WRITE_OPS, applyDepositWrite, readDepositDetail, readOfferingsSummary } from './giving-deposits.js';
 import { readOnlineGiving, linkOnlineGift, ignoreOnlineGift, cancelRecurringSchedule, updateRecurringSchedule } from './giving-online.js';
 
 const MAX_SPLITS = 4;
@@ -127,17 +128,22 @@ export async function respondWithGivingBatchWorkspaceV1(url, db) {
 // Reconciliation to bank and Batch reports pages. Totals only; no donor names.
 export async function respondWithGivingBatchLedgerV1(db) {
   const batches = withDepositStatus((await db.prepare(`${BATCH_LIST_SQL} ORDER BY gb.batch_date DESC, gb.id DESC LIMIT 120`).all()).results || []);
-  const deposits = (await db.prepare(
+  const deposits = ((await db.prepare(
     `SELECT d.id, d.deposit_date, d.source, d.external_ref, d.bank_cents, d.status, d.reconciled_at, d.notes,
             (SELECT COALESCE(SUM(dl.amount_cents),0) FROM giving_deposit_lines dl WHERE dl.deposit_id=d.id) AS line_cents,
-            (SELECT COUNT(*) FROM giving_deposit_lines dl WHERE dl.deposit_id=d.id) AS batch_count
+            (SELECT COUNT(*) FROM giving_deposit_lines dl WHERE dl.deposit_id=d.id) AS batch_count,
+            (SELECT COUNT(*) FROM giving_entries ge WHERE ge.deposit_id=d.id) AS gift_count,
+            (SELECT COALESCE(SUM(ge.amount),0) FROM giving_entries ge WHERE ge.deposit_id=d.id) AS gift_cents,
+            (SELECT COALESCE(SUM(ge.fee_cents),0) FROM giving_entries ge WHERE ge.deposit_id=d.id) AS fee_cents
        FROM giving_deposits d ORDER BY d.deposit_date DESC, d.id DESC LIMIT 120`
-  ).all()).results || [];
+  ).all()).results || []).map((d) => ({ ...d, given_cents: d.batch_count > 0 ? d.line_cents : d.gift_cents }));
   const lines = (await db.prepare(
     `SELECT dl.deposit_id, dl.batch_id, dl.amount_cents FROM giving_deposit_lines dl
       WHERE dl.deposit_id IN (SELECT id FROM giving_deposits ORDER BY deposit_date DESC, id DESC LIMIT 120)`
   ).all()).results || [];
-  return json({ contract: 'connect.giving-batch-ledger.v1', batches, deposits, lines });
+  // The work queue: open batches, money not yet on a deposit, deposits not yet matched, fees.
+  const summary = await readOfferingsSummary(db);
+  return json({ contract: 'connect.giving-batch-ledger.v1', batches, deposits, lines, summary });
 }
 
 async function openBatch(db, batchId) {
@@ -236,6 +242,10 @@ export async function applyGivingBatchWrite(db, body, email, env = {}) {
     if (!row.closed) return { error: 'Close the batch before depositing it.', status: 409 };
     const remaining = row.total_cents - row.linked_cents;
     if (remaining <= 0) return { error: 'This batch is already fully on a deposit.', status: 409 };
+    // A batch can be split across deposits: `amount` puts only part of what is left on this one.
+    const amount = body.amount === undefined || body.amount === '' ? remaining : toCents(body.amount);
+    if (!Number.isInteger(amount) || amount <= 0) return { error: 'Enter how much of the batch is on this deposit.', status: 400 };
+    if (amount > remaining) return { error: `Only ${(remaining / 100).toFixed(2)} of this batch is not already on a deposit.`, status: 400 };
     if (!isDay(body.deposit_date)) return { error: 'Choose the deposit date.', status: 400 };
     const source = ['check', 'cash', 'online', 'mixed'].includes(body.source) ? body.source : 'mixed';
     const ref = String(body.external_ref || '').trim().slice(0, 80);
@@ -243,10 +253,11 @@ export async function applyGivingBatchWrite(db, body, email, env = {}) {
       'INSERT INTO giving_deposits (deposit_date, source, processor, external_ref, notes) VALUES (?,?,?,?,?)'
     ).bind(body.deposit_date, source, '', ref, '').run();
     await db.prepare('INSERT INTO giving_deposit_lines (deposit_id, batch_id, amount_cents) VALUES (?,?,?)')
-      .bind(r.meta?.last_row_id, batchId, remaining).run();
+      .bind(r.meta?.last_row_id, batchId, amount).run();
     await audit(db, 'giving_batch_deposited_via_finance', batchId, email);
     return { ok: true, deposit_id: r.meta?.last_row_id };
   }
+  if (DEPOSIT_WRITE_OPS.includes(op)) return applyDepositWrite(db, body, email);
   if (op === 'reconcile_deposit' || op === 'reopen_deposit') {
     const depositId = parseInt(body.deposit_id, 10);
     const dep = await db.prepare('SELECT id FROM giving_deposits WHERE id=?').bind(depositId).first();
@@ -281,6 +292,14 @@ export async function handleGivingBatchContracts(req, env, path) {
     const auth = await authorizeGivingBatchContract(req, env, { write: false });
     if (auth.response) return auth.response;
     return respondWithGivingBatchLedgerV1(env.DB);
+  }
+  // One deposit with its lines, gifts, totals, and what could be added to it.
+  if (path === '/api/contracts/giving-deposit-v1' && req.method === 'GET') {
+    const auth = await authorizeGivingBatchContract(req, env, { write: false });
+    if (auth.response) return auth.response;
+    const detail = await readDepositDetail(env.DB, Number.parseInt(url.searchParams.get('id') || '', 10), { from: url.searchParams.get('from') || '', to: url.searchParams.get('to') || '' });
+    if (!detail) return json({ error: 'That deposit no longer exists.' }, 404);
+    return json({ contract: 'connect.giving-deposit.v1', ...detail });
   }
   if (path === '/api/contracts/giving-transactions-v1' && req.method === 'GET') {
     const auth = await authorizeGivingBatchContract(req, env, { write: false });
