@@ -24,6 +24,9 @@ jobs:
     steps:
       - name: Check out proposed change
         uses: actions/checkout@v4
+        with:
+          # Full history so the DEPLOY_VERSION check can build main's cached assets to compare.
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -44,6 +47,9 @@ jobs:
 
       - name: Verify built HTML scripts parse
         run: node .github/scripts/check-built-scripts.js
+
+      - name: Require a DEPLOY_VERSION bump when cached Connect assets change
+        run: node --no-warnings .github/scripts/check-deploy-version.js
 
       - name: Validate Worker configurations without deploying
         env:
