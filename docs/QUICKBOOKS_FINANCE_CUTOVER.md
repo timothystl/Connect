@@ -72,6 +72,6 @@ Done September 28, 2026, after the step 7 check:
 Still to do by hand:
 - Delete Connect's Worker secrets `QB_CLIENT_ID`, `QB_CLIENT_SECRET` (and `QB_ENVIRONMENT` if set) from `timothy-connect`.
 - Remove Connect's old redirect URI from the Intuit app, if not already done.
-- Connect's own copies of `finance_qb_connection` and `finance_qb_snapshot` in `timothy-connect-db` are no longer read. They hold a revoked token and an old report cache. Dropping them is left for a deliberate decision, since it deletes data.
+- Connect's own copies of `finance_qb_connection` and `finance_qb_snapshot` in `timothy-connect-db`: Andrew asked on September 28 for them to be backed up and dropped. `initDb()` no longer creates them, and `.github/workflows/drop-connect-quickbooks-tables.yml` records a D1 Time Travel bookmark, keeps a JSON copy (tokens blanked) as a 90-day workflow artifact, then drops both tables. Run it only after a Connect release without the `CREATE TABLE` statements is live.
 
 The rollback section above no longer applies as written: going back would mean restoring the removed Connect code.
