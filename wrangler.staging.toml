@@ -14,7 +14,7 @@ workers_dev = true
 #
 # Deploy:   wrangler deploy --config wrangler.staging.toml
 # Secrets:  wrangler secret put <NAME> --config wrangler.staging.toml
-# Migrate:  wrangler d1 migrations apply tlc-volunteer-db-staging --remote --config wrangler.staging.toml
+# Migrate:  wrangler d1 migrations apply timothy-connect-db-staging --remote --config wrangler.staging.toml
 # URL:      https://timothy-connect-staging.<subdomain>.workers.dev
 
 [vars]
@@ -37,10 +37,13 @@ enabled = true
 enabled = true
 invocation_logs = true
 
+# Renamed from tlc-volunteer-db-staging 2026-09-28 (D1 has no in-place rename): the data was copied
+# and reconciled by .github/workflows/migrate-staging-d1-database.yml. The old database is left
+# untouched until it is retired.
 [[d1_databases]]
 binding = "DB"
-database_name = "tlc-volunteer-db-staging"
-database_id = "d1d2a73f-67f2-4780-8b96-c97ec6bc2df3"
+database_name = "timothy-connect-db-staging"
+database_id = "a289a124-8fdc-4060-9af6-6def85df8828"
 migrations_dir = "migrations"
 
 [[kv_namespaces]]
