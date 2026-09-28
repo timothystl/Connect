@@ -41,6 +41,17 @@ Local development has no Finance host, so there the original Connect pages still
 `/recurring` still goes to Connect's Giving → Recurring pane). The `/admin/api/giving/stax-mockup/*`
 data routes below are unchanged.
 
+### Removing the sandbox test gifts
+
+Every gift the mockup records is a sandbox test (Connect has no live Stax key), but it lands in
+the real `giving_entries` ledger with `source='stax_mockup'`, so it appears in Finance's Online
+giving tabs and totals. `.github/workflows/purge-stax-sandbox-gifts.yml` removes them: run it with
+`mode=PREVIEW` to see counts only, then `mode=DELETE`, which records a D1 Time Travel bookmark and
+a 30-day JSON artifact of every removed row before deleting the sandbox gifts, their review-queue
+rows and correction history, the emptied "Stax Giving (mockup)" batches and their deposit links,
+and the sandbox recurring schedules and customer links. Any new test through the mockup form adds
+gifts again; re-run it afterward.
+
 ## Where the public form actually lives
 
 Andrew's call: the real giving portal needs to be on the main website domain, not
