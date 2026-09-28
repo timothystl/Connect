@@ -77,3 +77,15 @@ describe('Tuition Aid planner in Finance', () => {
     expect(tuitionAidWorkspaceTarget('people?q=smith&limit=10', 'GET')?.search).toBe('?q=smith&limit=10');
   });
 });
+
+describe('Tuition Aid storage status line', () => {
+  it('says where the records are kept, with counts and never names', async () => {
+    const { describeTuitionStorage } = await import('../apps/finance/tuition-aid-workspace.js');
+    expect(describeTuitionStorage({ mode: 'connect' })).toBe('Records are stored in Connect’s database.');
+    expect(describeTuitionStorage({ mode: 'copying' })).toContain('changes are paused');
+    expect(describeTuitionStorage({ mode: 'finance', status: 'verified', moved_at: '2026-09-28 03:10:00', tables: [{ table: 'tuition_students', count: 41 }, { table: 'tuition_config', count: 11 }] }))
+      .toBe('Records are stored in Finance’s database (moved 2026-09-28 03:10 UTC and checked row for row: 41 students, 11 settings).');
+    expect(describeTuitionStorage({ mode: 'finance', status: 'failed' })).toContain('Connect still has every record');
+    expect(describeTuitionStorage(null)).toBe('');
+  });
+});

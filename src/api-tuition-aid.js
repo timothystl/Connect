@@ -36,7 +36,9 @@ async function fillFromPerson(db, b) {
   return { ...b, family: p.last_name || b.family || '', child: p.first_name || b.child || '', household_id: p.household_id ?? b.household_id ?? null };
 }
 
-export async function handleTuitionAidApi(req, env, url, method, seg, db, isFinance) {
+// db holds the tuition_* tables (Connect's or Finance's D1, see src/tuition-storage.js); peopleDb
+// is always Connect's, for the linked person's name and household.
+export async function handleTuitionAidApi(req, env, url, method, seg, db, isFinance, peopleDb = db) {
   if (!isFinance) return json({ error: 'Access denied' }, 403);
 
   // ── Full bundle: students + config + history + year rates + per-student year pins ──
@@ -69,7 +71,7 @@ export async function handleTuitionAidApi(req, env, url, method, seg, db, isFina
     if (!b.is_pipeline && !b.family && !b.person_id) return json({ error: 'Family name or a linked person is required' }, 400);
     if (b.is_pipeline && !b.family) return json({ error: 'Family name is required' }, 400);
     if (b.is_pipeline && !b.birth_year) return json({ error: 'Birth year is required for a pipeline entrant' }, 400);
-    b = await fillFromPerson(db, b);
+    b = await fillFromPerson(peopleDb, b);
     const maxSort = await db.prepare(`SELECT COALESCE(MAX(sort_order),-1) as m FROM tuition_students`).first();
     const famPct = Number.isInteger(b.fam_pct) ? b.fam_pct : 50;
     const lhsAward = Number.isInteger(b.lhs_award_cents) ? b.lhs_award_cents : 120000;
@@ -122,7 +124,7 @@ export async function handleTuitionAidApi(req, env, url, method, seg, db, isFina
     if (method === 'PATCH') {
       let b; try { b = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
       if (Object.prototype.hasOwnProperty.call(b, 'person_id') && b.person_id) {
-        b = await fillFromPerson(db, b);
+        b = await fillFromPerson(peopleDb, b);
       }
       const sets = [];
       const binds = [];

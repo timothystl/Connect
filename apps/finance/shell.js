@@ -1,5 +1,5 @@
 import { ACCOUNTING_JS, ACCOUNTING_CSS, ACCOUNTING_CSP, accountingViewer, renderAccountingWorkspace, relayAccountingWorkspace } from './accounting-workspace.js';
-import { relayTuitionAidWorkspace, renderTuitionAidWorkspace, tuitionAidViewer } from './tuition-aid-workspace.js';
+import { fetchTuitionStorageStatus, relayTuitionAidWorkspace, renderTuitionAidWorkspace, tuitionAidViewer } from './tuition-aid-workspace.js';
 import { FINANCE_RELEASE_CHANNEL, FINANCE_VERSION } from './version.js';
 import givingFixture from '../../contracts/examples/giving-summary-v1.synthetic.json';
 import { acceptConnectGivingSummaryV1 } from '../../contracts/validators/connect-giving-consumer.js';
@@ -1804,7 +1804,8 @@ export default {
     if (route.id === 'tuition-aid-workspace-page') {
       const viewer = tuitionAidViewer(await fetchVerifiedRole(rawEnv, request.headers.get('Cf-Access-Jwt-Assertion') || ''));
       if (!viewer) return response('Access denied: Tuition Aid access could not be verified', { status: 403 });
-      const res = response(request.method === 'HEAD' ? null : renderTuitionAidWorkspace(viewer, env.RELEASE_SHA), {
+      const storageStatus = request.method === 'HEAD' ? null : await fetchTuitionStorageStatus(rawEnv, request.headers.get('Cf-Access-Jwt-Assertion') || '');
+      const res = response(request.method === 'HEAD' ? null : renderTuitionAidWorkspace(viewer, env.RELEASE_SHA, storageStatus), {
         headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
       });
       res.headers.set('Content-Security-Policy', ACCOUNTING_CSP);
