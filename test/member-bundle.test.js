@@ -359,6 +359,10 @@ describe('app-ext.js is lazy for every role', () => {
   ], { serve: SERVE, ...opts });
   const names = (ctx) => ctx.__injected.map((s) => s.split('?')[0]);
   const tick = () => new Promise((r) => setTimeout(r, 5));
+  // Chained lazy loads run each bundle on its own timer (see appendChild above), and the Finance
+  // bundle is large enough that a busy CI runner can still be evaluating it after one short tick.
+  // Wait for the condition itself, up to a second, instead of a fixed delay.
+  const until = async (ready) => { for (let i = 0; i < 200 && !ready(); i += 1) await tick(); };
   const activate = (ctx, tab) => ctx.document.getElementById('tab-' + tab).classList.add('active');
 
   it('is not needed to land on Home, attendance entry included', async () => {
@@ -430,7 +434,7 @@ describe('app-ext.js is lazy for every role', () => {
     ctx.loadSettings = () => { settingsLoaded = true; };
     ctx.showTab('settings');
     expect(settingsLoaded).toBe(true);
-    await tick();
+    await until(() => typeof ctx.exportPeople === 'function');
     expect(names(ctx)).toEqual(['/admin/app-ext.js']);
     expect(typeof ctx.exportPeople).toBe('function');
   });
@@ -439,7 +443,7 @@ describe('app-ext.js is lazy for every role', () => {
     const ctx = staffCtx();
     ctx.applyRoleUI('finance', '', { finance: true, staff: false, register: false, reports: true });
     ctx.showTab('finance');
-    await tick();
+    await until(() => typeof ctx.loadFinance === 'function');
     expect(names(ctx)).toEqual(['/admin/app-ext.js', '/admin/app-finance.js']);
     expect(typeof ctx.loadFinance).toBe('function');
   });
@@ -491,7 +495,7 @@ describe('app-ext.js is lazy for every role', () => {
     expect(names(ctx)).toEqual(['/admin/app-ext.js']);
     failing.length = 0; // the connection comes back
     ctx.showTab('finance');
-    await tick();
+    await until(() => typeof ctx.loadFinance === 'function');
     expect(names(ctx)).toEqual(['/admin/app-ext.js', '/admin/app-ext.js', '/admin/app-finance.js']);
     expect(typeof ctx.loadFinance).toBe('function');
   });
