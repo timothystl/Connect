@@ -35,6 +35,19 @@ accounting writes onto the selected destination, and makes the standalone app th
 entry from Connect. Advanced tools remain reachable and use the same selected accounting data.
 Finance `1.0.0-alpha.53` also corrects production/staging labels and records its deployment SHA.
 
+## September 27 user-interface cutover
+
+Connect now sends live accounting work to `finance.timothystl.org`. Its embedded Finance workspace
+retains only **Budget** and **Compensation**, at Andrew's direction, because those are planning and
+scenario surfaces rather than live accounting reports. The Connect sidebar exposes those two
+destinations separately; the Finance App link opens the standalone application.
+
+This does not sever the application contract. Connect remains authoritative for people, roles,
+funds, individual gifts, batches, deposits, donor statements, and Giving analytics. Finance reads
+and writes those facts through authenticated versioned Connect contracts; it never creates a
+second donor or Giving ledger. Retiring the embedded report navigation therefore must not remove
+the Connect contract endpoints or the `CONNECT_SERVICE` binding.
+
 Alternate native draft/import writers are intentionally not enabled alongside the established
 handlers. Their incomplete parallel schemas would create conflicting records. Production uses
 the existing validated edit workflows against the migrated accounting tables instead.

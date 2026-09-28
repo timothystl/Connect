@@ -4,7 +4,7 @@
 // version bump
 // automatically invalidates the long-lived browser cache on those files, with nowhere else that
 // needs updating in step.
-export const DEPLOY_VERSION = '0.1.0-alpha.7';
+export const DEPLOY_VERSION = '0.1.0-alpha.8';
 
 export const JS_CORE = String.raw`<script>
 // ── DEPLOY VERSION ───────────────────────────────────────────────────
@@ -311,22 +311,15 @@ function typeDotHtml(mt, size) {
 // in api-chms.js) that governs whether this role sees it: 'finance' for the rest of the
 // workspace, 'compensation' for the Compensation Planner, 'budget' for Budget — independent
 // toggles, so a role can hold any one without the others.
+// After the standalone Finance cutover, Connect retains only the two planning surfaces whose
+// figures are scenarios rather than live accounting records. All live Finance work opens the
+// standalone app from the sidebar. Keeping this registry narrow also makes stale #finance links
+// fall back to Budget/Compensation instead of reopening a retired legacy report.
 var FIN_TOPNAV_ITEMS = [
-  { id: 'health', label: 'Financial Health', finSection: 'health', perm: 'finance' },
-  { id: 'church', label: 'Church Report', finSection: 'church', perm: 'finance' },
-  { id: 'balance', label: 'Balance Sheet', finSection: 'balance', perm: 'finance' },
-  { id: 'daycare', label: 'Daycare Report', finSection: 'daycare', perm: 'finance' },
-  { id: 'property', label: 'Commercial Property', finSection: 'property', perm: 'finance' },
   { id: 'planning', label: 'Budget', finSection: 'planning', perm: 'budget' },
-  { id: 'accounts', label: 'Chart of Accounts', finSection: 'accounts', perm: 'finance' },
   { id: 'compensation', label: 'Compensation', finSection: 'compensation', perm: 'compensation' },
-  { id: 'fullreport', label: 'Full Report', finSection: 'fullreport', perm: 'finance' },
-  { divider: true },
-  // Everything that used to be interleaved with the reports — connections, file imports,
-  // hand-entered adjustments, the danger zone — lives behind this divider, off the reading pages.
-  { id: 'data', label: 'Data & Imports', finSection: 'data', perm: 'finance' },
 ];
-var _finActiveNavId = 'health';
+var _finActiveNavId = 'planning';
 // Which FIN_TOPNAV_ITEMS entries (non-divider) this role may actually see, in order — used both
 // to render the sub-nav and by showTab() below to validate/fall back a requested section.
 function finVisibleNavItems() {
@@ -368,10 +361,18 @@ function finNavGo(id) {
   showTab('finance', item.finSection);
 }
 
-// Reverted 2026-09-24 at Andrew's request: the standalone finance.timothystl.org workspace
-// isn't ready to replace this tab's formatting/layout for daily use yet. Opens the same
-// in-Connect Finance tab on every host, including production.
+// Live accounting work belongs in the standalone Finance app. Budget and Compensation remain
+// explicit Connect sidebar items and call showTab('finance', ...) directly instead of this.
 function openFinanceWorkspace() {
+  if (location.hostname === 'connect.timothystl.org') {
+    location.assign('https://finance.timothystl.org/');
+    return;
+  }
+  if (location.hostname === 'connect-staging.timothystl.org') {
+    location.assign('https://finance-staging.timothystl.org/');
+    return;
+  }
+  // Local development keeps the embedded surface reachable without depending on a remote login.
   showTab('finance');
 }
 
@@ -432,8 +433,9 @@ function showTab(name, finSection) {
   var ca = document.querySelector('.content-area');
   if (ca) ca.classList.remove('pv-mode', 'hv-mode', 'ov-mode');
   document.querySelectorAll('.s-item[data-tab]').forEach(function(b) {
-    b.classList.toggle('active', b.dataset.tab === name);
-    if (b.setAttribute) { if (b.dataset.tab === name) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
+    var active = b.dataset.tab === name && (!b.dataset.finSection || b.dataset.finSection === finSection);
+    b.classList.toggle('active', active);
+    if (b.setAttribute) { if (active) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
   });
   document.querySelectorAll('.tab-panel').forEach(function(p) {
     p.classList.toggle('active', p.id === 'tab-' + name);
@@ -478,6 +480,10 @@ function showTab(name, finSection) {
     // a council member granted only Compensation, only Budget, both, or neither, without a
     // role-name check here.
     var visible = finVisibleNavItems();
+    if (!visible.length && (location.hostname === 'connect.timothystl.org' || location.hostname === 'connect-staging.timothystl.org')) {
+      openFinanceWorkspace();
+      return;
+    }
     var requested = finSection && visible.filter(function(i) { return i.id === finSection; })[0];
     if (!requested) finSection = visible.length ? visible[0].id : 'health';
     if (finSection) _finActiveNavId = finSection;
@@ -920,8 +926,14 @@ function applyPermissionUI(perms) {
     });
   });
   var canSeeFinanceTab = permView('finance') || permView('compensation') || permView('budget');
-  document.querySelectorAll('.require-financeov').forEach(function(el) {
-    el.style.display = canSeeFinanceTab ? '' : 'none';
+  document.querySelectorAll('.require-financeapp').forEach(function(el) {
+    el.style.display = permView('finance') ? '' : 'none';
+  });
+  document.querySelectorAll('.require-connect-budget').forEach(function(el) {
+    el.style.display = permView('budget') ? '' : 'none';
+  });
+  document.querySelectorAll('.require-connect-compensation').forEach(function(el) {
+    el.style.display = permView('compensation') ? '' : 'none';
   });
   // Surfaces that name an individual giver — batches, transactions, deposits, letters,
   // statements, per-donor reports, the profile Giving tab. Hidden for an anon-giving role,
