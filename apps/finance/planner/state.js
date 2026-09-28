@@ -22,7 +22,7 @@ export const S = {
   purposeTags: [],
   view: 'plan',
   selected: 0,
-  drawerOpen: true,
+  drawerOpen: false,     // the selected worker's editor, open beneath their row in Set pay
   refYear: null,         // year the rates view is editing; null = the target year
   toast: '',
   saveState: '',         // '' | 'saving' | 'saved' | error text

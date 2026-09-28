@@ -54,12 +54,6 @@ function env({ role = 'council', compensation = 'edit', username = 'elder1', pla
 
 const JWT = { 'Cf-Access-Jwt-Assertion': 'signed.jwt' };
 
-async function planPage(e) {
-  const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan', { headers: JWT }), e);
-  expect(res.status).toBe(200);
-  return res.text();
-}
-
 function save(e, pairs) {
   return worker.fetch(new Request('https://finance.test/api/v1/compensation-council-overlay-save', {
     method: 'POST', headers: { ...JWT, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(pairs).toString(),
@@ -103,26 +97,13 @@ describe('saveCouncilOverlay', () => {
   });
 });
 
+// The Plan page's form editor for this route is retired with Plan (new view): council members
+// steer their draft on the Planner, whose saves land in the same Finance row. The route remains.
 describe('Compensation plan page', () => {
-  it('shows a council member with compensation edit their draft editor, pre-filled from their saved draft', async () => {
-    const html = await planPage(env());
-    expect(html).toContain('Your raise-plan draft');
-    expect(html).toContain('action="/api/v1/compensation-council-overlay-save"');
-    expect(html).toContain('<option value="custom" selected>Custom %</option>');
-    expect(html).toContain('name="comp_custom_pct" min="-100" max="100" step="0.1" value="3.5"');
-    expect(html).toContain('name="worker_method_1"');
-    expect(html).toMatch(/name="worker_method_1"[^]*?<option value="worksheet" selected>/);
-  });
-  it('renders the live roster without the synthetic fixture (production Finance has none)', async () => {
-    const html = await planPage(env({ role: 'council', compensation: 'view' }));
-    expect(html).toContain('Per-person compensation roster');
-    expect(html).toContain('Test Worker A');
-    expect(html).not.toContain('Data unavailable');
-  });
-
-  it('does not offer the editor to council with view-only compensation, or to admin', async () => {
-    expect(await planPage(env({ compensation: 'view' }))).not.toContain('Your raise-plan draft');
-    expect(await planPage(env({ role: 'admin' }))).not.toContain('Your raise-plan draft');
+  it('sends council to the Planner, where their draft is edited', async () => {
+    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan', { headers: JWT }), env());
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe('/?section=compensation&page=planner');
   });
 });
 
@@ -131,7 +112,7 @@ describe('POST /api/v1/compensation-council-overlay-save', () => {
     const db = fakeFinanceDb();
     const res = await save(env({ db }), [['comp_method', 'scalepct'], ['comp_scale_pct', '95'], ['worker_method_0', 'cola']]);
     expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toBe('/?section=compensation&page=plan&status=ok');
+    expect(res.headers.get('location')).toBe('/?section=compensation&page=planner&status=ok');
     expect(db.writes[0].args[0]).toBe('finance_salary_planner_council_elder1');
     expect(JSON.parse(db.writes[0].args[1])).toEqual({ compMethod: 'scalepct', compPerWorkerMethod: { 0: 'cola' }, compScalePct: 95, compBaselineRosterOnly: false });
   });

@@ -55,7 +55,9 @@ describe('Compensation Planner in Finance', () => {
     expect(html).toContain('<div id="cp-root" class="cp">');
     expect(html).toContain('<script src="/compensation-planner/app.js?v=sha1" defer></script>');
     expect(html).not.toContain('<iframe');
-    expect(html).toContain('page=plan');
+    // Plan (new view) is retired; the nav no longer offers it.
+    expect(html).not.toContain('Plan (new view)');
+    expect(html).not.toContain('page=plan"');
     const config = JSON.parse(html.match(/<script type="application\/json" id="cp-config">([^<]*)<\/script>/)[1]);
     expect(config).toMatchObject({ role: 'admin', permissions: { compensation: 'edit' }, preview: false });
     expect(config.targetYear).toBe(config.baseYear + 1);
@@ -66,7 +68,7 @@ describe('Compensation Planner in Finance', () => {
     expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/);
     expect(res.headers.get('x-frame-options')).toBe('DENY');
     // Every other page still runs no script at all.
-    const plan = await call(makeEnv().env, '/?section=compensation&page=plan');
+    const plan = await call(makeEnv().env, '/?section=compensation&page=benefits');
     expect(plan.headers.get('content-security-policy')).not.toContain('script-src');
   });
 
