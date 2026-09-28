@@ -31,7 +31,9 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
       { id: 'reconciliation', label: 'Reconciliation to bank', status: 'live' },
       { id: 'reports', label: 'Batch reports', status: 'live' },
       { id: 'quick-entry', label: 'Record a single gift', status: 'live' },
-      { id: 'online-form', label: 'Online form settings', status: 'live' },
+      // A tab of Online giving (Payments · Recurring · Givers & matching · Form settings), so it
+      // is left out of the sidebar list and highlights Online giving there instead.
+      { id: 'online-form', label: 'Online form settings', status: 'live', navParent: 'online' },
     ],
   },
   {

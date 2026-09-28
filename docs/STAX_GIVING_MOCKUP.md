@@ -23,6 +23,24 @@ only:
 Every response is labeled MOCKUP. No production Stax merchant account, and no change to
 Tithe.ly's own sync into `giving_entries`.
 
+## Staff screens live in Finance
+
+Staff work with the mockup's gifts in Finance, under **Giving Entry → Online giving**, whose tabs
+are Payments, Recurring, Givers & matching (the review queue), and Form settings (the cover-the-fee
+percentage and which funds the public form offers). Every change relays to Connect, which stays
+the only store. On production and staging, Connect's old staff URLs redirect to those tabs
+(`financeOriginForConnectHost` in `connect-worker.js`):
+
+| Old Connect URL | Finance tab |
+|---|---|
+| `/admin/giving/stax-mockup` | `?section=giving&page=online&view=associations` |
+| `/admin/giving/stax-mockup/funds` | `?section=giving&page=online-form` |
+| `/admin/giving/stax-mockup/recurring` | `?section=giving&page=online&view=recurring` |
+
+Local development has no Finance host, so there the original Connect pages still render (and
+`/recurring` still goes to Connect's Giving → Recurring pane). The `/admin/api/giving/stax-mockup/*`
+data routes below are unchanged.
+
 ## Where the public form actually lives
 
 Andrew's call: the real giving portal needs to be on the main website domain, not
@@ -51,8 +69,9 @@ Website repo's `give.timothystl.org/stax-mockup` form still works: the checkout 
 detects the missing `STAX_SANDBOX_API_KEY`/`STAX_SANDBOX_WEB_PAYMENTS_TOKEN` and runs in **demo
 mode**, skipping real Stax.js card fields and recording the gift through the *exact same*
 `recordStaxGift()` path a verified webhook would use. So the matching, ledger, and staff review
-queue are all fully clickable today. Then visit `/admin/giving/stax-mockup` on this repo's own
-domain (signed in as admin/finance) to see any gift that didn't match a person, and link it.
+queue are all fully clickable today. Then open Finance → Giving Entry → Online giving → Givers &
+matching (or `/admin/giving/stax-mockup` in local development) to see any gift that didn't match
+a person, and link it.
 
 ## Wiring up a real Stax sandbox
 

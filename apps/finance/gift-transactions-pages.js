@@ -284,6 +284,19 @@ function onlineHref(view, extra = {}) {
   return `/?${search.toString().replace(/&/g, '&amp;')}`;
 }
 
+// The Online giving tabs. Form settings is its own page (page=online-form) so its reads and
+// writes stay separate, but it sits in the same tab row as the other three views.
+export function renderOnlineGivingTabs(active, unmatchedCount = 0) {
+  const tabs = [
+    ['payments', 'Payments', onlineHref('payments')],
+    ['recurring', 'Recurring', onlineHref('recurring')],
+    ['associations', `Givers &amp; matching${unmatchedCount ? ` (${unmatchedCount})` : ''}`, onlineHref('associations')],
+    ['form', 'Form settings', '/?section=giving&amp;page=online-form'],
+  ];
+  return `<div class="chip-row" role="navigation" aria-label="Online giving">${tabs.map(([id, label, href]) => (id === active
+    ? `<span class="chip is-on" aria-current="page">${label}</span>` : `<a class="chip" href="${href}">${label}</a>`)).join('')}</div>`;
+}
+
 function payerName(row) {
   return row.person_id ? e(row.person_name) : row.payer_name ? `${e(row.payer_name)} <small class="tone-bad">not matched</small>` : '<span class="tone-muted">Anonymous</span>';
 }
@@ -362,7 +375,6 @@ export function renderOnlineGivingPage({ result, params, status, people = [] }) 
   const t = data.totals;
   const view = ['recurring', 'associations'].includes(params.get('view')) ? params.get('view') : 'payments';
   const activeRecurring = data.recurring.filter((s) => s.status !== 'cancelled');
-  const tab = (id, label) => (view === id ? `<span class="chip is-on">${label}</span>` : `<a class="chip" href="${onlineHref(id)}">${label}</a>`);
   return `${statusBanner(status)}
     <div class="grid">
       <div class="card"><small>Online this month</small><strong>${money(t.month_cents)}</strong><span>${t.month_count} gifts</span></div>
@@ -370,7 +382,7 @@ export function renderOnlineGivingPage({ result, params, status, people = [] }) 
       <div class="card"><small>Processor fees this year</small><strong>${money(t.year_fee_cents)}</strong><span>Where the processor reports them</span></div>
       <div class="card"><small>Recurring gifts</small><strong>${activeRecurring.length}</strong><span>${data.unmatched.length ? `<span class="tone-warn">${data.unmatched.length} online gift${data.unmatched.length === 1 ? '' : 's'} to match</span>` : 'All online gifts matched'}</span></div>
     </div>
-    <div class="chip-row">${tab('payments', 'Payments')}${tab('recurring', 'Recurring')}${tab('associations', `Givers &amp; matching${data.unmatched.length ? ` (${data.unmatched.length})` : ''}`)}</div>
+    ${renderOnlineGivingTabs(view, data.unmatched.length)}
     ${view === 'recurring' ? recurringView(data) : view === 'associations' ? associationsView(data, params, people) : paymentsView(data)}`;
 }
 
