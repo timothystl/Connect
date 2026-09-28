@@ -2118,55 +2118,6 @@ body.perm-giving-anon .require-giving-named{display:none!important;}
 .status-pill.status-contacted{background:rgba(46,126,166,.12);color:var(--teal);}
 .status-pill.status-confirmed{background:rgba(107,143,113,.15);color:var(--success);}
 .status-pill.status-declined{background:rgba(184,92,58,.1);color:var(--danger);}
-/* ── Tuition Aid Planner ── */
-.tap-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;}
-.tap-kpi{background:var(--white);border:1px solid var(--border);border-radius:12px;padding:14px 16px;}
-.tap-kpi.accent{background:var(--tint);border:1px solid var(--primary);}
-.tap-kpi .tap-lbl{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--warm-gray);font-weight:700;}
-.tap-kpi.accent .tap-lbl{color:var(--primary);}
-.tap-kpi .tap-val{font-size:1.5rem;font-weight:700;color:var(--navy);margin-top:2px;}
-.tap-kpi.accent .tap-val{color:var(--primary);}
-.tap-kpi .tap-note{font-size:.72rem;color:var(--warm-gray);margin-top:2px;}
-.tap-kpi.accent .tap-note{color:var(--muted);}
-.tap-pathway{background:var(--white);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:18px;}
-.tap-path-track{display:flex;align-items:flex-start;gap:0;overflow-x:auto;padding:6px 0 4px;}
-.tap-path-stage{flex:1 0 auto;min-width:100px;text-align:center;position:relative;padding:0 6px;}
-.tap-path-stage .tap-dot{width:12px;height:12px;border-radius:50%;background:var(--navy);margin:0 auto 6px;border:3px solid var(--pale-gold);}
-.tap-path-stage.hot .tap-dot{background:var(--gold-accent);border-color:var(--white);box-shadow:0 0 0 4px rgba(201,151,58,.25);}
-.tap-path-line{position:relative;top:6px;height:2px;background:var(--border);margin:0 -50%;z-index:-1;}
-.tap-path-stage:first-child .tap-path-line{display:none;}
-.tap-path-count{font-size:1.1rem;font-weight:700;color:var(--navy);}
-.tap-path-label{font-size:.7rem;text-transform:uppercase;letter-spacing:.03em;color:var(--warm-gray);font-weight:600;}
-.tap-flags{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
-.tap-flag{font-size:.75rem;background:var(--pale-gold);color:var(--warning);padding:5px 11px;border-radius:20px;border:1px solid var(--border);}
-.tap-flag b{color:var(--navy);}
-.tap-grid2{display:grid;grid-template-columns:1.3fr 1fr;gap:16px;margin-bottom:16px;}
-.tap-grid2b{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
-@media(max-width:900px){.tap-grid2,.tap-grid2b{grid-template-columns:1fr;}}
-.tap-gauge-track{width:100%;height:20px;background:var(--linen);border-radius:10px;overflow:hidden;}
-.tap-gauge-fill{height:100%;background:var(--primary);width:0%;transition:width .2s ease,background .2s ease;}
-.tap-gauge-fill.over{background:var(--error);}
-.tap-gauge-label{display:flex;justify-content:space-between;margin-top:6px;font-size:.82rem;color:var(--warm-gray);}
-.tap-gauge-label .tap-gauge-text{font-weight:700;color:var(--navy);}
-.tap-gauge-label .tap-over-text{color:var(--danger)!important;}
-.tap-slider-row{display:flex;align-items:center;gap:8px;}
-.tap-slider-row input[type=range]{flex:1 1 auto;min-width:70px;accent-color:var(--navy);cursor:pointer;}
-.tap-slider-row input[type=range].over{accent-color:var(--danger);}
-.tap-slider-row input[type=number]{width:56px;flex:0 0 auto;font-size:.78rem;text-align:right;border:1px solid var(--border);border-radius:6px;padding:3px 5px;color:var(--navy);font-weight:600;font-family:var(--font-body);}
-.tap-slider-row input[type=number].over{border-color:var(--danger);color:var(--danger);}
-.tap-slider-caption{font-size:.68rem;color:var(--warm-gray);margin-top:2px;}
-.tap-award-cell{font-variant-numeric:tabular-nums;font-weight:700;color:var(--navy);text-align:right;white-space:nowrap;}
-.tap-pipeline-box{background:var(--pale-gold);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px;}
-.tap-pipeline-box h4{margin:0 0 8px;font-size:.85rem;color:var(--warning);}
-.tap-pipeline-form{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
-.tap-pipeline-form input{font-size:.82rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--white);font-family:var(--font-body);}
-.tap-pipeline-chip{display:inline-flex;align-items:center;gap:6px;background:var(--white);border:1px solid var(--border);border-radius:20px;padding:5px 10px;margin:0 8px 8px 0;font-size:.8rem;}
-.tap-pipeline-remove{border:none;background:none;color:var(--danger);font-size:15px;font-weight:700;cursor:pointer;line-height:1;padding:0 2px;}
-.tap-lhs-toggle{display:block;font-size:.68rem;font-weight:400;color:var(--warm-gray);margin-top:3px;text-align:right;cursor:pointer;white-space:nowrap;}
-.tap-lhs-toggle input{vertical-align:middle;margin-right:3px;cursor:pointer;}
-.tap-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;font-size:.85rem;}
-.tap-controls select{padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--white);color:var(--charcoal);font-family:var(--font-body);}
-
 #p-count-mobile{display:none;}
 /* ══ PHONE-FIRST PASS — Dashboard & People ══════════════════════════════════════════════
    Everything before this was defect repair: stop iOS zooming, stop tables widening the page,
@@ -2275,8 +2226,6 @@ body.perm-giving-anon .require-giving-named{display:none!important;}
   textarea{font-size:16px!important;}
   /* Keep the intentionally-oversized attendance entry fields oversized. */
   .att-input{font-size:1.65rem!important;}
-  /* The one input pinned narrow enough to clip its own text at 16px. */
-  .tap-slider-row input[type=number]{width:78px;}
 }
 </style>
 </head>

@@ -377,7 +377,7 @@ describe('app-ext.js is lazy for every role', () => {
     expect(typeof ctx.initReports, 'app-ext.js code is in the eager bundles').toBe('undefined');
   });
 
-  for (const tab of ['giving', 'attendance', 'reports', 'tuitionaid', 'volunteers', 'import']) {
+  for (const tab of ['giving', 'attendance', 'reports', 'volunteers', 'import']) {
     it('fetches app-ext.js (only) the first time ' + tab + ' is opened', async () => {
       const ctx = staffCtx();
       ctx.applyRoleUI('admin', '', null);
@@ -400,9 +400,9 @@ describe('app-ext.js is lazy for every role', () => {
   });
 
   it('skips the deferred load when the user has already left the tab', async () => {
-    const ctx = staffCtx({ serve: { ...SERVE, '/admin/app-ext.js': CHMS_APP_EXT_JS + '\nvar __extLoadCalls = 0; function loadTuitionAid() { __extLoadCalls++; }' } });
+    const ctx = staffCtx({ serve: { ...SERVE, '/admin/app-ext.js': CHMS_APP_EXT_JS + '\nvar __extLoadCalls = 0; function loadAttendance() { __extLoadCalls++; }' } });
     ctx.applyRoleUI('admin', '', null);
-    ctx.showTab('tuitionaid'); // panel never marked active in this harness = user moved on
+    ctx.showTab('attendance'); // panel never marked active in this harness = user moved on
     await tick();
     expect(ctx.__extLoadCalls).toBe(0);
   });
@@ -469,7 +469,7 @@ describe('app-ext.js is lazy for every role', () => {
       .sort();
     expect(used).toEqual([
       '_givView', 'givOffSetPane', 'givSetView', 'goToBatch', 'initReports',
-      'letterheadImgHtml', 'loadAttendance', 'loadTuitionAid', 'renderLetterHTML',
+      'letterheadImgHtml', 'loadAttendance', 'renderLetterHTML',
       'volLoadEvents', 'volLoadMinistryRoles', 'volLoadSignups', 'volLoadTemplates',
     ]);
   });

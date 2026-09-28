@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { handleTuitionAidApi, tapAttendsLhsDefaultTrue, tapAttendsLhsFlag } from '../src/api-tuition-aid.js';
-import { CHMS_APP_EXT_JS } from '../src/html-chms.js';
 
 // Reported: unchecking "Plans to attend LHS" on the Tuition Aid planner does not save — the box
 // comes back checked after a reload.
@@ -140,42 +139,5 @@ describe('unchecking "Plans to attend LHS" (the reported bug)', () => {
     await call(db, { method: 'PATCH', seg: `tuition-aid/students/${id}`, body: { attends_lhs: 0 } });
     await call(db, { method: 'PATCH', seg: `tuition-aid/students/${id}`, body: { fam_pct: 40 } });
     expect(attendsOf(db, id)).toBe(0);
-  });
-});
-
-// ── The Family Share % slider is gone ────────────────────────────────────────
-describe('K-8 Family Share % is a typed figure, not a slider', () => {
-  const src = CHMS_APP_EXT_JS;
-
-  it('renders no range input in the K-8 planner rows', () => {
-    const cell = src.match(/tapOutsideAidChange\(this,[\s\S]{0,700}?tap-slider-caption/);
-    expect(cell).not.toBeNull();
-    expect(cell[0]).not.toContain('type="range"');
-    expect(cell[0]).toContain('max="100"');
-  });
-
-  it('keeps the number box, so the percentage is still editable', () => {
-    expect(src).toContain('tapSliderChange(this,');
-  });
-
-  it('keeps the LHS award slider, which is dollars and was not the ask', () => {
-    expect(src).toMatch(/type="range"[\s\S]{0,80}step="25"/);
-  });
-
-  it('does not write the clamped value back into the box being typed in', () => {
-    // Rewriting a focused input's own value mid-keystroke is the controlled-input round-trip that
-    // made the Finance boxes type backward (FIN52). With the range gone there is no second
-    // control left to mirror, so there is nothing legitimate left to write either.
-    const fn = src.match(/function tapSliderChange\([\s\S]*?\n\}/)[0];
-    expect(fn).not.toContain('nums[0].value');
-    expect(fn).toContain('Math.min(100,');
-  });
-
-  it('still flags the K-8 rows red when the budget is blown', () => {
-    // The over-budget class used to ride the range input. Dropping that selector along with the
-    // slider would have silently removed the per-row signal.
-    const fn = src.match(/document\.querySelectorAll\('#tap-k8-body[^\n]*/)[0];
-    expect(fn).toContain('input[type=number]');
-    expect(fn).toContain("'over'");
   });
 });

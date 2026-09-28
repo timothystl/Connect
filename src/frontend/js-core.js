@@ -4,7 +4,7 @@
 // version bump
 // automatically invalidates the long-lived browser cache on those files, with nowhere else that
 // needs updating in step.
-export const DEPLOY_VERSION = '0.1.0-alpha.10';
+export const DEPLOY_VERSION = '0.1.0-alpha.11';
 
 export const JS_CORE = String.raw`<script>
 // ── DEPLOY VERSION ───────────────────────────────────────────────────
@@ -362,17 +362,12 @@ function finNavGo(id) {
 }
 
 // Tuition Aid moved to Finance for good (Andrew, Sept 28 2026): the planner runs at
-// finance.timothystl.org/?section=tuition. Local development keeps the embedded tab.
+// finance.timothystl.org/?section=tuition. Connect no longer has a Tuition Aid tab of its own, so
+// staging and local development open Finance's staging planner.
 function openTuitionAid() {
-  if (location.hostname === 'connect.timothystl.org') {
-    location.assign('https://finance.timothystl.org/?section=tuition');
-    return;
-  }
-  if (location.hostname === 'connect-staging.timothystl.org') {
-    location.assign('https://finance-staging.timothystl.org/?section=tuition');
-    return;
-  }
-  showTab('tuitionaid');
+  location.assign(location.hostname === 'connect.timothystl.org'
+    ? 'https://finance.timothystl.org/?section=tuition&page=planner'
+    : 'https://finance-staging.timothystl.org/?section=tuition&page=planner');
 }
 
 // Live accounting work belongs in the standalone Finance app. Budget and Compensation remain
@@ -429,7 +424,6 @@ function showTab(name, finSection) {
   // This is a UX convenience (avoid landing on a blank/403'd tab); the real enforcement is
   // server-side in handleChmsApi's ACL block, which reads the same permissions.
   if (name === 'giving'     && !_userPermissions.finance)  return;
-  if (name === 'tuitionaid' && !_userPermissions.finance)  return;
   if (name === 'finance'    && !_userPermissions.finance)  return;
   if (name === 'attendance' && !_userPermissions.staff)    return;
   if (name === 'register'   && !_userPermissions.register) return;
@@ -438,7 +432,7 @@ function showTab(name, finSection) {
   if (name === 'settings'   && _userRole !== 'admin') return;
   if (name === 'volunteers' && _userRole !== 'admin' && _userRole !== 'volunteer') return;
   if (name === 'scheduler'  && _userRole !== 'admin') return;
-  var labels = {home:'Home',people:'People',households:'Households',organizations:'Organizations',giving:'Giving',tuitionaid:'Tuition Aid Planner',finance:'Financial Reports',reports:'Reports',attendance:'Attendance',register:'Register',import:'Import',settings:'Settings',volunteers:'Volunteers',scheduler:'Scheduler'};
+  var labels = {home:'Home',people:'People',households:'Households',organizations:'Organizations',giving:'Giving',finance:'Financial Reports',reports:'Reports',attendance:'Attendance',register:'Register',import:'Import',settings:'Settings',volunteers:'Volunteers',scheduler:'Scheduler'};
   // Push browser history so back button works (skip when responding to popstate)
   if (!_tabFromPopState) {
     history.pushState({ tab: name }, '', '#' + name);
@@ -476,7 +470,6 @@ function showTab(name, finSection) {
       // load), and givSetView is what actually loads that view's data — calling loadBatches()
       // alone would refresh a panel that may not even be the one on screen.
       if (name === 'giving') givSetView(_givView);
-      if (name === 'tuitionaid') loadTuitionAid();
       if (name === 'reports') initReports();
       if (name === 'attendance') loadAttendance();
       if (name === 'volunteers') { volLoadSignups(); volLoadMinistryRoles(); volLoadEvents(); volLoadTemplates(); }
@@ -524,7 +517,7 @@ function showTab(name, finSection) {
 // ── Lazy-load app-ext.js (and, for a member, app-staff.js) ──────────────────
 // The shell sends a member one script (app-member.js: core + people + households) and every
 // other role two (plus app-staff.js: settings + dashboard + register). app-ext.js — Giving,
-// Reports, Export/Import, Attendance, Tuition Aid and Volunteers, ~640KB of source — is in
+// Reports, Export/Import, Attendance and Volunteers, ~560KB of source — is in
 // NO role's eager script tags. Most roles land on Home or People, so it is fetched once, the
 // first time one of its tabs is opened (a volunteer, who lands on Volunteers, fetches it right
 // away). Same pattern as app-finance.js and the Scheduler embed below.
@@ -543,7 +536,7 @@ function showTab(name, finSection) {
 // first: js-reports reaches for js-settings/js-dashboard helpers in places. typeof initReports
 // is the readiness check for app-ext.js, typeof loadSettings for app-staff.js — both names are
 // unique to their bundle.
-var EXT_TABS = { giving: 1, tuitionaid: 1, reports: 1, attendance: 1, volunteers: 1, import: 1 };
+var EXT_TABS = { giving: 1, reports: 1, attendance: 1, volunteers: 1, import: 1 };
 var _extPromise = null; // the in-flight or finished load; reset on failure so a retry refetches
 function isTabActive(name) {
   var p = document.getElementById('tab-' + name);

@@ -93,15 +93,6 @@ describe('MOB1 — scope', () => {
     }
   });
 
-  it('widens the one input pinned too narrow to hold 16px text', () => {
-    // Search the block itself, not the whole sheet: the base rule elsewhere still says 56px,
-    // and matching that would pass for the wrong reason.
-    const body = zoomBlock.text.slice(zoomBlock.text.indexOf('{') + 1);
-    const m = body.match(/\.tap-slider-row input\[type=number\]\{([^}]*)\}/);
-    expect(m, 'rule should live inside the MOB1 block').toBeTruthy();
-    expect(m[1]).toMatch(/width:7\dpx/);
-  });
-
   it('changes nothing on desktop — every declaration is inside the media query', () => {
     const base = STYLE.replace(zoomBlock.text, '');
     expect(base).not.toMatch(/font-size:16px!important/);
