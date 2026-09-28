@@ -29,15 +29,16 @@ export function tapAttendsLhsFlag(v) {
   return v ? 1 : 0;
 }
 
+// Without a people table (Finance), the name and household the caller sent with the link stand.
 async function fillFromPerson(db, b) {
-  if (!b.person_id) return b;
+  if (!b.person_id || !db) return b;
   const p = await db.prepare('SELECT id, first_name, last_name, household_id FROM people WHERE id=?').bind(b.person_id).first();
   if (!p) return b;
   return { ...b, family: p.last_name || b.family || '', child: p.first_name || b.child || '', household_id: p.household_id ?? b.household_id ?? null };
 }
 
-// db holds the tuition_* tables (Connect's or Finance's D1, see src/tuition-storage.js); peopleDb
-// is always Connect's, for the linked person's name and household.
+// db holds the tuition_* tables (Connect's D1, or Finance's: apps/finance/tuition-service.js).
+// peopleDb is Connect's, for a linked person's name and household; Finance passes null.
 export async function handleTuitionAidApi(req, env, url, method, seg, db, isFinance, peopleDb = db) {
   if (!isFinance) return json({ error: 'Access denied' }, 403);
 

@@ -54,7 +54,12 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     // Moved from Connect (Andrew, Sept 28 2026). Connect's own planner, served inside Finance.
     id: 'tuition', label: 'Tuition Aid', group: 'Tuition Aid', permission: 'tuitionaid',
     capabilities: ['K-8 aid planner', 'Lutheran High School aid', 'aid budget and policy', 'year navigator and history', 'pipeline'],
-    pages: [{ id: 'planner', label: 'Tuition Aid planner', status: 'live' }],
+    pages: [
+      { id: 'overview', label: 'Overview', status: 'live' },
+      { id: 'planner', label: 'Planner', status: 'live' },
+      { id: 'past-years', label: 'Past years', status: 'live' },
+      { id: 'settings', label: 'Settings', status: 'live' },
+    ],
   },
   {
     id: 'charts', label: 'Charts', group: 'Charts', permission: 'finance',
