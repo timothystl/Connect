@@ -167,6 +167,9 @@ describe('Giving analysis reports for Finance (giving-reports-v1, giving-impact-
     const bands = await (await report(db, 'bands', `&year=2025&freq=monthly&uplift_cents=2500&fund_id=${general}&seg=reports/giving-insights`)).json();
     expect(bands).toMatchObject({ report: 'bands', freq: 'monthly', uplift_cents: 2500, fund_id: general, year: 2025 });
     expect(bands.summary.givers).toBe(1);
+    const none = await (await report(db, 'bands', '&year=2025&uplift_cents=0')).json();
+    expect(none).toMatchObject({ uplift_cents: 0, summary: { uplift_annual_cents: 0 } });
+    expect((await (await report(db, 'bands', '&year=2025')).json()).uplift_cents).toBe(1000);
     expect(bands).not.toHaveProperty('top_givers');
     expect((await report(db, 'giving-statement')).status).toBe(404);
     expect((await report(db, '__proto__')).status).toBe(404);

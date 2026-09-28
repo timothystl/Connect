@@ -732,7 +732,9 @@ if (seg === 'reports/giving-bands' && method === 'GET') {
   if (!year || isNaN(year)) return json({ error: 'year required' }, 400);
   const scope = url.searchParams.get('scope') === 'person' ? 'person' : 'household';
   const freq  = url.searchParams.get('freq') === 'monthly' ? 'monthly' : 'weekly';
-  const upliftCents = Math.max(0, Math.min(parseInt(url.searchParams.get('uplift_cents') || '', 10) || (freq === 'monthly' ? 4000 : 1000), 100000));
+  // An explicit 0 is a real choice (model no increase); only a missing or unreadable value falls back.
+  const upliftParsed = parseInt(url.searchParams.get('uplift_cents') || '', 10);
+  const upliftCents = Math.max(0, Math.min(Number.isNaN(upliftParsed) ? (freq === 'monthly' ? 4000 : 1000) : upliftParsed, 100000));
   const fundId = parseInt(url.searchParams.get('fund_id') || '', 10) || 0;
   const start = year + '-01-01', end = year + '-12-31';
   const effDate = "COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date)";
