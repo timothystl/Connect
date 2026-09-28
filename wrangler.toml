@@ -52,13 +52,9 @@ custom_domain = false
 pattern = "connect.timothystl.org"
 custom_domain = true
 
-# Old hostname, kept resolving to this same Worker purely so connect-worker.js's
-# isLegacyChmsHost check can 301-redirect staff's existing bookmarks to
-# connect.timothystl.org — not a live app surface anymore.
-[[routes]]
-pattern = "chms.timothystl.org/*"
-zone_name = "timothystl.org"
-custom_domain = false
+# chms.timothystl.org (the old hostname that 301-redirected staff bookmarks to
+# connect.timothystl.org) was retired 2026-09-28: its route and DNS record are gone. The
+# isLegacyChmsHost redirect in connect-worker.js is now unreachable but harmless.
 
 # Renamed from tlc-volunteer-db (Cloudflare D1 database, not the binding name -- DB was
 # already generic) -- the old database still exists and is left untouched. D1 has no in-place
