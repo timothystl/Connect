@@ -65,7 +65,7 @@ import {
 } from './connect-planner.js';
 import { PLANNER_APP_JS } from './planner/bundle.generated.js';
 import { buildBoardLayoutWrites, normalizeBoardLayout } from './board-layout.js';
-import { BUDGET_BUILDER_STYLES, buildPlannerModel, defaultProjectBaseCents, parsePlannerForm, parseProjectLine, plannerBackQuery, plannerCsv, plannerParams, renderBudgetBuilderPage, renderPlannerPrint, applyCouncilDraft } from './planning-builder-pages.js';
+import { BUDGET_BUILDER_STYLES, buildPlannerModel, defaultProjectBaseCents, parsePlannerForm, parseProjectLine, plannerBackQuery, plannerCsv, plannerParams, plannerYears, renderBudgetBuilderPage, renderPlannerPrint, applyCouncilDraft } from './planning-builder-pages.js';
 import { fetchLiveFinanceCashRunway } from './finance-cash-runway-client.js';
 import { defaultLiveBudgetFiscalYear } from './finance-budget-client.js';
 import { FACILITIES_STYLES, renderFacilitiesPage } from './facilities-pages.js';
@@ -1099,13 +1099,14 @@ async function handleBudgetPlannerCsv(request, env, url) {
   const role = await fetchVerifiedRole(env, accessJwt);
   const planningSection = FINANCE_PARITY_SECTIONS.find((s) => s.id === 'planning');
   if (!role.ok || !roleCanAccessSection(role.role, planningSection, role.permissions)) return plain('Access denied', 403);
-  const p = plannerParams(url.searchParams);
+  const asked = plannerParams(url.searchParams);
   const [read, layoutResult, draft] = await Promise.all([
-    fetchBudgetBuilder(env, p.target, p.base),
+    fetchBudgetBuilder(env, asked.target, asked.base),
     fetchBoardLayout(env),
     role.role === 'council' ? fetchCouncilBudgetDraft(env, accessJwt) : null,
   ]);
   if (!read.ok) return plain('The budget plan could not be read from Connect right now.', 502);
+  const p = plannerYears(asked, read.builder);
   const builder = draft?.ok ? applyCouncilDraft(read.builder, draft.rows) : read.builder;
   const csv = plannerCsv(buildPlannerModel(builder, { layout: layoutResult.ok ? normalizeBoardLayout(layoutResult.layout) : null, params: p }), p);
   if (request.method === 'HEAD') return new Response(null, { headers: { 'Content-Type': 'text/csv; charset=utf-8' } });

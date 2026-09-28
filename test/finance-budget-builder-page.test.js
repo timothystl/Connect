@@ -101,8 +101,11 @@ describe('Budget planner (Finance)', () => {
 
   it('reads another base year, hides columns and leaves chosen lines out of every total', async () => {
     const { env, calls } = makeEnv();
-    await get(env, `&target=${FY}&base=${FY - 2}`);
+    const older = await (await get(env, `&target=${FY}&base=${FY - 2}`)).text();
     expect(calls.find((c) => c.path.endsWith('/finance-budget-builder-v1')).search).toBe(`?target_year=${FY}&base_year=${FY - 2}`);
+    // This fixture answers for FY-1 (as a Connect without base_year would), so the page says so.
+    expect(older).toContain(`Base year ${FY - 1} (annualized`);
+    expect(older).toContain(`<th>FY${FY - 1} Budget</th>`);
     expect(plannerParams(new URLSearchParams(`target=${FY}&base=${FY + 3}`)).base).toBe(FY - 1);
     const cols = await (await get(makeEnv().env, '&cols=bud,plan')).text();
     expect(cols).toContain(`<th>Category</th><th>FY${FY - 1} Budget</th><th>FY${FY} Plan</th></tr>`);

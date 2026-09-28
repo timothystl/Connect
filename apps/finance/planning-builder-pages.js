@@ -58,6 +58,14 @@ export function plannerParams(params, now = new Date()) {
   };
 }
 
+// The years the figures are actually for: the ones Connect answered with (a Connect that does not
+// yet read base_year answers for the year before the target), so labels never misstate them.
+export function plannerYears(p, builder) {
+  const target = Number.isInteger(builder?.targetYear) ? builder.targetYear : p.target;
+  const base = Number.isInteger(builder?.baseYear) ? builder.baseYear : p.base;
+  return target === p.target && base === p.base ? p : { ...p, target, base };
+}
+
 // The view as query pairs (only what differs from the defaults, plus both years), with overrides.
 // `omit` drops keys a form supplies itself.
 export function plannerQuery(p, overrides = {}, omit = []) {
@@ -593,7 +601,7 @@ function outlook(model, p) {
 // ── The page ─────────────────────────────────────────────────────────────────────────────────
 
 export function renderBudgetBuilderPage({ builder: rawBuilder, params, canEditPlan = false, canEditActuals = false, canManageBudgetPlan = false, statuses = {}, councilViewer = false, councilDraft = null, councilDraftFailed = false, layout = null, now = new Date() }) {
-  const p = plannerParams(params, now);
+  const p = plannerYears(plannerParams(params, now), rawBuilder);
   const builder = councilDraft ? applyCouncilDraft(rawBuilder, councilDraft) : rawBuilder;
   const model = buildPlannerModel(builder, { layout, params: p });
   const pickFormId = 'bp-pick';
@@ -649,7 +657,7 @@ export function renderBudgetBuilderPage({ builder: rawBuilder, params, canEditPl
 // Expenses on their own pages. "Plan for next year" prints Budget, Actual, Projected, Plan, Change
 // and Δ%; "Just this year" prints the base year alone. DRAFT stamps a watermark on every page.
 export function renderPlannerPrint({ builder: rawBuilder, params, councilDraft = null, layout = null, now = new Date() }) {
-  const p = plannerParams(params, now);
+  const p = plannerYears(plannerParams(params, now), rawBuilder);
   const builder = councilDraft ? applyCouncilDraft(rawBuilder, councilDraft) : rawBuilder;
   const model = buildPlannerModel(builder, { layout, params: p });
   const showPlan = p.printMode !== 'thisyear';
