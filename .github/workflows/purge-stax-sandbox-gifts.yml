@@ -1,0 +1,178 @@
+name: Remove Stax sandbox test gifts from Connect
+
+# One-time cleanup (Andrew, 2026-09-28): the Stax giving mockup only ever had sandbox keys
+# (STAX_SANDBOX_API_KEY / STAX_SANDBOX_WEB_PAYMENTS_TOKEN; there is no live Stax key), so every gift
+# it recorded is test data, yet those gifts sit in Connect's real giving_entries ledger and show up
+# in Finance → Online giving. Every such row carries source='stax_mockup'.
+#
+# mode=PREVIEW (default) only counts what would be removed; nothing changes.
+# mode=DELETE first records a D1 Time Travel bookmark and a JSON copy of every row it removes
+# (30-day workflow artifact), then removes:
+#   - giving_entries with source='stax_mockup' (the giving rollup triggers adjust monthly, batch and
+#     yearly totals as they would for any deleted gift) and their giving_entry_changes history,
+#   - their giving_stax_unmatched review rows, plus any left behind by gifts already removed,
+#   - "Stax Giving (mockup) YYYY-MM" batches left empty, and those batches' deposit links,
+#   - every giving_stax_recurring_schedules and giving_stax_customers row (sandbox ids only).
+# Each statement is idempotent, so a re-run finishes an interrupted clean-up. Tithe.ly, manual and
+# every other gift is untouched: nothing is selected except by source='stax_mockup' or the
+# mockup-only tables.
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Full main commit SHA this workflow runs from
+        required: true
+        type: string
+      reason:
+        description: Reason for this cleanup
+        required: true
+        type: string
+      mode:
+        description: PREVIEW to count only, DELETE to back up and remove
+        required: true
+        default: PREVIEW
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: purge-stax-sandbox-gifts
+  cancel-in-progress: false
+
+jobs:
+  purge:
+    name: Stax sandbox gifts in timothy-connect-db (${{ inputs.mode }})
+    if: github.ref == 'refs/heads/main' && (inputs.mode == 'PREVIEW' || inputs.mode == 'DELETE')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DB_NAME: timothy-connect-db
+      BACKUP_DIR: /tmp/stax-sandbox-backup
+    steps:
+      - name: Check out the approved commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.expected_sha }}
+
+      - name: Verify the approved commit is on main and has no live Stax key
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git merge-base --is-ancestor "$EXPECTED_SHA" origin/main
+          if grep -rhoE "env\.STAX_[A-Z_]+" src connect-worker.js | grep -vE "STAX_SANDBOX_|STAX_GIVING_WEBHOOK_SECRET" | grep -q .; then
+            echo "Connect reads a non-sandbox Stax key; its gifts may be real. Refusing."; exit 1
+          fi
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Count, and in DELETE mode back up, remove and confirm
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"
+          q() { npx wrangler d1 execute "$DB_NAME" --remote --json --command "$1"; }
+          ENTRIES="SELECT id FROM giving_entries WHERE source='stax_mockup'"
+          EMPTY_MOCKUP_BATCHES="SELECT b.id FROM giving_batches b WHERE b.description LIKE 'Stax Giving (mockup) %' AND NOT EXISTS (SELECT 1 FROM giving_entries e WHERE e.batch_id=b.id AND COALESCE(e.source,'')<>'stax_mockup')"
+
+          # Counts and totals only: no names, emails or card details reach the log.
+          count_sql="SELECT
+            (SELECT COUNT(*) FROM giving_entries WHERE source='stax_mockup') AS gifts,
+            (SELECT COALESCE(SUM(amount),0) FROM giving_entries WHERE source='stax_mockup') AS gift_cents,
+            (SELECT COUNT(*) FROM giving_entries WHERE source='stax_mockup' AND person_id IS NOT NULL) AS matched_gifts,
+            (SELECT MIN(contribution_date) FROM giving_entries WHERE source='stax_mockup') AS first_date,
+            (SELECT MAX(contribution_date) FROM giving_entries WHERE source='stax_mockup') AS last_date,
+            (SELECT COUNT(*) FROM giving_entries WHERE processor='stax' AND COALESCE(source,'')<>'stax_mockup') AS other_stax_gifts,
+            (SELECT COUNT(*) FROM giving_entry_changes WHERE entry_id IN ($ENTRIES)) AS change_rows,
+            (SELECT COUNT(*) FROM giving_stax_unmatched) AS review_rows,
+            (SELECT COUNT(*) FROM giving_stax_unmatched WHERE giving_entry_id NOT IN ($ENTRIES)) AS review_rows_outside,
+            (SELECT COUNT(*) FROM ($EMPTY_MOCKUP_BATCHES)) AS mockup_batches,
+            (SELECT COUNT(*) FROM giving_batches WHERE description LIKE 'Stax Giving (mockup) %') AS mockup_batches_all,
+            (SELECT COUNT(*) FROM giving_deposit_lines WHERE batch_id IN ($EMPTY_MOCKUP_BATCHES)) AS deposit_links,
+            (SELECT COUNT(*) FROM giving_stax_recurring_schedules) AS schedules,
+            (SELECT COUNT(*) FROM giving_stax_customers) AS customer_links"
+          q "$count_sql" | jq '.[0].results[0]' > "$BACKUP_DIR/before.json"
+          echo "Before:"; cat "$BACKUP_DIR/before.json"
+
+          # Any review row outside the sandbox gifts must belong to a gift that no longer exists;
+          # one pointing at a surviving non-sandbox gift would mean the data is not what we expect.
+          stray=$(q "SELECT COUNT(*) AS n FROM giving_stax_unmatched u JOIN giving_entries e ON e.id=u.giving_entry_id WHERE COALESCE(e.source,'')<>'stax_mockup'" | jq '.[0].results[0].n')
+          test "$stray" = "0" || { echo "$stray review rows belong to non-sandbox gifts. Refusing."; exit 1; }
+
+          summary() {
+            {
+              echo "## Stax sandbox test gifts ($MODE)"
+              echo
+              echo "- Commit: \`${GITHUB_SHA}\`"
+              echo "- Reason: ${REASON}"
+              echo "- Before: $(jq -c . "$BACKUP_DIR/before.json")"
+              if [ -f "$BACKUP_DIR/after.json" ]; then echo "- After: $(jq -c . "$BACKUP_DIR/after.json")"; fi
+              if [ -n "${bookmark:-}" ]; then
+                echo "- Time Travel bookmark before the delete: \`${bookmark}\` (\`wrangler d1 time-travel restore ${DB_NAME} --bookmark=${bookmark}\` rewinds the whole database)"
+                echo "- JSON copy of every removed row: artifact \`stax-sandbox-gifts-backup\`, kept 30 days"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+          if [ "$MODE" != "DELETE" ]; then summary; exit 0; fi
+
+          # 1. Time Travel bookmark before any change.
+          npx wrangler d1 time-travel info "$DB_NAME" --json > "$BACKUP_DIR/time-travel.json"
+          bookmark=$(jq -r '.bookmark // empty' "$BACKUP_DIR/time-travel.json")
+          test -n "$bookmark"
+
+          # 2. JSON copy of every row that will be removed, checked against the counts.
+          dump() { q "$2" | jq '.[0].results' > "$BACKUP_DIR/$1.json"; }
+          dump giving_entries "SELECT * FROM giving_entries WHERE source='stax_mockup' ORDER BY id"
+          dump giving_entry_changes "SELECT * FROM giving_entry_changes WHERE entry_id IN ($ENTRIES) ORDER BY id"
+          dump giving_stax_unmatched "SELECT * FROM giving_stax_unmatched ORDER BY id"
+          dump giving_batches "SELECT * FROM giving_batches WHERE id IN ($EMPTY_MOCKUP_BATCHES) ORDER BY id"
+          dump giving_deposit_lines "SELECT * FROM giving_deposit_lines WHERE batch_id IN ($EMPTY_MOCKUP_BATCHES)"
+          dump giving_stax_recurring_schedules "SELECT * FROM giving_stax_recurring_schedules ORDER BY id"
+          dump giving_stax_customers "SELECT * FROM giving_stax_customers ORDER BY id"
+          test "$(jq length "$BACKUP_DIR/giving_entries.json")" = "$(jq .gifts "$BACKUP_DIR/before.json")"
+          test "$(jq length "$BACKUP_DIR/giving_stax_unmatched.json")" = "$(jq .review_rows "$BACKUP_DIR/before.json")"
+          test "$(jq length "$BACKUP_DIR/giving_stax_recurring_schedules.json")" = "$(jq .schedules "$BACKUP_DIR/before.json")"
+          (cd "$BACKUP_DIR" && sha256sum *.json > SHA256SUMS)
+
+          # 3. Remove: children first, then the gifts, then batches the gifts leave empty.
+          q "DELETE FROM giving_entry_changes WHERE entry_id IN ($ENTRIES);
+             DELETE FROM giving_stax_unmatched WHERE giving_entry_id IN ($ENTRIES) OR giving_entry_id NOT IN (SELECT id FROM giving_entries);
+             DELETE FROM giving_entries WHERE source='stax_mockup';
+             DELETE FROM giving_deposit_lines WHERE batch_id IN (SELECT b.id FROM giving_batches b WHERE b.description LIKE 'Stax Giving (mockup) %' AND NOT EXISTS (SELECT 1 FROM giving_entries e WHERE e.batch_id=b.id));
+             DELETE FROM giving_batches WHERE description LIKE 'Stax Giving (mockup) %' AND NOT EXISTS (SELECT 1 FROM giving_entries e WHERE e.batch_id=giving_batches.id);
+             DELETE FROM giving_stax_recurring_schedules;
+             DELETE FROM giving_stax_customers;" > /dev/null
+
+          # 4. Confirm nothing is left.
+          q "$count_sql" | jq '.[0].results[0]' > "$BACKUP_DIR/after.json"
+          echo "After:"; cat "$BACKUP_DIR/after.json"
+          jq -e '.gifts == 0 and .review_rows == 0 and .mockup_batches == 0 and .schedules == 0 and .customer_links == 0' "$BACKUP_DIR/after.json" > /dev/null
+          summary
+
+      - name: Keep the JSON backup
+        if: always() && inputs.mode == 'DELETE'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stax-sandbox-gifts-backup
+          path: /tmp/stax-sandbox-backup/
+          retention-days: 30
+          if-no-files-found: warn
