@@ -206,7 +206,7 @@ describe('Giving analytics contracts (giving-analytics-*-v1, giving-followup-wri
     expect(all.totals.ytd_cents).toBe(revenue.totals.ytd_cents + 300000);
     expect(revenue.totals.prior_ytd_cents).toBe(donor.totals.prior_ytd_cents + 40000);
     const cat = Object.fromEntries(all.categories.map((c) => [c.key, c]));
-    expect(all.categories.map((c) => c.key)).toEqual(['general', 'restricted', 'earned', 'passive', 'mdo']);
+    expect(all.categories.map((c) => c.key)).toEqual(['general', 'restricted', 'earned', 'passive', 'mdo', 'passthrough']);
     expect(cat.general.cents).toBe(gf.totals.ytd_cents);
     expect(cat.restricted).toMatchObject({ cents: 50000, fund_count: 1 });
     expect(cat.earned).toMatchObject({ cents: 100000, prior_cents: 40000, fund_count: 1 });
@@ -218,6 +218,21 @@ describe('Giving analytics contracts (giving-analytics-*-v1, giving-followup-wri
     // The category scopes filter every figure, households included: Acme is an organization,
     // so the category funds add no household.
     expect(revenue.households.ytd_households).toBe(donor.households.ytd_households);
+  });
+
+  it('leaves pass-through funds out of donor giving and revenue but reports them as their own category', async () => {
+    const { db, ids, general } = setup();
+    const raw = db._raw;
+    const concordia = insertFund(db, "25010 Concordia Children's Services");
+    raw.prepare("UPDATE funds SET category='general' WHERE id=?").run(general);
+    raw.prepare("UPDATE funds SET category='passthrough' WHERE id=?").run(concordia);
+    raw.prepare("INSERT INTO giving_entries (batch_id, person_id, fund_id, amount, method, contribution_date) VALUES (1,?,?,?,'check',?)")
+      .run(ids.acme, concordia, 700000, '2026-05-01');
+    const read = async (fund) => (await call(db, '/api/contracts/giving-analytics-v1', { query: `?as_of=2026-09-20&fund=${fund}` })).json();
+    const [all, donor, revenue] = await Promise.all(['all', 'donor', 'revenue'].map(read));
+    expect(all.totals.ytd_cents - donor.totals.ytd_cents).toBe(700000);
+    expect(revenue.totals.ytd_cents).toBe(donor.totals.ytd_cents);
+    expect(all.categories.find((c) => c.key === 'passthrough')).toMatchObject({ cents: 700000, fund_count: 1, label: 'Pass-through (not church income)' });
   });
 
   it('reports totals, weeks, funds, household bands and pledges without naming anyone', async () => {

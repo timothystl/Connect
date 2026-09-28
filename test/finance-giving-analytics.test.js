@@ -80,6 +80,52 @@ describe('Giving analytics pages (Finance v3)', () => {
     expect(paths(calls)).not.toContain('giving-analytics-people-v1');
   });
 
+  it('takes MDO income from the Daycare report and keeps pass-through funds out of the total', async () => {
+    const data = {
+      ...TOTALS,
+      fund: { key: 'revenue', label: 'All revenue except MDO', fund_count: 8 },
+      fund_options: [{ key: 'general', label: 'General Fund' }, { key: 'revenue', label: 'All revenue except MDO' }],
+      categories: [
+        { key: 'general', label: 'General Fund', cents: 51200000, prior_cents: 50000000, fund_count: 3 },
+        { key: 'restricted', label: 'Restricted & designated', cents: 5800000, prior_cents: 5800000, fund_count: 2 },
+        { key: 'earned', label: 'Earned income', cents: 2000000, prior_cents: 1000000, fund_count: 2 },
+        { key: 'passive', label: 'Passive income', cents: 1000000, prior_cents: 1000000, fund_count: 1 },
+        { key: 'mdo', label: 'MDO income', cents: 0, prior_cents: 0, fund_count: 0 },
+        { key: 'passthrough', label: 'Pass-through (not church income)', cents: 3500000, prior_cents: 2000000, fund_count: 1 },
+      ],
+    };
+    const { env } = makeEnv();
+    const inner = env.CONNECT_SERVICE.fetch;
+    env.CONNECT_SERVICE.fetch = async (req) => {
+      const url = new URL(req.url);
+      if (url.pathname.endsWith('/giving-analytics-v1')) return new Response(JSON.stringify(data));
+      if (url.pathname.endsWith('/finance-daycare-report-v1')) {
+        return new Response(JSON.stringify({
+          contract: 'connect.finance-daycare-report.v1', dataClassification: 'aggregate', sourceProduct: 'connect', consumerProduct: 'finance',
+          currency: 'USD', fiscalYear: 2026, generatedAt: '2026-09-28T00:00:00Z',
+          allocation: { utilityPct: 0.5, insurancePct: 0.5, churchUtilityActualCents: 0, churchInsuranceActualCents: 0, mdoUtilityCents: 0, mdoInsuranceCents: 0 },
+          categories: [
+            { category: 'Tuition Income', classification: 'Income', actualCents: 21000000, budgetCents: 30000000 },
+            { category: 'Payroll', classification: 'Expenses', actualCents: 15000000, budgetCents: 20000000 },
+          ],
+          totals: { incomeActualCents: 21000000, incomeBudgetCents: 30000000, expenseActualCents: 15000000, expenseBudgetCents: 20000000, netActualCents: 6000000, netBudgetCents: 10000000 },
+          reconciliation: { categoryCount: 2, incomeCategoryCount: 1, expenseCategoryCount: 1, totalsMatch: true },
+        }));
+      }
+      return inner(req);
+    };
+    const html = await (await get(env, '&page=trends&fund=revenue')).text();
+    expect(html).toContain('Tuition income from the Daycare report, 2026');
+    expect(html).toContain('$210,000');
+    // Total: 512,000 + 58,000 + 20,000 + 10,000 + 210,000 = $810,000; pass-through left out.
+    expect(html).toContain('<td>Total church revenue');
+    expect(html).toContain('$810,000');
+    expect(html).toContain('Passed through to other organizations');
+    expect(html).toContain('$35,000');
+    expect(html).toContain('not church income, not in the total');
+    expect(html).toContain('All revenue (no MDO)</a> $600,000');
+  });
+
   it('compares months and the same days of last year on Year over year', async () => {
     const { env } = makeEnv();
     const html = await (await get(env, '&page=year-over-year')).text();
@@ -121,7 +167,7 @@ describe('Giving analytics pages (Finance v3)', () => {
     };
     // The General Fund is the default.
     const gf = await (await get(env, '&page=year-over-year')).text();
-    expect(calls.at(-1).query).toBe('?fund=general');
+    expect(calls.filter((c) => !c.query.includes('fiscal_year')).at(-1).query).toBe('?fund=general');
     expect(gf).toContain('<a href="/?section=giving-analytics&amp;page=year-over-year" class="is-on" aria-current="true">General Fund</a>');
     expect(gf).toContain('<option value="8">Building Fund</option>');
     expect(gf).toContain('General Fund giving by month, 2025 and 2026');
@@ -132,12 +178,12 @@ describe('Giving analytics pages (Finance v3)', () => {
     expect(gf).toContain('<a href="/?section=giving-analytics&amp;page=year-over-year&amp;fund=donor">Donor giving</a>');
     expect(gf).toContain('<a href="/?section=giving-analytics&amp;page=year-over-year&amp;fund=revenue">All revenue (no MDO)</a>');
     const donor = await (await get(env, '&page=trends&fund=donor')).text();
-    expect(calls.at(-1).query).toBe('?fund=donor');
+    expect(calls.filter((c) => !c.query.includes('fiscal_year')).at(-1).query).toBe('?fund=donor');
     expect(donor).toContain('class="is-on" aria-current="true">Donor giving</a>');
     expect(donor).toContain('Every donor gift: the General Fund plus restricted and designated funds (5 funds)');
     expect(donor).toContain('Giving year to date');
     const revenue = await (await get(env, '&page=trends&fund=revenue')).text();
-    expect(calls.at(-1).query).toBe('?fund=revenue');
+    expect(calls.filter((c) => !c.query.includes('fiscal_year')).at(-1).query).toBe('?fund=revenue');
     expect(revenue).toContain('class="is-on" aria-current="true">All revenue (no MDO)</a>');
     expect(revenue).toContain('All revenue entered in Connect except MDO');
     expect(revenue).toContain('Revenue year to date');
@@ -151,7 +197,7 @@ describe('Giving analytics pages (Finance v3)', () => {
     expect(pledges).toContain('2026 gifts to all revenue except MDO only');
 
     const all = await (await get(env, '&page=year-over-year&fund=all')).text();
-    expect(calls.at(-1).query).toBe('?fund=all');
+    expect(calls.filter((c) => !c.query.includes('fiscal_year')).at(-1).query).toBe('?fund=all');
     expect(all).toContain('<option value="all" selected>All funds</option>');
     expect(all).toContain('Every gift entered in Connect counts');
     // The sidebar keeps a non-default choice while moving between Giving pages.
@@ -159,7 +205,7 @@ describe('Giving analytics pages (Finance v3)', () => {
 
     for (const page of ['trends', 'year-over-year', 'household-bands', 'pledges', 'what-if']) {
       const html = await (await get(env, `&page=${page}&fund=8`)).text();
-      expect(calls.at(-1).query).toBe('?fund=8');
+      expect(calls.filter((c) => !c.query.includes('fiscal_year')).at(-1).query).toBe('?fund=8');
       expect(html).toContain('<option value="8" selected>Building Fund</option>');
       expect(html).toContain('Building Fund');
     }
@@ -169,7 +215,7 @@ describe('Giving analytics pages (Finance v3)', () => {
     const trends = await (await get(env, '&page=trends')).text();
     expect(trends).toContain('<a href="/?section=giving-analytics&amp;page=trends&amp;fund=8">Building Fund</a>');
     const concentration = await (await worker.fetch(new Request('https://finance.test/?section=charts&page=concentration', { headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }), env)).text();
-    expect(calls.at(-1).query).toBe('?fund=general');
+    expect(calls.filter((c) => !c.query.includes('fiscal_year')).at(-1).query).toBe('?fund=general');
     expect(concentration).toContain('Showing the General Fund only.');
     expect(concentration).toContain('href="/?section=charts&amp;page=concentration" class="is-on"');
   });

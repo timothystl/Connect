@@ -142,7 +142,7 @@ function changeNote(now, before, label) {
 
 // ── Trends ────────────────────────────────────────────────────────────────────────────────────
 
-export function renderTrendsPage({ result, keep = {} }) {
+export function renderTrendsPage({ result, keep = {}, mdoBooks = null }) {
   if (!result.ok) return unavailable('Giving trends', result.message);
   const a = result.data;
   const t = a.totals;
@@ -179,12 +179,15 @@ export function renderTrendsPage({ result, keep = {} }) {
       <div class="panel"><h2>${e(fundOf(a).label)}, last 13 weeks</h2><p class="muted-line">Each bar is a week ending on Sunday.</p>${weekBars}</div>
       <div class="panel"><h2>By fund, year to date</h2><p class="muted-line">Every fund, whichever is shown above. Choose a fund to see it alone.</p>${funds}</div>
     </div>
-    ${revenueMix(a, keep)}`;
+    ${revenueMix(a, keep, mdoBooks)}`;
 }
 
-// Where the money entered in Connect comes from this year, in the four revenue categories, with
-// donations split into unrestricted (General Fund) and restricted. Each fund's category is set in
-// Connect under Giving → Settings → Fund categories. Hidden when Connect sends no categories.
+// Where the church's money comes from this year, in the four revenue categories, with donations
+// split into unrestricted (General Fund) and restricted. Each fund's category is set in Connect
+// under Giving → Settings → Fund categories. MDO tuition is not entered in Connect: it comes from
+// the Daycare report (the church books' Tuition Income, a whole-year figure with no same-days
+// comparison). Pass-through funds are money received for another organization; they are shown
+// on their own line and left out of every total. Hidden when Connect sends no categories.
 const MIX_GROUPS = [
   { title: 'Donations', keys: ['general', 'restricted'], names: { general: 'Unrestricted (General Fund)', restricted: 'Restricted & designated' } },
   { title: 'Earned income', keys: ['earned'], names: { earned: 'Rentals, fees, fundraisers' } },
@@ -192,12 +195,17 @@ const MIX_GROUPS = [
   { title: 'MDO income', keys: ['mdo'], names: { mdo: 'MDO tuition and fees' } },
 ];
 
-function revenueMix(a, keep) {
-  const cats = new Map((a.categories || []).map((c) => [c.key, c]));
-  if (!cats.size) return '';
+function revenueMix(a, keep, mdoBooks = null) {
+  const raw = new Map((a.categories || []).map((c) => [c.key, c]));
+  if (!raw.size) return '';
+  const passthrough = raw.get('passthrough');
+  const fromBooks = Boolean(mdoBooks?.ok);
+  const cats = new Map([...raw].filter(([key]) => key !== 'passthrough'));
+  if (fromBooks) cats.set('mdo', { key: 'mdo', fund_count: 0, ...raw.get('mdo'), cents: mdoBooks.cents, prior_cents: 0, fromBooks: true });
   const total = [...cats.values()].reduce((s, c) => s + c.cents, 0);
   const max = Math.max(1, ...[...cats.values()].map((c) => c.cents));
   const delta = (c) => {
+    if (c.fromBooks) return '<span class="tone-muted">Whole-year figure</span>';
     const note = changeNote(c.cents, c.prior_cents, 'last year');
     return c.prior_cents ? `<span class="tone-${note.tone}">${note.text}</span>` : '<span class="tone-muted">—</span>';
   };
@@ -207,18 +215,26 @@ function revenueMix(a, keep) {
   const body = MIX_GROUPS.map((g) => {
     const members = g.keys.map((k) => cats.get(k)).filter(Boolean);
     if (!members.length) return '';
-    const sum = { cents: members.reduce((s, c) => s + c.cents, 0), prior_cents: members.reduce((s, c) => s + c.prior_cents, 0) };
-    const head = `<tr class="ga-mix-group"><th scope="rowgroup">${e(g.title)}</th><td></td><td>${money(sum.cents)}</td><td>${total ? pct(sum.cents / total) : '—'}</td><td>${delta(sum)}</td></tr>`;
+    const sum = { cents: members.reduce((s, c) => s + c.cents, 0), prior_cents: members.reduce((s, c) => s + c.prior_cents, 0), fromBooks: members.some((c) => c.fromBooks) };
+    const source = g.keys.includes('mdo')
+      ? `<small>${fromBooks ? `Tuition income from the Daycare report, ${e(String(mdoBooks.year))}` : 'Only what is entered in Connect; the Daycare report could not be read'}</small>` : '';
+    const head = `<tr class="ga-mix-group"><th scope="rowgroup">${e(g.title)}${source}</th><td></td><td>${money(sum.cents)}</td><td>${total ? pct(sum.cents / total) : '—'}</td><td>${delta(sum)}</td></tr>`;
     return head + (members.length > 1 ? members.map((c) => row(c, g.names[c.key])).join('') : '');
   }).join('');
+  // The total's change compares like with like: the MDO books figure has no same-days number, so
+  // the change is worked out without it.
+  const comparable = [...cats.values()].filter((c) => !c.fromBooks);
+  const totalDelta = delta({ cents: comparable.reduce((s, c) => s + c.cents, 0), prior_cents: comparable.reduce((s, c) => s + c.prior_cents, 0) });
+  const passRow = passthrough && (passthrough.cents || passthrough.prior_cents)
+    ? `<tr class="ga-mix-pass"><td>Passed through to other organizations<small>${fundCount(passthrough.fund_count || 0)} · not church income, not in the total</small></td><td></td><td>${money(passthrough.cents)}</td><td>—</td><td>${delta(passthrough)}</td></tr>` : '';
   const donations = (cats.get('general')?.cents || 0) + (cats.get('restricted')?.cents || 0);
   const noMdo = total - (cats.get('mdo')?.cents || 0);
   const tabs = [['general', cats.get('general')?.cents || 0], ['donor', donations], ['revenue', noMdo]];
   const current = fundKey(a);
-  return `<div class="panel panel-spaced list-panel"><div class="panel-head"><h2>Where the money comes from, year to date</h2><span class="muted">Everything entered in Connect, whichever view is shown above</span></div>
+  return `<div class="panel panel-spaced list-panel"><div class="panel-head"><h2>Where the money comes from, year to date</h2><span class="muted">Church revenue, whichever view is shown above</span></div>
       <div class="table-scroll"><table class="pm-table ga-num ga-mix"><thead><tr><th>Category</th><th><span class="sr-only">Share bar</span></th><th>${a.year} to date</th><th>Share</th><th>vs. same days ${a.year - 1}</th></tr></thead>
-      <tbody>${body}<tr class="total-row"><td>Everything in Connect</td><td></td><td>${money(total)}</td><td>100%</td><td>${delta({ cents: total, prior_cents: [...cats.values()].reduce((s, c) => s + c.prior_cents, 0) })}</td></tr></tbody></table></div>
-      <p class="muted-line">The three views above: ${tabs.map(([key, cents]) => `<a href="${href('trends', { ...keep, fund: key })}"${key === current ? ' aria-current="true"' : ''}>${e(SCOPE_TABS.find(([k]) => k === key)[1])}</a> ${money(cents)}`).join(' · ')}. Each fund’s category is set in Connect under Giving settings, Fund categories.</p></div>`;
+      <tbody>${body}<tr class="total-row"><td>Total church revenue${fromBooks ? '<small>The change leaves out MDO, which has no same-days figure</small>' : ''}</td><td></td><td>${money(total)}</td><td>100%</td><td>${totalDelta}</td></tr>${passRow}</tbody></table></div>
+      <p class="muted-line">The three views above: ${tabs.map(([key, cents]) => `<a href="${href('trends', { ...keep, fund: key })}"${key === current ? ' aria-current="true"' : ''}>${e(SCOPE_TABS.find(([k]) => k === key)[1])}</a> ${money(cents)}`).join(' · ')}. None of them include pass-through funds. Each fund’s category is set in Connect under Giving settings, Fund categories; choose “Pass-through” for money the church receives for another organization.</p></div>`;
 }
 
 // ── Year over year ────────────────────────────────────────────────────────────────────────────
@@ -574,6 +590,9 @@ export const GIVING_ANALYTICS_STYLES = `
     .ga-mix td small { display:block; color:#6B7280; font-size:12px; }
     .ga-mix td:nth-child(2) { width:28%; }
     .ga-mix .ga-meter { display:block; }
+    .ga-mix-pass td { color:#6B7280; font-style:italic; border-top:1px dashed #D5DAE3; }
+    .ga-mix-pass td:not(:first-child) { text-align:right; }
+    .ga-mix-group th small { display:block; font-weight:400; color:#6B7280; font-size:12px; text-transform:none; letter-spacing:0; }
     .ga-mix .ga-mix-group th, .ga-mix .ga-mix-group td { font-weight:700; text-align:left; border-top:1px solid #D5DAE3; }
     .ga-mix .ga-mix-group td:not(:nth-child(2)) { text-align:right; }
     .ga-mix-sub td:first-child { padding-left:18px; }

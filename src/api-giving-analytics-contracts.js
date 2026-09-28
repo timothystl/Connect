@@ -87,7 +87,8 @@ export function resolveAsOf(url, now = new Date()) {
 // Which slice of giving the totals describe: ?fund=all (the default), ?fund=general (every fund
 // Connect counts as the General Fund, the same resolveGeneralFundIds rule the board report's fund
 // lens uses), ?fund=donor (every gift: the General Fund plus restricted and designated funds),
-// ?fund=revenue (every fund except MDO income: gifts plus earned and passive income), or
+// ?fund=revenue (every fund except MDO income and pass-through funds: gifts plus earned and
+// passive income), or
 // ?fund=<fund id> for one fund. Anything unrecognized reads as all funds, never as an empty
 // slice. `ids` is null for all funds; otherwise the fund ids to filter on.
 export const FUND_SCOPES = Object.freeze([
@@ -116,7 +117,7 @@ export function resolveFundScope(requested, fundRows) {
       : scoped(want, label, (f) => ids.has(f.id) || catOf.get(f.id) === 'restricted');
   }
   if (want === 'revenue') {
-    return scoped('revenue', 'All revenue except MDO', (f) => normalizeFundCategory(f.category) !== 'mdo');
+    return scoped('revenue', 'All revenue except MDO', (f) => !['mdo', 'passthrough'].includes(normalizeFundCategory(f.category)));
   }
   if (/^\d{1,9}$/.test(want)) {
     const fund = rows.find((f) => String(f.id) === want);
@@ -347,8 +348,9 @@ export async function respondWithGivingAnalyticsV1(url, db) {
 }
 
 // Year-to-date and same-days-last-year totals for each fund category, in the order the revenue
-// is explained: gifts (unrestricted, then restricted), earned, passive, then MDO.
-const CATEGORY_ORDER = ['general', 'restricted', 'earned', 'passive', 'mdo'];
+// is explained: gifts (unrestricted, then restricted), earned, passive, MDO, then money passed
+// through to other organizations (reported apart, never counted as church revenue).
+const CATEGORY_ORDER = ['general', 'restricted', 'earned', 'passive', 'mdo', 'passthrough'];
 function summarizeCategories(rows) {
   const out = new Map(CATEGORY_ORDER.map((key) => [key, { key, label: fundCategoryLabel(key), cents: 0, prior_cents: 0, fund_count: 0 }]));
   for (const r of rows) {
