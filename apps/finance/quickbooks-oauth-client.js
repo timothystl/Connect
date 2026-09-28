@@ -178,5 +178,6 @@ export function makeQboClient(env, conn, fetchImpl = fetch) {
     budgets: () => get(`/query?query=${encodeURIComponent('SELECT * FROM Budget')}&minorversion=${MINOR_VERSION}`),
     profitAndLoss: (params) => get(`/reports/ProfitAndLoss?${new URLSearchParams(params)}&minorversion=${MINOR_VERSION}`),
     transactionList: (params) => get(`/reports/TransactionList?${new URLSearchParams(params)}&minorversion=${MINOR_VERSION}`),
+    profitAndLossDetail: (params) => get(`/reports/ProfitAndLossDetail?${new URLSearchParams(params)}&minorversion=${MINOR_VERSION}`),
   };
 }

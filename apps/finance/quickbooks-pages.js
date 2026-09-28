@@ -1,7 +1,10 @@
 import { buildDataStatusView } from './data-status-service.js';
 import { buildAccountsReportView } from './accounts-report-service.js';
 import { escapeHtml, renderKpiCards, renderSectionHeading, renderTable } from './render-helpers.js';
-import { findTransactionExceptions, summarizeExpenseAccounts, summarizeVendorSpend } from './quickbooks-transactions-service.js';
+import {
+  expenseAccountOf, findTransactionExceptions, searchTransactions, sortRows, spendingCents, spendingRowsFor,
+  summarizeExpenseAccounts, summarizeExpenseLines, summarizeVendorSpend, TRANSACTION_SORTS,
+} from './quickbooks-transactions-service.js';
 
 function flattenAccountHierarchy(nodes) {
   return nodes.flatMap((node) => [node, ...flattenAccountHierarchy(node.children)]);
@@ -82,46 +85,160 @@ function transactionLink(row) {
     : '—';
 }
 
-function renderDateFilter(pageId, result) {
+// Every view state lives in the query string (these pages run no script), so search, sort,
+// filters, and drill-downs are ordinary links and survive a reload or a shared URL.
+const VIEW_PARAMS = ['start_date', 'end_date', 'q', 'type', 'sort', 'dir', 'account', 'vendor'];
+
+function readView(searchParams) {
+  const get = (name) => (searchParams && searchParams.get(name)) || '';
+  return Object.fromEntries(VIEW_PARAMS.map((name) => [name, get(name).trim()]));
+}
+
+function pageHref(pageId, result, view, changes = {}) {
+  const params = new URLSearchParams({ section: 'quickbooks', page: pageId });
+  const merged = { ...view, start_date: result?.startDate || view.start_date, end_date: result?.endDate || view.end_date, ...changes };
+  for (const name of VIEW_PARAMS) if (merged[name]) params.set(name, merged[name]);
+  return `/?${params}`;
+}
+
+function sortHeader(label, key, pageId, result, view, { defaultKey, numeric = false } = {}) {
+  const activeKey = view.sort || defaultKey;
+  const activeDir = view.dir || (numeric || activeKey === 'date' ? 'desc' : 'asc');
+  const active = activeKey === key;
+  const nextDir = active ? (activeDir === 'asc' ? 'desc' : 'asc') : (numeric || key === 'date' ? 'desc' : 'asc');
+  const arrow = active ? (activeDir === 'asc' ? ' ▲' : ' ▼') : '';
+  const aria = active ? ` aria-sort="${activeDir === 'asc' ? 'ascending' : 'descending'}"` : '';
+  return `<th${numeric ? ' class="num"' : ''}${aria}><a href="${escapeHtml(pageHref(pageId, result, view, { sort: key, dir: nextDir }))}" title="Sort by ${escapeHtml(label.toLowerCase())}">${escapeHtml(label)}${arrow}</a></th>`;
+}
+
+function table(headHtml, rowsHtml, emptyMessage) {
+  const body = rowsHtml || `<tr><td colspan="99">${escapeHtml(emptyMessage)}</td></tr>`;
+  return `<div class="table-wrap"><table><thead><tr>${headHtml}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function renderFilterForm(pageId, result, view, { types = [], searchLabel = 'Search', searchPlaceholder = '' } = {}) {
+  const hidden = ['sort', 'dir', 'account', 'vendor']
+    .filter((name) => view[name])
+    .map((name) => `<input type="hidden" name="${name}" value="${escapeHtml(view[name])}">`).join('');
+  const typeSelect = types.length ? `<div class="field"><label for="qb-type">Transaction type</label><select id="qb-type" name="type"><option value="">All types</option>${types.map((type) => `<option${type === view.type ? ' selected' : ''}>${escapeHtml(type)}</option>`).join('')}</select></div>` : '';
+  const clear = view.q || view.type ? ` <a href="${escapeHtml(pageHref(pageId, result, view, { q: '', type: '' }))}">Clear search</a>` : '';
   return `<form method="GET" action="/" class="filter-form">
-    <input type="hidden" name="section" value="quickbooks"><input type="hidden" name="page" value="${escapeHtml(pageId)}">
-    <div class="field"><label for="qb-start">From</label><input id="qb-start" type="date" name="start_date" value="${escapeHtml(result?.startDate || '')}" required></div>
-    <div class="field"><label for="qb-end">Through</label><input id="qb-end" type="date" name="end_date" value="${escapeHtml(result?.endDate || '')}" required></div>
-    <button type="submit">Load</button>
+    <input type="hidden" name="section" value="quickbooks"><input type="hidden" name="page" value="${escapeHtml(pageId)}">${hidden}
+    <div class="field"><label for="qb-start">From</label><input id="qb-start" type="date" name="start_date" value="${escapeHtml(result?.startDate || view.start_date || '')}" required></div>
+    <div class="field"><label for="qb-end">Through</label><input id="qb-end" type="date" name="end_date" value="${escapeHtml(result?.endDate || view.end_date || '')}" required></div>
+    <div class="field"><label for="qb-q">${escapeHtml(searchLabel)}</label><input id="qb-q" type="search" name="q" value="${escapeHtml(view.q)}" placeholder="${escapeHtml(searchPlaceholder)}"></div>
+    ${typeSelect}
+    <p><button type="submit">Load</button>${clear}</p>
   </form>`;
 }
 
-function renderTransactionPage(pageId, result) {
+function amountCell(row) {
+  return `<td class="num">${row.amountCents == null ? escapeHtml(row.amount || '—') : money(row.amountCents)}</td>`;
+}
+
+function renderTransactionTable(pageId, result, view, rows, { includeReason = false, emptyMessage = 'No transactions match.' } = {}) {
+  const sorted = sortRows(rows, TRANSACTION_SORTS, view.sort || 'date', view.dir || (!view.sort || view.sort === 'date' || view.sort === 'amount' ? 'desc' : 'asc'));
+  const h = (label, key, options) => sortHeader(label, key, pageId, result, view, { defaultKey: 'date', ...options });
+  const head = [h('Date', 'date'), h('Type', 'type'), h('Number', 'number'), h('Name', 'name'), h('Account', 'account'), h('Category / split', 'category'), h('Amount', 'amount', { numeric: true }),
+    includeReason ? '<th>Reason</th>' : '', '<th></th>'].join('');
+  const body = sorted.map((row) => {
+    const vendorLink = row.name
+      ? `<a href="${escapeHtml(pageHref('vendor-spend', result, view, { vendor: row.name, account: '', q: '', type: '', sort: '', dir: '' }))}">${escapeHtml(row.name)}</a>` : '—';
+    const memo = row.memo ? `<br><small class="muted">${escapeHtml(row.memo)}</small>` : '';
+    return `<tr><td>${escapeHtml(row.date || '—')}</td><td>${escapeHtml(row.type || '—')}</td><td>${escapeHtml(row.docNum || '—')}</td><td>${vendorLink}${memo}</td><td>${escapeHtml(row.account || '—')}</td><td>${escapeHtml(row.split === '-Split-' ? 'Multiple (split)' : row.split || '—')}</td>${amountCell(row)}${includeReason ? `<td>${escapeHtml(row.reasons.join('; '))}</td>` : ''}<td>${transactionLink(row)}</td></tr>`;
+  }).join('');
+  return table(head, body, emptyMessage);
+}
+
+function renderSummaryTable(pageId, result, view, summary, { label, key, linkParam, countLabel = 'Transactions' }) {
+  const sorts = { [key]: (row) => row[key], count: (row) => row.transactionCount, amount: (row) => row.amountCents };
+  const sorted = sortRows(summary, sorts, view.sort || 'amount', view.dir || (view.sort === key ? 'asc' : 'desc'));
+  const h = (text, sortKey, options) => sortHeader(text, sortKey, pageId, result, view, { defaultKey: 'amount', ...options });
+  const head = h(label, key) + h(countLabel, 'count', { numeric: true }) + h('Spend', 'amount', { numeric: true });
+  const body = sorted.map((row) => `<tr><td><a href="${escapeHtml(pageHref(pageId, result, view, { [linkParam]: row[key], q: '', sort: '', dir: '' }))}">${escapeHtml(row[key])}</a></td><td class="num">${row.transactionCount}</td><td class="num">${money(row.amountCents)}</td></tr>`).join('');
+  const total = sorted.reduce((sum, row) => sum + row.amountCents, 0);
+  const footer = sorted.length ? `<tr><td><strong>Total</strong></td><td class="num"><strong>${sorted.reduce((sum, row) => sum + row.transactionCount, 0)}</strong></td><td class="num"><strong>${money(total)}</strong></td></tr>` : '';
+  return table(head, body + footer, 'Nothing matches for this range.');
+}
+
+function filterSummary(summary, key, query) {
+  const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+  return words.length ? summary.filter((row) => words.every((word) => row[key].toLowerCase().includes(word))) : summary;
+}
+
+const SPENDING_NOTE = 'Spending counts bills, expenses, and checks (less vendor and card credits) when they are entered. Bill payments are left out because they pay a bill already counted.';
+
+function renderTransactionPage(pageId, result, searchParams) {
   const headings = {
     transactions: ['Transactions', 'QuickBooks transaction detail'],
-    'expense-drilldown': ['Expense drill-down', 'Spending by account'],
+    'expense-drilldown': ['Expense drill-down', 'Spending by expense account'],
     'vendor-spend': ['Vendor spend', 'Spending by vendor'],
     exceptions: ['Exceptions', 'Incomplete transaction details'],
   };
   const [heading, description] = headings[pageId];
-  const filter = renderDateFilter(pageId, result);
+  const view = readView(searchParams);
   if (!result?.ok) return `<section class="report" aria-label="${escapeHtml(heading)}">
     ${renderSectionHeading({ eyebrow: 'QuickBooks', heading, badge: 'Live read' })}
     <p>${escapeHtml(description)}. Finance reads this directly from QuickBooks and does not change transactions.</p>
-    ${filter}<p class="status status-error">${escapeHtml(result?.error || 'Transactions are unavailable.')}</p></section>`;
-  const rows = result.transactions || [];
-  let table;
-  if (pageId === 'expense-drilldown') {
-    table = renderTable({ head: ['Account', 'Transactions', 'Total activity'], rows: summarizeExpenseAccounts(rows).map((row) => `<tr><td>${escapeHtml(row.account)}</td><td>${row.transactionCount}</td><td>${money(row.amountCents)}</td></tr>`).join('') });
-  } else if (pageId === 'vendor-spend') {
-    table = renderTable({ head: ['Vendor', 'Transactions', 'Spend'], rows: summarizeVendorSpend(rows).map((row) => `<tr><td>${escapeHtml(row.name)}</td><td>${row.transactionCount}</td><td>${money(row.amountCents)}</td></tr>`).join('') });
+    ${renderFilterForm(pageId, result, view)}<p class="status status-error">${escapeHtml(result?.error || 'Transactions are unavailable.')}</p></section>`;
+  const all = result.transactions || [];
+  const kpis = (shown, extra = []) => renderKpiCards([
+    { label: 'Transactions loaded', value: String(all.length) },
+    ...(shown == null ? [] : [{ label: 'Shown', value: String(shown) }]),
+    ...extra,
+    { label: 'Loaded at', value: escapeHtml(result.syncedAt.slice(0, 16).replace('T', ' ')), hint: 'UTC' },
+  ]);
+  const intro = `<p>${escapeHtml(description)} for ${escapeHtml(result.startDate)} through ${escapeHtml(result.endDate)}. This is read-only; use the QuickBooks link to edit a source transaction.</p>`;
+  let body;
+
+  const drill = pageId === 'expense-drilldown' ? { param: 'account', value: view.account, noun: 'account' }
+    : pageId === 'vendor-spend' ? { param: 'vendor', value: view.vendor, noun: 'vendor' } : null;
+  // Expense drill-down prefers Profit and Loss Detail, one row per expense line, so a split bill
+  // counts toward each account it was charged to. Without it, whole transactions are grouped.
+  const byLine = pageId === 'expense-drilldown' && Array.isArray(result.expenseLines);
+  const lineNote = byLine
+    ? 'Lines come from QuickBooks Profit and Loss Detail, so a bill split across accounts counts toward each one, and totals match the Profit and Loss. Credits and refunds reduce an account.'
+    : `${SPENDING_NOTE} A bill or expense spread across several accounts appears once, under “Multiple accounts”.`;
+  const lineWarning = pageId === 'expense-drilldown' && result.expenseLinesError
+    ? `<p class="status status-error">${escapeHtml(result.expenseLinesError)} Showing whole transactions instead.</p>` : '';
+  if (drill && drill.value) {
+    // One account or vendor: the spending rows behind its total, searchable and sortable.
+    const detail = byLine
+      ? result.expenseLines.filter((line) => line.account === drill.value)
+      : spendingRowsFor(all, { [drill.param]: drill.value });
+    const shown = searchTransactions(detail, view.q);
+    const total = shown.reduce((sum, row) => sum + (byLine ? row.amountCents : spendingCents(row)), 0);
+    const back = pageHref(pageId, result, view, { [drill.param]: '', q: '', sort: '', dir: '' });
+    const other = drill.param === 'account'
+      ? [...new Set(shown.map((row) => row.name).filter(Boolean))].length
+      : [...new Set(shown.map(expenseAccountOf).filter(Boolean))].length;
+    body = `<p><a href="${escapeHtml(back)}">← All ${drill.noun === 'account' ? 'accounts' : 'vendors'}</a></p>
+      <h3>${escapeHtml(drill.value)}</h3>${lineWarning}
+      ${renderFilterForm(pageId, result, view, { searchPlaceholder: 'Name, memo, number, amount…' })}
+      ${kpis(shown.length, [{ label: 'Spend', value: money(total) }, { label: drill.param === 'account' ? 'Vendors' : 'Accounts', value: String(other) }])}
+      ${renderTransactionTable(pageId, result, view, shown, { emptyMessage: `No spending for this ${drill.noun} matches.` })}
+      <p class="muted">${escapeHtml(drill.param === 'account' ? lineNote : SPENDING_NOTE)}</p>`;
+  } else if (drill) {
+    const summary = drill.param === 'vendor' ? summarizeVendorSpend(all)
+      : byLine ? summarizeExpenseLines(result.expenseLines) : summarizeExpenseAccounts(all);
+    const key = drill.param === 'account' ? 'account' : 'name';
+    const shown = filterSummary(summary, key, view.q);
+    body = `${renderFilterForm(pageId, result, view, { searchLabel: `Find ${drill.noun}`, searchPlaceholder: drill.param === 'account' ? 'Account name or number' : 'Vendor name' })}
+      ${kpis(null, [{ label: drill.param === 'account' ? 'Accounts' : 'Vendors', value: String(shown.length) }])}
+      <p>Select ${drill.param === 'account' ? 'an account' : 'a vendor'} to see the transactions behind its total.</p>
+      ${lineWarning}${renderSummaryTable(pageId, result, view, shown, { label: drill.param === 'account' ? 'Expense account' : 'Vendor', key, linkParam: drill.param, countLabel: byLine ? 'Lines' : 'Transactions' })}
+      <p class="muted">${escapeHtml(drill.param === 'account' ? lineNote : SPENDING_NOTE)}</p>`;
   } else {
-    const displayed = pageId === 'exceptions' ? findTransactionExceptions(rows) : rows;
-    const includeReason = pageId === 'exceptions';
-    table = renderTable({
-      head: ['Date', 'Type', 'Number', 'Name', 'Account', 'Amount', ...(includeReason ? ['Reason'] : []), ''],
-      rows: displayed.map((row) => `<tr><td>${escapeHtml(row.date || '—')}</td><td>${escapeHtml(row.type || '—')}</td><td>${escapeHtml(row.docNum || '—')}</td><td>${escapeHtml(row.name || '—')}</td><td>${escapeHtml(row.account || '—')}</td><td>${row.amountCents == null ? escapeHtml(row.amount || '—') : money(row.amountCents)}</td>${includeReason ? `<td>${escapeHtml(row.reasons.join('; '))}</td>` : ''}<td>${transactionLink(row)}</td></tr>`).join(''),
-    });
+    const base = pageId === 'exceptions' ? findTransactionExceptions(all) : all;
+    const types = [...new Set(base.map((row) => row.type).filter(Boolean))].sort();
+    const shown = searchTransactions(base, view.q).filter((row) => !view.type || row.type === view.type);
+    body = `${renderFilterForm(pageId, result, view, { types, searchPlaceholder: 'Name, memo, account, number, amount…' })}
+      ${kpis(shown.length)}
+      ${renderTransactionTable(pageId, result, view, shown, { includeReason: pageId === 'exceptions', emptyMessage: pageId === 'exceptions' ? 'No incomplete transactions match.' : 'No transactions match.' })}`;
   }
   return `<section class="report" aria-label="${escapeHtml(heading)}">
     ${renderSectionHeading({ eyebrow: 'QuickBooks', heading, badge: 'Live from QuickBooks' })}
-    <p>${escapeHtml(description)} for ${escapeHtml(result.startDate)} through ${escapeHtml(result.endDate)}. This is read-only; use the QuickBooks link to edit a source transaction.</p>
-    ${filter}${renderKpiCards([{ label: 'Transactions loaded', value: String(rows.length) }, { label: 'Loaded at', value: escapeHtml(result.syncedAt.slice(0, 16).replace('T', ' ')), hint: 'UTC' }])}${table}</section>`;
+    ${intro}${body}</section>`;
 }
 
 function renderImportHistory(result) {
@@ -139,7 +256,7 @@ function renderImportHistory(result) {
 
 export function renderQuickbooksPage(pageId, { dataStatus, accountsReport, quickbooksOwn = null, quickbooksBackups = null, quickbooksTransactions = null, importHistory = null, canManageQuickbooks = false, searchParams = null }) {
   if (['transactions', 'expense-drilldown', 'vendor-spend', 'exceptions'].includes(pageId)) {
-    return renderTransactionPage(pageId, quickbooksTransactions);
+    return renderTransactionPage(pageId, quickbooksTransactions, searchParams);
   }
   if (pageId === 'import-history') return renderImportHistory(importHistory);
   if (pageId === 'account-mapping') {

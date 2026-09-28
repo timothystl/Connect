@@ -1,10 +1,17 @@
 import { makeQboClient, refreshTokens } from './quickbooks-oauth-client.js';
 import { ensureFreshAccessToken } from './quickbooks-token-service.js';
 import { getConnection } from './quickbooks-oauth-routes.js';
+import { normalizeChurchClassification } from './quickbooks-church-sync.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_RANGE_DAYS = 366;
-const EXPENSE_TRANSACTION_TYPES = new Set(['bill', 'expense', 'check', 'credit card credit', 'vendor credit', 'bill payment', 'bill payment (check)', 'bill payment (credit card)']);
+// Spending is counted once, when it is incurred: bills, expenses, and checks, less vendor and
+// credit card credits. Bill payments only settle a bill already counted, so they are left out of
+// the spending views (they still appear on the Transactions page).
+const EXPENSE_TRANSACTION_TYPES = new Set(['bill', 'expense', 'check', 'cash expense', 'credit card expense', 'credit card credit', 'vendor credit']);
+const CREDIT_TRANSACTION_TYPES = new Set(['credit card credit', 'vendor credit']);
+export const SPLIT_PLACEHOLDER = '-Split-';
+export const MULTIPLE_ACCOUNTS_LABEL = 'Multiple accounts (split transaction)';
 
 const COLUMN_ALIASES = {
   date: { types: ['tx_date'], titles: ['date'] },
@@ -12,7 +19,8 @@ const COLUMN_ALIASES = {
   docNum: { types: ['doc_num'], titles: ['num'] },
   name: { types: ['name', 'cust_name', 'vend_name', 'emp_name'], titles: ['name'] },
   memo: { types: ['memo'], titles: ['memo/description', 'memo'] },
-  account: { types: ['account_name', 'split_acc', 'split'], titles: ['account', 'split'] },
+  account: { types: ['account_name'], titles: ['account'] },
+  split: { types: ['other_account', 'split_acc'], titles: ['split'] },
   amount: { types: ['subt_nat_amount', 'amount'], titles: ['amount'] },
 };
 
@@ -21,8 +29,10 @@ const QBO_TRANSACTION_SLUGS = {
   'refund receipt': 'refundreceipt', 'credit memo': 'creditmemo', payment: 'recvpayment',
   bill: 'bill', expense: 'expense', check: 'check', 'credit card credit': 'creditcardcredit',
   'vendor credit': 'vendorcredit', 'purchase order': 'purchaseorder',
-  'bill payment': 'billpaymentcheck', 'bill payment (check)': 'billpaymentcheck',
-  'bill payment (credit card)': 'billpaymentcreditcard', 'journal entry': 'journal',
+  // QuickBooks Online opens every bill payment, check or credit card, at /app/billpayment;
+  // /app/billpaymentcheck returns its "can't find the page" screen (reported 2026-09-28).
+  'bill payment': 'billpayment', 'bill payment (check)': 'billpayment',
+  'bill payment (credit card)': 'billpayment', 'journal entry': 'journal',
   deposit: 'deposit', transfer: 'transfer',
 };
 
@@ -31,14 +41,19 @@ function transactionUrl(type, id) {
   return slug && id ? `https://qbo.intuit.com/app/${slug}?txnId=${encodeURIComponent(String(id))}` : null;
 }
 
+// Live reports carry the column key in MetaData (ColKey) and a generic ColType ("String", "Money");
+// fixtures and older shapes put the key in ColType. Keys match first, then titles.
 function columnIndexes(columns) {
   const result = {};
-  for (const [index, column] of (columns || []).entries()) {
-    const type = String(column.ColType || '').toLowerCase();
-    const title = String(column.ColTitle || '').toLowerCase();
-    for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
-      if (result[field] == null && (aliases.types.includes(type) || aliases.titles.includes(title))) result[field] = index;
-    }
+  const described = (columns || []).map((column) => ({
+    keys: [column.ColType, ...(column.MetaData || []).filter((meta) => meta?.Name === 'ColKey').map((meta) => meta.Value)]
+      .map((value) => String(value || '').toLowerCase()),
+    title: String(column.ColTitle || '').toLowerCase(),
+  }));
+  for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
+    let index = described.findIndex((column) => column.keys.some((key) => aliases.types.includes(key)));
+    if (index < 0) index = described.findIndex((column) => aliases.titles.includes(column.title));
+    if (index >= 0) result[field] = index;
   }
   return result;
 }
@@ -57,22 +72,68 @@ function parseAmount(value) {
   return Number.isFinite(number) ? Math.round(number * 100) : null;
 }
 
+function rowFromCells(cells, indexes) {
+  const cell = (field) => indexes[field] == null ? null : cells[indexes[field]];
+  const type = cell('type')?.value || '';
+  const id = cell('type')?.id || cells.find((entry) => entry?.id)?.id || null;
+  const amount = cell('amount')?.value || '';
+  return {
+    date: cell('date')?.value || '', type, docNum: cell('docNum')?.value || '',
+    name: cell('name')?.value || '', memo: cell('memo')?.value || '',
+    account: cell('account')?.value || '', split: cell('split')?.value || '', amount, amountCents: parseAmount(amount),
+    transactionId: id, viewUrl: transactionUrl(type, id),
+  };
+}
+
+const EXPENSE_CLASSIFICATIONS = new Set(['Expenses', 'Cost of Goods Sold', 'Other Expenses']);
+const EXPENSE_GROUPS = new Set(['expenses', 'cogs', 'otherexpenses']);
+
+function walkProfitAndLossDetail(rows, path, isExpense, indexes, output) {
+  for (const row of rows || []) {
+    if (row.type === 'Section' || row.Header) {
+      const label = String(row.Header?.ColData?.[0]?.value || '').trim();
+      // The top-level section is the classification (this company labels it "Expenditures");
+      // everything under it is the account path, parent:child like the Church Report.
+      const topLevel = isExpense == null;
+      const expense = topLevel
+        ? EXPENSE_GROUPS.has(String(row.group || '').toLowerCase()) || EXPENSE_CLASSIFICATIONS.has(normalizeChurchClassification(label))
+        : isExpense;
+      walkProfitAndLossDetail(row.Rows?.Row, topLevel || !label ? path : [...path, label], expense, indexes, output);
+    } else if (isExpense && row.type === 'Data' && Array.isArray(row.ColData) && path.length) {
+      const line = rowFromCells(row.ColData, indexes);
+      if (line.amountCents == null || line.amountCents === 0) continue;
+      output.push({ ...line, account: path.join(':') });
+    }
+  }
+}
+
+// Profit and Loss Detail lists every expense line under the account it was charged to, so a bill
+// split across several accounts appears once per line with that line's own amount. Amounts are
+// signed as the P&L shows them: a credit or refund reduces the account's spending.
+export function parseProfitAndLossDetail(report) {
+  const indexes = columnIndexes(report?.Columns?.Column);
+  delete indexes.account;
+  const lines = [];
+  walkProfitAndLossDetail(report?.Rows?.Row, [], null, indexes, lines);
+  return lines;
+}
+
+export function summarizeExpenseLines(lines) {
+  const totals = new Map();
+  for (const line of lines || []) {
+    const current = totals.get(line.account) || { account: line.account, transactionCount: 0, amountCents: 0 };
+    current.transactionCount += 1;
+    current.amountCents += line.amountCents;
+    totals.set(line.account, current);
+  }
+  return [...totals.values()].sort((a, b) => b.amountCents - a.amountCents || a.account.localeCompare(b.account));
+}
+
 export function parseTransactionList(report) {
   const indexes = columnIndexes(report?.Columns?.Column);
   const rows = [];
   flattenRows(report?.Rows?.Row, rows);
-  return rows.map((cells) => {
-    const cell = (field) => indexes[field] == null ? null : cells[indexes[field]];
-    const type = cell('type')?.value || '';
-    const id = cell('type')?.id || cells.find((entry) => entry?.id)?.id || null;
-    const amount = cell('amount')?.value || '';
-    return {
-      date: cell('date')?.value || '', type, docNum: cell('docNum')?.value || '',
-      name: cell('name')?.value || '', memo: cell('memo')?.value || '',
-      account: cell('account')?.value || '', amount, amountCents: parseAmount(amount),
-      transactionId: id, viewUrl: transactionUrl(type, id),
-    };
-  });
+  return rows.map((cells) => rowFromCells(cells, indexes));
 }
 
 function defaultDates(now) {
@@ -95,7 +156,7 @@ export function resolveTransactionDates(searchParams, now = Date.now()) {
   return { ok: true, startDate, endDate };
 }
 
-export async function loadQuickbooksTransactions(env, searchParams, { now = Date.now(), fetchImpl = fetch } = {}) {
+export async function loadQuickbooksTransactions(env, searchParams, { now = Date.now(), fetchImpl = fetch, includeExpenseLines = false } = {}) {
   const dates = resolveTransactionDates(searchParams, now);
   if (!dates.ok) return dates;
   const connection = await getConnection(env.FINANCE_DB);
@@ -109,36 +170,106 @@ export async function loadQuickbooksTransactions(env, searchParams, { now = Date
   } catch {
     return { ok: false, ...dates, error: 'QuickBooks needs to be reconnected before transactions can be loaded.' };
   }
-  const response = await makeQboClient(env, fresh, fetchImpl).transactionList({
-    start_date: dates.startDate, end_date: dates.endDate, sort_by: 'tx_date', sort_order: 'descend',
-  });
+  const client = makeQboClient(env, fresh, fetchImpl);
+  const range = { start_date: dates.startDate, end_date: dates.endDate };
+  const [response, detail] = await Promise.all([
+    client.transactionList({ ...range, sort_by: 'tx_date', sort_order: 'descend' }),
+    includeExpenseLines ? loadExpenseLines(client, range) : null,
+  ]);
   if (!response.ok) return { ok: false, ...dates, error: `QuickBooks could not load the transaction report (HTTP ${response.status}).` };
   const transactions = parseTransactionList(await response.json());
-  return { ok: true, ...dates, transactions, syncedAt: new Date(now).toISOString() };
+  return { ok: true, ...dates, transactions, ...(detail || {}), syncedAt: new Date(now).toISOString() };
+}
+
+// A failed Profit and Loss Detail read only drops the per-line view; the drill-down then falls
+// back to grouping whole transactions and says so.
+async function loadExpenseLines(client, range) {
+  try {
+    const response = await client.profitAndLossDetail(range);
+    if (!response.ok) return { expenseLinesError: `QuickBooks could not load Profit and Loss Detail (HTTP ${response.status}).` };
+    return { expenseLines: parseProfitAndLossDetail(await response.json()) };
+  } catch {
+    return { expenseLinesError: 'QuickBooks could not load Profit and Loss Detail.' };
+  }
+}
+
+function isSpending(row) {
+  return EXPENSE_TRANSACTION_TYPES.has(String(row.type || '').toLowerCase()) && row.amountCents != null && row.amountCents !== 0;
+}
+
+export function spendingCents(row) {
+  const amount = Math.abs(row.amountCents);
+  return CREDIT_TRANSACTION_TYPES.has(String(row.type || '').toLowerCase()) ? -amount : amount;
+}
+
+// The account a spending row was charged to. On a bill or expense the Account column is the
+// payable/bank side, so the Split column carries the expense account; "-Split-" means several.
+export function expenseAccountOf(row) {
+  const split = String(row.split || '').trim();
+  if (split === SPLIT_PLACEHOLDER) return MULTIPLE_ACCOUNTS_LABEL;
+  return split || row.account || '';
+}
+
+function summarize(transactions, keyOf, label) {
+  const totals = new Map();
+  for (const row of transactions || []) {
+    const key = isSpending(row) ? keyOf(row) : '';
+    if (!key) continue;
+    const current = totals.get(key) || { [label]: key, transactionCount: 0, amountCents: 0 };
+    current.transactionCount += 1;
+    current.amountCents += spendingCents(row);
+    totals.set(key, current);
+  }
+  return [...totals.values()].sort((a, b) => b.amountCents - a.amountCents || a[label].localeCompare(b[label]));
 }
 
 export function summarizeVendorSpend(transactions) {
-  const totals = new Map();
-  for (const row of transactions || []) {
-    if (!EXPENSE_TRANSACTION_TYPES.has(row.type.toLowerCase()) || !row.name || row.amountCents == null) continue;
-    const current = totals.get(row.name) || { name: row.name, transactionCount: 0, amountCents: 0 };
-    current.transactionCount += 1;
-    current.amountCents += Math.abs(row.amountCents);
-    totals.set(row.name, current);
-  }
-  return [...totals.values()].sort((a, b) => b.amountCents - a.amountCents || a.name.localeCompare(b.name));
+  return summarize(transactions, (row) => row.name, 'name');
 }
 
 export function summarizeExpenseAccounts(transactions) {
-  const totals = new Map();
-  for (const row of transactions || []) {
-    if (!EXPENSE_TRANSACTION_TYPES.has(row.type.toLowerCase()) || !row.account || row.amountCents == null || row.amountCents === 0) continue;
-    const current = totals.get(row.account) || { account: row.account, transactionCount: 0, amountCents: 0 };
-    current.transactionCount += 1;
-    current.amountCents += Math.abs(row.amountCents);
-    totals.set(row.account, current);
-  }
-  return [...totals.values()].sort((a, b) => b.amountCents - a.amountCents || a.account.localeCompare(b.account));
+  return summarize(transactions, expenseAccountOf, 'account');
+}
+
+// The spending rows behind one Expense drill-down account or one Vendor spend vendor.
+export function spendingRowsFor(transactions, { account = null, vendor = null } = {}) {
+  return (transactions || []).filter((row) => isSpending(row)
+    && (account == null || expenseAccountOf(row) === account)
+    && (vendor == null || row.name === vendor));
+}
+
+const SEARCH_FIELDS = ['date', 'type', 'docNum', 'name', 'memo', 'account', 'split', 'amount'];
+
+// Case-insensitive search across every visible field; each word must match somewhere.
+export function searchTransactions(transactions, query) {
+  const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return [...(transactions || [])];
+  return (transactions || []).filter((row) => {
+    const haystack = SEARCH_FIELDS.map((field) => String(row[field] ?? '')).join(' ').toLowerCase()
+      + (row.amountCents == null ? '' : ` ${(Math.abs(row.amountCents) / 100).toFixed(2)}`);
+    return words.every((word) => haystack.includes(word.replace(/[$,]/g, '')) || haystack.includes(word));
+  });
+}
+
+export const TRANSACTION_SORTS = {
+  date: (row) => row.date, type: (row) => row.type, number: (row) => row.docNum, name: (row) => row.name,
+  account: (row) => row.account, category: (row) => row.split, amount: (row) => row.amountCents,
+};
+
+export function sortRows(rows, sorts, key, dir) {
+  const valueOf = sorts[key];
+  if (!valueOf) return [...rows];
+  const direction = dir === 'asc' ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const left = valueOf(a);
+    const right = valueOf(b);
+    const blankLeft = left == null || left === '';
+    const blankRight = right == null || right === '';
+    if (blankLeft || blankRight) return blankLeft === blankRight ? 0 : blankLeft ? 1 : -1;
+    const order = typeof left === 'number' && typeof right === 'number'
+      ? left - right : String(left).localeCompare(String(right), 'en-US', { numeric: true, sensitivity: 'base' });
+    return order * direction;
+  });
 }
 
 export function findTransactionExceptions(transactions) {
