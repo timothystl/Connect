@@ -343,13 +343,12 @@ describe('Finance alpha staging shell', () => {
   });
 
   it('offers a clearly-labeled, non-authoritative council-view preview that hides write forms', async () => {
-    const off = await (await worker.fetch(new Request('https://finance.test/?section=giving&page=quick-entry'), env)).text();
+    const off = await (await worker.fetch(new Request('https://finance.test/?section=giving&page=funds'), env)).text();
     expect(off).not.toContain('class="council-preview"');
     expect(off).toContain('title="Preview council view: hides editing controls without changing permissions">Council</a>');
-    expect(off).toContain('href="/?section=giving&amp;page=quick-entry&amp;council=1"');
-    expect(off).toContain('<form method="POST" action="/api/v1/connect-giving-quick-entry">');
+    expect(off).toContain('href="/?section=giving&amp;page=funds&amp;council=1"');
 
-    const on = await (await worker.fetch(new Request('https://finance.test/?section=giving&page=quick-entry&council=1'), env)).text();
+    const on = await (await worker.fetch(new Request('https://finance.test/?section=giving&page=funds&council=1'), env)).text();
     expect(on).toContain('<body class="council-preview">');
     expect(on).toContain('Your actual verified permissions still apply');
     expect(on).toContain('Editing controls are hidden');
@@ -1263,11 +1262,11 @@ describe('Finance alpha staging shell', () => {
       expect(cashReserveHtml).toContain('synthetic fixture');
       expect(cashReserveHtml).not.toContain('$35,000');
 
+      // Giving vs. pace reads Connect's giving-analytics-v1 period (test/finance-giving-pace.test.js);
+      // it never falls back to the church report's actual income or a synthetic figure.
       const pacingHtml = await (await worker.fetch(chartsRequest('giving-pace'), liveEnv)).text();
-      expect(pacingHtml).toContain('Naive monthly pace');
-      expect(pacingHtml).toContain('$20,000');
-      expect(pacingHtml).toContain(`1/12 of FY${liveFiscalYear} church income budget · live from Connect`);
-      expect(pacingHtml).not.toContain('$10,000');
+      expect(pacingHtml).toContain('Giving vs. pace could not be read from Connect');
+      expect(pacingHtml).not.toContain('Naive monthly pace');
     });
 
     it('renders each Charts page from the synthetic fixtures alone when no CONNECT_SERVICE is configured (unchanged regression baseline)', async () => {
@@ -1283,8 +1282,8 @@ describe('Finance alpha staging shell', () => {
       expect(cashReserveHtml).not.toContain('live from Connect');
 
       const pacingHtml = await (await worker.fetch(new Request('https://finance.test/?section=charts&page=giving-pace'), env)).text();
-      expect(pacingHtml).toContain('$10,000');
-      expect(pacingHtml).toContain('church income budget · synthetic fixture');
+      expect(pacingHtml).toContain('Giving vs. pace could not be read from Connect');
+      expect(pacingHtml).toContain('<select name="period">');
     });
 
     it('labels each KPI by its own independent source when only one live resolver answers (partial availability)', async () => {
@@ -1476,21 +1475,12 @@ describe('Finance alpha staging shell', () => {
     expect(statements[0]).toMatch(/^SELECT\b/i);
   });
 
-  it('renders a synthetic role-level Compensation plan, its sub-pages, and its own read budget', async () => {
-    statements.length = 0;
-    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan'), env);
-    const html = await res.text();
-    expect(res.status).toBe(200);
-    expect(html).toContain('Synthetic Compensation Report');
-    expect(html).toContain('Role-level plan for fiscal year 2027');
-    expect(html).toContain('Synthetic Ministry Role');
-    expect(html).toContain('Synthetic Operations Role');
-    expect(html).toContain('$105,000');
-    expect(html).toContain('$21,000');
-    expect(html).toContain('$126,000');
-    expect(html).toContain('No personal identities');
-    expect(statements).toHaveLength(3);
-    expect(statements.every((sql) => /^SELECT\b/i.test(sql))).toBe(true);
+  it('sends the retired Compensation Plan page to the Planner, and renders the synthetic sub-pages', async () => {
+    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan&edit=0'), env);
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe('/?section=compensation&page=planner');
+    const preview = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan&council=1'), env);
+    expect(preview.headers.get('location')).toBe('/?section=compensation&page=planner&council=1');
 
     const councilHtml = await (await worker.fetch(new Request('https://finance.test/?section=compensation&page=council'), env)).text();
     expect(councilHtml).toContain('Council review snapshot');
@@ -1574,26 +1564,6 @@ describe('Finance alpha staging shell', () => {
       expect(benefitsHtml).not.toContain('No personal identities are included');
       expect(benefitsHtml).toContain('built from the saved compensation plan, which could not be read');
     });
-
-    it('admin sees every worker verbatim on the Plan page, including one flagged hideFromCouncil', async () => {
-      const html = await (await worker.fetch(req('https://finance.test/?section=compensation&page=plan'), liveCompensationEnv('admin'))).text();
-      expect(html).toContain('Worker A');
-      expect(html).toContain('Worker B (hidden from council)');
-      expect(html).toContain('>2<');
-      expect(html).toContain('$140,000');
-    });
-
-    it('a council viewer never sees a worker flagged hideFromCouncil on the Plan page -- same rule the Council page enforces', async () => {
-      const html = await (await worker.fetch(req('https://finance.test/?section=compensation&page=plan'), liveCompensationEnv('council'))).text();
-      expect(html).toContain('Worker A');
-      expect(html).not.toContain('Worker B (hidden from council)');
-      // KPI totals are recomputed from the filtered roster too, so the hidden worker's $90,000
-      // never leaks into "Entered current pay total" even in aggregate.
-      expect(html).toContain('>1<');
-      expect(html).toContain('$50,000');
-      expect(html).not.toContain('$140,000');
-      expect(html).toContain('Excludes any worker not shown to council');
-    });
   });
 
   it('serves only synthetic read-only summary data', async () => {
@@ -1608,7 +1578,7 @@ describe('Finance alpha staging shell', () => {
   });
 
   it('enforces the named summary query budget and read-only statements', async () => {
-    expect(FINANCE_QUERY_BUDGETS).toEqual({ summary: 4, churchReport: 1, churchTrends: 1, balanceSheet: 1, balanceTrends: 1, daycareReport: 1, daycareAllocation: 2, propertyReport: 1, propertyReserves: 1, propertyLedgers: 2, propertyValuation: 3, propertyForecast: 1, budgetReport: 1, accountsReport: 1, dataStatus: 1, compensationReport: 1, compensationBenchmark: 1, compensationBenefits: 1, cashRunway: 2, propertyDistributions: 1, facilities: 5, hr: 8, planning: 2, propertyBooks: 2 });
+    expect(FINANCE_QUERY_BUDGETS).toEqual({ summary: 4, churchReport: 1, churchTrends: 1, balanceSheet: 1, balanceTrends: 1, daycareReport: 1, daycareAllocation: 2, propertyReport: 1, propertyReserves: 1, propertyLedgers: 2, propertyValuation: 3, propertyForecast: 1, budgetReport: 1, accountsReport: 1, dataStatus: 1, compensationReport: 1, compensationBenchmark: 1, compensationBenefits: 1, cashRunway: 2, propertyDistributions: 1, facilities: 5, hr: 8, planning: 3, propertyBooks: 2 });
     await expect(runBudgetedReadBatch(env.FINANCE_DB, 'summary', [
       'SELECT 1', 'SELECT 2', 'SELECT 3', 'SELECT 4', 'SELECT 5',
     ])).rejects.toThrow('Finance query budget exceeded: summary');

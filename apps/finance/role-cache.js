@@ -47,7 +47,8 @@ async function savedRole(db, identity, now) {
 export async function resolvePageRole(env, accessJwt, { now = Date.now(), fetchImpl } = {}) {
   // Page rendering has a bounded dependency on Connect. Saves still use the stricter default
   // live verification path, while page views can fall back to the last verified role promptly.
-  const live = await fetchVerifiedRole(env, accessJwt, { timeoutMs: PAGE_ROLE_TIMEOUT_MS, retry: false });
+  // A dropped connection or a 5xx while Connect restarts is retried once; a timeout is not.
+  const live = await fetchVerifiedRole(env, accessJwt, { timeoutMs: PAGE_ROLE_TIMEOUT_MS, retry: true });
   if (live.ok) {
     await saveRole(env.FINANCE_DB, live);
     return live;

@@ -1,7 +1,8 @@
 // ── Compensation Planner settings views ──────────────────────────────────────────────────────
 // Server-rendered versions of legacy's Salary Planner editing views (src/frontend/js-finance.js):
-// the raise-method grid (step 1), "This year's rates" (district base salary, Concordia rates,
-// health plan quote) and the market comparison data (each worker's Concordia ranges). Forms post
+// "This year's rates" (district base salary, Concordia rates, health plan quote) and the market
+// comparison data (each worker's Concordia ranges). Raise methods and hand-set salaries are set on
+// the Planner (apps/finance/planner/), where the retired Plan (new view)'s grid moved. Forms post
 // to compensation-plan-write-v1, which applies them with compensation-plan-form.js. Only admin and
 // compensation roles are given the forms; everyone else allowed into the section sees the figures.
 import { escapeHtml, renderSectionHeading } from './render-helpers.js';
@@ -9,11 +10,10 @@ import {
   HEALTH_PLAN_QUOTE_2027, FIN_HEALTH_TIERS, LCMS_MO_BASE_SALARY_BY_YEAR, LCMS_EMPLOYER_FICA_RATE,
   SSA_COLA_REFERENCE_PCT, finConcordiaPensionRateFor, finConcordiaDisabilityRateFor,
 } from './compensation-calc.js';
-import { COMP_METHOD_KEYS, FIN_COMP_PLAN_KEYS, FIN_CONCORDIA_RANGE_KEYS } from './compensation-projection.js';
+import { FIN_COMP_PLAN_KEYS, FIN_CONCORDIA_RANGE_KEYS } from './compensation-projection.js';
 import { money, moneySigned } from './compensation-council-report.js';
 
 const e = escapeHtml;
-const METHOD_NAMES = { none: 'No raise', worksheet: 'District Scale', scalepct: '% of Scale', cola: 'COLA', custom: 'Custom %' };
 // Legacy finFmtPctInput: a stored fraction shown as a percentage without float noise.
 function pctInput(fraction) {
   if (fraction == null || fraction === '') return '';
@@ -29,56 +29,6 @@ function statusBanner(entryStatus, entryMessage) {
 }
 function returnFields(page, { planYear, refYear } = {}) {
   return `<input type="hidden" name="return_page" value="${page}">${planYear ? `<input type="hidden" name="plan_year" value="${e(planYear)}">` : ''}${refYear ? `<input type="hidden" name="ref_year" value="${e(refYear)}">` : ''}`;
-}
-
-// Legacy step 1: pick a raise method for everyone or per worker, or type a figure by hand. Each
-// method's resulting salary is shown beside the choice, as legacy's method columns did.
-export function renderRaiseMethodsEditor(plan, projection, { planYear } = {}) {
-  const roster = Array.isArray(plan && plan.roster) ? plan.roster : [];
-  const perWorker = (plan && plan.compPerWorkerMethod) || {};
-  const overrides = (plan && plan.compOverrides) || {};
-  const planMethod = COMP_METHOD_KEYS.includes(plan && plan.compMethod) ? plan.compMethod : 'cola';
-  const model = projection && projection.ok ? projection.model : null;
-  const computed = projection && projection.ok ? projection.computed : null;
-  const label = (key) => (model ? model.methodLabel(key) : METHOD_NAMES[key]);
-  const option = (value, text, selected) => `<option value="${value}"${selected ? ' selected' : ''}>${e(text)}</option>`;
-  const methodHead = COMP_METHOD_KEYS.map((k) => `<th class="num">${e(label(k))}</th>`).join('');
-  const rows = roster.map((w, i) => {
-    const name = (w && (w.name || w.position)) || `Staff member ${i + 1}`;
-    const figures = COMP_METHOD_KEYS.map((k) => {
-      const cents = model ? model.methodSalaryCents(w, k) : null;
-      const active = (perWorker[i] || planMethod) === k;
-      return `<td class="num">${cents == null ? '&mdash;' : (active ? `<b>${money(cents)}</b>` : money(cents))}</td>`;
-    }).join('');
-    const current = computed && computed[i] ? money(computed[i].currentCents) : '&mdash;';
-    const result = computed && computed[i] ? `<b>${money(computed[i].salaryCents)}</b>` : '&mdash;';
-    const flags = [w && w.externallyFunded ? 'externally funded' : '', w && w.cashOnly ? 'cash only' : '', w && w.hideFromCouncil ? 'hidden from council' : ''].filter(Boolean);
-    return `<tr><td><b>${e(name)}</b>${flags.length ? `<br><small>${e(flags.join(' · '))}</small>` : ''}</td><td class="num">${current}</td>${figures}
-      <td><select name="worker_method_${i}" aria-label="Raise method for ${e(name)}">${option('default', `Plan-wide (${label(planMethod)})`, !perWorker[i])}${COMP_METHOD_KEYS.map((k) => option(k, label(k), perWorker[i] === k)).join('')}</select></td>
-      <td><input type="number" name="worker_override_${i}" min="0" step="1" value="${e(overrides[i] == null ? '' : String(overrides[i]).replace(/[^0-9.]/g, ''))}" placeholder="—" aria-label="Hand-set FY salary for ${e(name)}" style="width:7.5rem"></td>
-      <td class="num">${result}</td></tr>`;
-  }).join('');
-  const num = (v) => (v === undefined || v === null || v === '' ? '' : e(String(v)));
-  return `<section aria-label="Raise methods">
-    ${renderSectionHeading({ eyebrow: 'Compensation Plan', heading: 'Raise methods', badge: 'Shared plan · relayed live to Connect' })}
-    <form method="POST" action="/api/v1/connect-compensation-plan-write">
-      <input type="hidden" name="action" value="methods">${returnFields('plan', { planYear })}
-      <div class="grid form-grid">
-        <div class="field"><label for="rm-method">Plan-wide raise method</label><select id="rm-method" name="comp_method">${COMP_METHOD_KEYS.map((k) => option(k, METHOD_NAMES[k], k === planMethod)).join('')}</select></div>
-        <div class="field"><label for="rm-custom">Custom raise (%, negative for a pay cut)</label><input id="rm-custom" type="number" name="comp_custom_pct" min="-100" max="100" step="0.1" value="${num(plan && plan.compCustomPct)}" placeholder="3.5"></div>
-        <div class="field"><label for="rm-scale">Share of District Scale (%)</label><input id="rm-scale" type="number" name="comp_scale_pct" min="0" max="200" step="1" value="${num(plan && plan.compScalePct)}" placeholder="95"></div>
-        <div class="field"><label for="rm-basis">Compare the plan against</label><select id="rm-basis" name="comp_base_year_basis">
-          ${option('roster', 'The same roster at last year’s rates', (plan && plan.compBaseYearBasis) !== 'ledger')}
-          ${option('ledger', 'Last year’s ledger accounts', (plan && plan.compBaseYearBasis) === 'ledger')}
-        </select></div>
-      </div>
-      <div class="field"><label><input type="checkbox" name="comp_baseline_roster_only" value="1"${plan && plan.compBaselineRosterOnly ? ' checked' : ''}> Ledger comparison: leave out salary accounts no roster worker is linked to</label></div>
-      ${roster.length ? `<div class="table-wrap"><table><thead><tr><th>Worker</th><th class="num">Current pay</th>${methodHead}<th>Method for this worker</th><th>Hand-set salary ($)</th><th class="num">FY${model ? model.targetYear : ''} salary</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p>No workers on this plan yet.</p>'}
-      <div class="field"><label><input type="checkbox" name="apply_to_all" value="1"> Apply the plan-wide method to everyone (clears every per-worker choice and hand-set salary)</label></div>
-      <button type="submit">Save raise methods</button>
-    </form>
-    <p><small>A hand-set salary wins over the worker’s method; leave it blank to use the method. COLA uses the Social Security COLA entered on Rates &amp; ranges for the plan year.</small></p>
-  </section>`;
 }
 
 function rateField(label, name, value, { suffix = '%', placeholder = '' } = {}) {

@@ -147,8 +147,8 @@ export function summarizeCompensationWorkers(workers) {
 }
 
 // Real, honestly-scoped Council rollup -- for the SAME roles who already see the real per-person
-// roster on the Plan page (admin/council/compensation; see COMPENSATION_LIVE_ALLOWED_ROLES above
-// and compensation-pages.js's 'plan' branch). Deliberately NOT a live version of
+// roster on the Planner (admin/council/compensation; see COMPENSATION_LIVE_ALLOWED_ROLES above).
+// Deliberately NOT a live version of
 // buildCompensationCouncilSnapshot above: the real contract carries no stored benefits_cents or
 // adjustment_pct per worker (those are planning-tool assumptions, never a "compensation record" of
 // a person -- see finance-compensation-consumer.js's header comment), so there is no honest

@@ -117,7 +117,7 @@ export function renderAccountHierarchy(nodes) {
 // several), renamed for display, and tagged with a purpose. Only changed rows are sent, so an
 // account still on its name-based default is not pinned to it by saving another row. The accounts
 // are the same year's chart leaves the main table above lists.
-function renderLayoutEditor(rows, layout, entryStatus, entryMessage) {
+export function renderLayoutEditor(rows, layout, entryStatus, entryMessage, { returnTo = '' } = {}) {
   const e = escapeHtml;
   const leaves = chartLeafRows(rows);
   const sections = buildBoardSections(leaves, layout, (r) => ({ path: r.category_path, name: r.account_name, isRevenue: isRevenueClassification(r.classification) }));
@@ -153,10 +153,10 @@ function renderLayoutEditor(rows, layout, entryStatus, entryMessage) {
     ${renderSectionHeading({ eyebrow: 'Chart of Accounts', heading: 'Budget layout', badge: 'Relayed live to Connect' })}
     ${entryStatus === 'ok' ? '<p class="status">Saved in Connect.</p>' : ''}
     ${entryStatus === 'error' ? `<p class="status status-error">Not saved: ${e(entryMessage || 'unknown error')}</p>` : ''}
-    <p>This is how the Budget builder groups its lines. Rename a heading, move accounts between categories, rename an account for display, or give it a purpose tag. QuickBooks account numbers, names and groups are untouched.</p>
+    <p>This is how the Budget planner groups its lines. Rename a heading, move accounts between categories, rename an account for display, or give it a purpose tag. QuickBooks account numbers, names and groups are untouched.</p>
     <details class="panel panel-spaced"><summary>Category headings</summary>
       <form method="POST" action="/api/v1/connect-board-categories-write">
-        <input type="hidden" name="form_kind" value="headings">
+        <input type="hidden" name="form_kind" value="headings">${returnTo ? `<input type="hidden" name="return_to" value="${e(returnTo)}">` : ''}
         <div class="grid form-grid">
           ${headingField('donor_wrapper_label', layout.donorWrapperLabel, DONOR_WRAPPER_DEFAULT_LABEL, 'Donor income wrapper')}
           ${BOARD_REVENUE_ORDER.map((k) => headingField(`label_revenue_${k}`, layout.revenueLabels[k], BOARD_REVENUE_DEFAULT_LABELS[k], `Revenue: ${BOARD_REVENUE_DEFAULT_LABELS[k]}`)).join('')}
@@ -167,7 +167,7 @@ function renderLayoutEditor(rows, layout, entryStatus, entryMessage) {
       </form>
     </details>
     <form method="POST" action="/api/v1/connect-board-categories-write">
-      <input type="hidden" name="form_kind" value="accounts">
+      <input type="hidden" name="form_kind" value="accounts">${returnTo ? `<input type="hidden" name="return_to" value="${e(returnTo)}">` : ''}
       <div class="table-wrap"><table class="coa-layout"><thead><tr><th></th><th>Account (display name)</th><th>Board category</th><th>Purpose</th></tr></thead>
         <tbody>${side('Revenue', sections.revenue)}${side('Expenses', sections.expense)}</tbody></table></div>
       <div class="grid form-grid">

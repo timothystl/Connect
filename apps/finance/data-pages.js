@@ -45,7 +45,7 @@ const DESTRUCTIVE = [
   { label: 'Remove a reserve month or disbursement', href: '/?section=property&page=reserve-distribution', page: 'Commercial Property › Reserve & distribution', admin: true },
   { label: 'Remove a repair entry', href: '/?section=property&page=work-orders', page: 'Commercial Property › Work orders & repairs', admin: true },
   { label: 'Remove a capital ledger entry', href: '/?section=property&page=capital', page: 'Commercial Property › Capital improvements', admin: true },
-  { label: 'Remove a Budget plan line', href: '/?section=planning&page=builder', page: 'Budget › Budget builder', admin: true },
+  { label: 'Remove a Budget plan line', href: '/?section=planning&page=builder', page: 'Budget › Budget planner', admin: true },
   { label: 'Disconnect QuickBooks (revokes access and clears the report cache)', href: '/?section=quickbooks&page=sync-status', page: 'QuickBooks › Sync status', admin: true },
 ];
 

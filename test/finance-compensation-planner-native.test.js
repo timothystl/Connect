@@ -103,6 +103,53 @@ describe.skipIf(!executablePath)('Compensation Planner in a browser', () => {
     await t.close();
   }, 30000);
 
+  it('opens a worker’s editor full width beneath their row, and folds it away again', async () => {
+    const t = await open();
+    expect(await t.page.locator('.fin-comp-editor-row').count()).toBe(0);
+    await t.page.click('tr.fin-comp-row >> nth=1 >> td[data-act="select"]');
+    // The editor is the row straight after the worker's own, spanning the whole table.
+    const next = await t.page.evaluate(() => {
+      const row = document.querySelectorAll('tr.fin-comp-row')[1];
+      const after = row.nextElementSibling;
+      return { cls: after.className, span: after.cells[0].colSpan, cols: row.cells.length, width: after.getBoundingClientRect().width, table: row.closest('table').getBoundingClientRect().width };
+    });
+    expect(next.cls).toBe('fin-comp-editor-row');
+    expect(next.span).toBe(next.cols);
+    expect(next.width).toBe(next.table);
+    expect(await t.page.inputValue('#cp-name-1')).toBe('Test Director');
+    await t.page.click('[data-act="closeDrawer"]');
+    expect(await t.page.locator('.fin-comp-editor-row').count()).toBe(0);
+    await t.page.click('tr.fin-comp-row >> nth=2 >> td[data-act="select"]');
+    await t.page.click('tr.fin-comp-row >> nth=2 >> td[data-act="select"]');
+    expect(await t.page.locator('.fin-comp-editor-row').count()).toBe(0);
+    expect(t.errors).toEqual([]);
+    await t.close();
+  }, 30000);
+
+  it('hand-sets a salary in the Set pay table, clears it in one click, and saves mileage', async () => {
+    const t = await open();
+    await t.page.locator('#cp-handset-1').type('47000');
+    expect(await t.page.evaluate(() => document.activeElement.id)).toBe('cp-handset-1');
+    await t.waitForSave(1);
+    expect(t.writes.at(-1).compOverrides).toEqual({ 1: '47000' });
+    expect(await t.page.locator('tr.fin-comp-row').nth(1).locator('td.edited').first().textContent()).toContain('$47,000');
+    await t.page.click('tr.fin-comp-row >> nth=1 >> [data-act="clearOverride"]');
+    expect(await t.page.inputValue('#cp-handset-1')).toBe('');
+    await t.page.click('tr.fin-comp-row >> nth=0 >> td[data-act="select"]');
+    const before = await t.page.textContent('.fin-comp-editor-row .fin-comp-payrow.total');
+    await t.page.fill('#cp-mileage-0', '2400');
+    await t.page.waitForFunction(() => /Mileage/.test(document.querySelector('.fin-comp-paylist')?.textContent || ''));
+    const after = await t.page.textContent('.fin-comp-editor-row .fin-comp-payrow.total');
+    expect(Number(after.replace(/[^0-9]/g, '')) - Number(before.replace(/[^0-9]/g, ''))).toBe(2400);
+    await t.page.waitForTimeout(900);
+    await t.waitForSave(2);
+    const body = t.writes.at(-1);
+    expect(body.compOverrides).toEqual({});
+    expect(body.roster[0].mileageCents).toBe(240000);
+    expect(t.errors).toEqual([]);
+    await t.close();
+  }, 30000);
+
   it('adds and removes a worker without shifting anyone else’s settings', async () => {
     const t = await open();
     await t.page.click('tr.fin-comp-row >> nth=2 >> td[data-act="methodOne"][data-k="none"]');
@@ -123,7 +170,9 @@ describe.skipIf(!executablePath)('Compensation Planner in a browser', () => {
   it('lets council with edit permission change only the raise plan, saved as their draft', async () => {
     const t = await open({ role: 'council', compensation: 'edit' });
     expect(await t.page.textContent('.fin-comp-shell')).toContain('saved to your own council plan');
+    await t.page.click('tr.fin-comp-row >> nth=0 >> td[data-act="select"]');
     expect(await t.page.locator('#cp-name-0').isDisabled()).toBe(true);
+    expect(await t.page.locator('#cp-handset-0').isDisabled()).toBe(true);
     expect(await t.page.locator('[data-act="addWorker"]').count()).toBe(0);
     await t.page.click('.fin-comp-chip[data-k="worksheet"]');
     await t.page.waitForFunction(() => /council draft/.test(document.querySelector('.fin-comp-save')?.textContent || ''), null, { timeout: 5000 });

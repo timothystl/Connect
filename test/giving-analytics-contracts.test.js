@@ -266,6 +266,44 @@ describe('Giving analytics contracts (giving-analytics-*-v1, giving-followup-wri
     for (const name of ['Krause', 'Schreiber', 'Ellis', 'Hollis', 'Nguyen', 'Acme']) expect(text).not.toContain(name);
   });
 
+  it('answers one period against the same days last year and the matching budget, prorated by day', async () => {
+    const { db, building } = setup();
+    const raw = db._raw;
+    const line = (year, name, budget) => raw.prepare(
+      `INSERT INTO finance_church_entries (fiscal_year, period_month, classification, category_path, account_name, own_actual_cents, own_budget_cents, source)
+       VALUES (?, 0, 'Income', ?, ?, 0, ?, 'import')`
+    ).run(year, `Income:${name}`, name, budget);
+    line(2026, '40085 Sunday Offering', 36500000); // $1,000 a day
+    line(2026, '50010 Missions', 1000000);
+    line(2026, 'Interest', null);
+    raw.prepare(`INSERT INTO finance_settings (key, value) VALUES ('finance_cash_policy', ?)`).run(JSON.stringify({ general_fund_budget_code: '40085' }));
+    const read = async (query, email) => (await call(db, '/api/contracts/giving-analytics-v1', { email, query: `?as_of=2026-09-20${query}` })).json();
+
+    const gf = await read('&fund=general&from=2026-09-01&to=2026-09-20');
+    // Walter $200 (Sep 6), Jordan $150, loose cash $114 this year; Walter and Anna last year.
+    expect(gf.period).toMatchObject({
+      from: '2026-09-01', to: '2026-09-20', days: 20, cents: 46400, gifts: 3,
+      prior_from: '2025-09-01', prior_to: '2025-09-20', prior_cents: 30000, prior_gifts: 2,
+      budget: { cents: 2000000, basis: 'general_fund', codes: ['40085'], accounts: ['40085 Sunday Offering'], years: [{ year: 2026, annual_cents: 36500000, days: 20, days_in_year: 365, cents: 2000000 }] },
+    });
+    expect(gf).not.toHaveProperty('households');
+    expect(gf.fund.key).toBe('general');
+
+    const all = await read('&fund=all&from=2026-09-01&to=2026-09-20');
+    expect(all.period.budget).toMatchObject({ basis: 'church_income', cents: Math.round(37500000 * 20 / 365) });
+    // A fund with no budget line gets no budget, and says which year was missing.
+    const bf = await read(`&fund=${building}&from=2026-01-01&to=2026-09-20`);
+    expect(bf.period).toMatchObject({ cents: 50000, budget: null, budget_missing_years: [2026] });
+    // A period reaching into a year with no budget gets none at all.
+    const across = await read('&fund=general&from=2025-12-01&to=2026-01-31');
+    expect(across.period).toMatchObject({ budget: null, budget_missing_years: [2025] });
+    // Council may read it (totals only); a period over the limit falls back to the ordinary read.
+    expect((await read('&fund=general&from=2026-09-01&to=2026-09-20', 'carl@timothystl.org')).period.cents).toBe(46400);
+    const tooLong = await read('&from=2024-01-01&to=2026-09-20');
+    expect(tooLong).not.toHaveProperty('period');
+    expect(tooLong).toHaveProperty('households');
+  });
+
   it('lets council read the totals but not the named detail or the follow-up writer', async () => {
     const { db } = setup();
     expect((await call(db, '/api/contracts/giving-analytics-v1', { email: 'carl@timothystl.org' })).status).toBe(200);

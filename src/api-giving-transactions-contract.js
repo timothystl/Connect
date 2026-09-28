@@ -9,13 +9,35 @@ import { giftHistory } from './giving-gift-corrections.js';
 
 const MAX_ROWS = 5000;
 const PAGE_ROWS = 200;
-const SORTS = {
-  date_desc: 'gift_date DESC, ge.id DESC',
-  date_asc: 'gift_date ASC, ge.id ASC',
-  amount_desc: 'ge.amount DESC, ge.id DESC',
-  amount_asc: 'ge.amount ASC, ge.id ASC',
-  name: "person_sort ASC, gift_date DESC, ge.id DESC",
-};
+// Every sortable column, both directions. The ORDER BY text comes only from this table, keyed by
+// the requested name; the request itself is never written into the SQL. Envelope and check
+// numbers are usually numeric, so they sort as numbers first (blanks last either way).
+const numericText = (col, dir) => `(COALESCE(${col},'')='') ASC, CAST(${col} AS INTEGER) ${dir}, ${col} ${dir}`;
+const SORTS = {};
+for (const dir of ['ASC', 'DESC']) {
+  const d = dir.toLowerCase();
+  SORTS[`date_${d}`] = `gift_date ${dir}, ge.id ${dir}`;
+  SORTS[`amount_${d}`] = `ge.amount ${dir}, ge.id ${dir}`;
+  SORTS[`name_${d}`] = `(ge.person_id IS NULL) ASC, person_sort ${dir}, gift_date DESC, ge.id DESC`;
+  SORTS[`fund_${d}`] = `f.name ${dir}, gift_date DESC, ge.id DESC`;
+  SORTS[`method_${d}`] = `ge.method ${dir}, gift_date DESC, ge.id DESC`;
+  SORTS[`batch_${d}`] = `ge.batch_id ${dir}, ge.id ${dir}`;
+  SORTS[`envelope_${d}`] = `${numericText('p.envelope_number', dir)}, gift_date DESC, ge.id DESC`;
+  SORTS[`check_${d}`] = `${numericText('ge.check_number', dir)}, gift_date DESC, ge.id DESC`;
+}
+Object.freeze(SORTS);
+// The By giver view's own columns (?gsort=), largest total first unless another is chosen.
+const GIVER_SORTS = {};
+for (const dir of ['ASC', 'DESC']) {
+  const d = dir.toLowerCase();
+  GIVER_SORTS[`name_${d}`] = `(ge.person_id IS NULL) ASC, MAX(COALESCE(p.last_name,'')||' '||COALESCE(p.first_name,'')) ${dir}`;
+  GIVER_SORTS[`envelope_${d}`] = numericText('MAX(p.envelope_number)', dir);
+  GIVER_SORTS[`gifts_${d}`] = `gift_count ${dir}, total_cents DESC`;
+  GIVER_SORTS[`last_${d}`] = `last_gift_date ${dir}, total_cents DESC`;
+  GIVER_SORTS[`total_${d}`] = `total_cents ${dir}`;
+}
+Object.freeze(GIVER_SORTS);
+const own = (table, key) => Object.prototype.hasOwnProperty.call(table, key);
 
 function isDay(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
@@ -39,7 +61,10 @@ export function parseTransactionFilters(params, today = new Date().toISOString()
   const from = isDay(params.get('from')) ? params.get('from') : `${today.slice(0, 4)}-01-01`;
   const to = isDay(params.get('to')) ? params.get('to') : today;
   const status = ['all', 'active', 'voided', 'refunded', 'changed'].includes(params.get('status')) ? params.get('status') : 'all';
-  const sort = SORTS[params.get('sort')] ? params.get('sort') : 'date_desc';
+  // 'name' is the old single-direction name sort; older links still carry it.
+  const requestedSort = params.get('sort') === 'name' ? 'name_asc' : params.get('sort');
+  const sort = own(SORTS, requestedSort) ? requestedSort : 'date_desc';
+  const giverSort = own(GIVER_SORTS, params.get('gsort')) ? params.get('gsort') : 'total_desc';
   const batchId = parseInt(params.get('batch_id') || '', 10);
   return {
     from: from <= to ? from : to,
@@ -52,6 +77,7 @@ export function parseTransactionFilters(params, today = new Date().toISOString()
     batch_id: Number.isInteger(batchId) ? batchId : null,
     status,
     sort,
+    giver_sort: giverSort,
     offset: Math.max(0, Math.min(1e6, parseInt(params.get('offset') || '0', 10) || 0)),
     limit: params.get('all') === '1' ? MAX_ROWS : PAGE_ROWS,
   };
@@ -123,7 +149,7 @@ export async function respondWithGivingTransactionsV1(url, db) {
     `SELECT ge.person_id, TRIM(COALESCE(p.first_name,'')||' '||COALESCE(p.last_name,'')) AS person_name,
             COALESCE(p.envelope_number,'') AS envelope_number, COUNT(*) AS gift_count,
             COALESCE(SUM(ge.amount),0) AS total_cents, MAX(COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date)) AS last_gift_date
-       ${FROM} WHERE ${sql} GROUP BY ge.person_id ORDER BY total_cents DESC LIMIT 500`
+       ${FROM} WHERE ${sql} GROUP BY ge.person_id ORDER BY ${GIVER_SORTS[f.giver_sort]} LIMIT 500`
   ).bind(...binds).all()).results || [];
   const byMonth = (await db.prepare(
     `SELECT substr(COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date),1,7) AS month,

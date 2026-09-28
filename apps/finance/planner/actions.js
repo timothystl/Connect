@@ -36,7 +36,12 @@ export const ACTIONS = {
   // ── Navigation (nothing saved) ──
   view: { who: 'view', run(ds) { S.view = ds.v; } },
   dismissToast: { who: 'view', run() { S.toast = ''; } },
-  select: { who: 'view', run(ds) { S.selected = idx(ds); S.drawerOpen = true; } },
+  // Clicking the open worker's row again folds their editor away.
+  select: { who: 'view', run(ds) {
+    const i = idx(ds);
+    S.drawerOpen = !(S.drawerOpen && S.selected === i);
+    S.selected = i;
+  } },
   closeDrawer: { who: 'view', run() { S.drawerOpen = false; } },
   ratesYear: { who: 'view', run(ds, value) { S.refYear = Number(value); } },
 
@@ -51,7 +56,6 @@ export const ACTIONS = {
     const i = idx(ds), p = plan();
     p.perWorkerMethod[i] = ds.k;
     delete p.overrides[i];
-    S.selected = i;
     const w = p.roster[i], m = model();
     say((w.name || 'Worker ' + (i + 1)) + ' → ' + m.methodLabel(ds.k) + ' (' + money(m.methodSalaryCents(w, ds.k)) + ').');
   } },
@@ -72,7 +76,12 @@ export const ACTIONS = {
 
   // ── Roster and hand-set figures (admin/compensation) ──
   clearOverrides: { who: 'edit', save: true, run() { plan().overrides = {}; say('Hand-set figures cleared.'); } },
-  override: { who: 'edit', save: true, run(ds, value) { plan().overrides[idx(ds)] = value; } },
+  // A hand-set FY salary, typed in the Set pay table's Hand-set column or the worker's editor.
+  // Emptying the box goes back to the worker's method.
+  override: { who: 'edit', save: true, run(ds, value) {
+    if (String(value == null ? '' : value).trim() === '') delete plan().overrides[idx(ds)];
+    else plan().overrides[idx(ds)] = value;
+  } },
   clearOverride: { who: 'edit', save: true, run(ds) { delete plan().overrides[idx(ds)]; } },
   matchMidpoint: { who: 'edit', save: true, run(ds) {
     const i = idx(ds), w = plan().roster[i];
@@ -101,6 +110,7 @@ export const ACTIONS = {
     p.perWorkerMethod = reindexAfterRemoval(p.perWorkerMethod, i);
     p.overrides = reindexAfterRemoval(p.overrides, i);
     if (S.selected >= p.roster.length) S.selected = Math.max(0, p.roster.length - 1);
+    S.drawerOpen = false;
     say((name || 'Worker') + ' removed.');
   } },
   field: { who: 'edit', save: true, run(ds, value) { worker(ds)[ds.f] = value; } },
@@ -134,6 +144,13 @@ export const ACTIONS = {
     else w.actualSalaryCents = Math.round(n * 100);
   } },
   clearCurrentPay: { who: 'edit', save: true, run(ds) { delete worker(ds).actualSalaryCents; } },
+  // Annual mileage reimbursement or car allowance, whole dollars a year; blank or $0 removes it.
+  mileage: { who: 'edit', save: true, run(ds, value) {
+    const w = worker(ds);
+    const n = parseFloat(String(value == null ? '' : value).replace(/[^0-9.]/g, ''));
+    if (!Number.isFinite(n) || n <= 0) delete w.mileageCents;
+    else w.mileageCents = Math.round(n * 100);
+  } },
   toggle: { who: 'edit', save: true, run(ds, value) {
     const w = worker(ds);
     w[ds.f] = !!value;

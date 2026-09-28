@@ -55,7 +55,9 @@ describe('Compensation Planner in Finance', () => {
     expect(html).toContain('<div id="cp-root" class="cp">');
     expect(html).toContain('<script src="/compensation-planner/app.js?v=sha1" defer></script>');
     expect(html).not.toContain('<iframe');
-    expect(html).toContain('page=plan');
+    // Plan (new view) is retired; the nav no longer offers it.
+    expect(html).not.toContain('Plan (new view)');
+    expect(html).not.toContain('page=plan"');
     const config = JSON.parse(html.match(/<script type="application\/json" id="cp-config">([^<]*)<\/script>/)[1]);
     expect(config).toMatchObject({ role: 'admin', permissions: { compensation: 'edit' }, preview: false });
     expect(config.targetYear).toBe(config.baseYear + 1);
@@ -66,7 +68,7 @@ describe('Compensation Planner in Finance', () => {
     expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/);
     expect(res.headers.get('x-frame-options')).toBe('DENY');
     // Every other page still runs no script at all.
-    const plan = await call(makeEnv().env, '/?section=compensation&page=plan');
+    const plan = await call(makeEnv().env, '/?section=compensation&page=benefits');
     expect(plan.headers.get('content-security-policy')).not.toContain('script-src');
   });
 
@@ -125,10 +127,11 @@ describe('Compensation Planner in Finance', () => {
     expect(councilDraftFromPlan({ compBaselineRosterOnly: 1 })).toEqual({ compBaselineRosterOnly: true });
   });
 
-  it('shows Connect’s Budget Planner and Chart of Accounts as tabs beside Finance’s own pages', async () => {
+  it('shows Connect’s Chart of Accounts as a tab beside Finance’s own pages; the Budget Planner is native now', async () => {
     const budget = await (await call(makeEnv().env, '/?section=planning&page=connect')).text();
-    expect(budget).toContain('<iframe src="/accounting?section=planning"');
-    expect(budget).toContain('Connect budget planner');
+    expect(budget).not.toContain('<iframe src="/accounting?section=planning"');
+    expect(budget).not.toContain('Connect budget planner');
+    expect(budget).toContain('<h1 class="page-title">Budget planner</h1>');
     const coa = await (await call(makeEnv().env, '/?section=accounts&page=connect')).text();
     expect(coa).toContain('<iframe src="/accounting?section=accounts"');
     const workspace = await call(makeEnv().env, '/accounting?section=planning');

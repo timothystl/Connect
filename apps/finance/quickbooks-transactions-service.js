@@ -22,7 +22,23 @@ const COLUMN_ALIASES = {
   account: { types: ['account_name'], titles: ['account'] },
   split: { types: ['other_account', 'split_acc'], titles: ['split'] },
   amount: { types: ['subt_nat_amount', 'amount'], titles: ['amount'] },
+  dueDate: { types: ['due_date'], titles: ['due date'] },
+  cleared: { types: ['is_cleared'], titles: ['clr', 'cleared'] },
+  paymentMethod: { types: ['pmt_mthd'], titles: ['payment method'] },
+  className: { types: ['klass_name'], titles: ['class'] },
+  location: { types: ['dept_name'], titles: ['location', 'department'] },
+  createdBy: { types: ['create_by'], titles: ['created by'] },
+  lastModifiedBy: { types: ['last_mod_by'], titles: ['last modified by'] },
 };
+
+// The TransactionList columns Finance asks for. QuickBooks' default set omits who entered a
+// transaction, its payment method and cleared status; memo is requested explicitly so a company
+// whose default layout drops it still sends the note. A company that rejects a column (class or
+// location tracking off) is retried with QuickBooks' default columns.
+export const TRANSACTION_LIST_COLUMNS = [
+  'tx_date', 'txn_type', 'doc_num', 'name', 'memo', 'account_name', 'other_account', 'subt_nat_amount',
+  'due_date', 'is_cleared', 'pmt_mthd', 'create_by', 'last_mod_by',
+].join(',');
 
 const QBO_TRANSACTION_SLUGS = {
   invoice: 'invoice', estimate: 'estimate', 'sales receipt': 'salesreceipt',
@@ -77,10 +93,14 @@ function rowFromCells(cells, indexes) {
   const type = cell('type')?.value || '';
   const id = cell('type')?.id || cells.find((entry) => entry?.id)?.id || null;
   const amount = cell('amount')?.value || '';
+  const text = (field) => String(cell(field)?.value || '').trim();
   return {
-    date: cell('date')?.value || '', type, docNum: cell('docNum')?.value || '',
-    name: cell('name')?.value || '', memo: cell('memo')?.value || '',
-    account: cell('account')?.value || '', split: cell('split')?.value || '', amount, amountCents: parseAmount(amount),
+    date: text('date'), type, docNum: text('docNum'),
+    name: text('name'), nameId: cell('name')?.id || null, memo: text('memo'),
+    account: text('account'), split: text('split'), amount, amountCents: parseAmount(amount),
+    dueDate: text('dueDate'), cleared: text('cleared'), paymentMethod: text('paymentMethod'),
+    className: text('className'), location: text('location'),
+    createdBy: text('createdBy'), lastModifiedBy: text('lastModifiedBy'),
     transactionId: id, viewUrl: transactionUrl(type, id),
   };
 }
@@ -172,10 +192,12 @@ export async function loadQuickbooksTransactions(env, searchParams, { now = Date
   }
   const client = makeQboClient(env, fresh, fetchImpl);
   const range = { start_date: dates.startDate, end_date: dates.endDate };
-  const [response, detail] = await Promise.all([
-    client.transactionList({ ...range, sort_by: 'tx_date', sort_order: 'descend' }),
+  const listParams = { ...range, sort_by: 'tx_date', sort_order: 'descend' };
+  const [first, detail] = await Promise.all([
+    client.transactionList({ ...listParams, columns: TRANSACTION_LIST_COLUMNS }),
     includeExpenseLines ? loadExpenseLines(client, range) : null,
   ]);
+  const response = first.ok || first.status !== 400 ? first : await client.transactionList(listParams);
   if (!response.ok) return { ok: false, ...dates, error: `QuickBooks could not load the transaction report (HTTP ${response.status}).` };
   const transactions = parseTransactionList(await response.json());
   return { ok: true, ...dates, transactions, ...(detail || {}), syncedAt: new Date(now).toISOString() };
@@ -193,7 +215,7 @@ async function loadExpenseLines(client, range) {
   }
 }
 
-function isSpending(row) {
+export function isSpending(row) {
   return EXPENSE_TRANSACTION_TYPES.has(String(row.type || '').toLowerCase()) && row.amountCents != null && row.amountCents !== 0;
 }
 
@@ -238,7 +260,7 @@ export function spendingRowsFor(transactions, { account = null, vendor = null } 
     && (vendor == null || row.name === vendor));
 }
 
-const SEARCH_FIELDS = ['date', 'type', 'docNum', 'name', 'memo', 'account', 'split', 'amount'];
+const SEARCH_FIELDS = ['date', 'type', 'docNum', 'name', 'memo', 'account', 'split', 'amount', 'paymentMethod', 'className', 'location', 'createdBy'];
 
 // Case-insensitive search across every visible field; each word must match somewhere.
 export function searchTransactions(transactions, query) {
@@ -254,7 +276,15 @@ export function searchTransactions(transactions, query) {
 export const TRANSACTION_SORTS = {
   date: (row) => row.date, type: (row) => row.type, number: (row) => row.docNum, name: (row) => row.name,
   account: (row) => row.account, category: (row) => row.split, amount: (row) => row.amountCents,
+  memo: (row) => row.memo,
 };
+
+// Every transaction with one payee: bills and checks, and also the bill payments, deposits and
+// journal entries the spending views leave out, so a payee reached from a bill payment is not
+// empty. The QuickBooks entity id matches when both sides carry it; otherwise the name does.
+export function transactionsForName(transactions, { name = '', nameId = '' } = {}) {
+  return (transactions || []).filter((row) => (nameId && row.nameId ? row.nameId === nameId : row.name === name));
+}
 
 export function sortRows(rows, sorts, key, dir) {
   const valueOf = sorts[key];

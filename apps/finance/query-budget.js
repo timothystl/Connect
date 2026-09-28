@@ -21,7 +21,7 @@ export const FINANCE_QUERY_BUDGETS = Object.freeze({
   propertyDistributions: 1,
   facilities: 5,
   hr: 8,
-  planning: 2,
+  planning: 3,
   propertyBooks: 2,
 });
 

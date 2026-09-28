@@ -51,8 +51,8 @@ export function defaultLiveBudgetFiscalYear(now = new Date()) {
 // ORIGINAL incoming request (Cloudflare Access already attached it there); Connect independently
 // verifies that signature to learn who is acting and checks their real Connect role (admin or
 // council only, same as the legacy in-Connect Budget Planner) -- this call carries it through, it
-// does not decide who is authorized. Same never-throws, always-{ok,reason}-labeled shape as
-// postConnectGivingQuickEntry in connect-giving-client.js.
+// does not decide who is authorized. Never throws: every failure
+// resolves to a labeled { ok: false, reason }.
 const WRITE_REQUEST_TIMEOUT_MS = 4000;
 
 export async function postConnectFinanceBudgetWrite(env, accessJwt, rows) {
