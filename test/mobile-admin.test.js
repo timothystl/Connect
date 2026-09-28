@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { handleMobileApi } from '../src/api-mobile.js';
+import { handleMobileApi, currentSundayISO } from '../src/api-mobile.js';
 import { MOBILE_ADMIN_HTML } from '../src/mobile-admin-html.js';
 
 // Cover for the phone-optimized quick-access page (splash, dashboard, people directory,
@@ -178,6 +178,46 @@ describe('handleMobileApi — attendance upsert', () => {
       { DB: db }, makeUrl('attendance'), 'POST', 'staff'
     );
     expect(r.status).toBe(400);
+  });
+});
+
+describe('mobile attendance — a saved count is the one the dashboard shows', () => {
+  it('saves to, and reads back, the same row when a date/time has a duplicate or a non-sunday-typed row', async () => {
+    const db = makeDb();
+    const date = currentSundayISO();
+    // An imported/seeded row typed 'special' plus two 'sunday' duplicates at 08:00.
+    await db.prepare(`INSERT INTO worship_services (service_date,service_time,service_name,service_type,attendance,communion,notes)
+      VALUES (?,?,?,?,?,0,''), (?,?,?,?,?,0,''), (?,?,?,?,?,0,'')`)
+      .bind(date, '08:00', '', 'sunday', 0, date, '08:00', '', 'sunday', 0, date, '08:00', '', 'special', 0).run();
+    await db.prepare(`INSERT INTO worship_services (service_date,service_time,service_name,service_type,attendance,communion,notes)
+      VALUES (?,?,?,?,?,0,'')`).bind(date, '10:45', '', 'special', 0).run();
+    for (const [time, count] of [['08:00', 142], ['10:45', 97]]) {
+      const r = await handleMobileApi(makeReq({ date, time, count }), { DB: db }, makeUrl('attendance'), 'POST', 'staff');
+      expect(r.status).toBe(200);
+    }
+    const d = await (await handleMobileApi(makeReq(), { DB: db }, makeUrl('dashboard'), 'GET', 'staff')).json();
+    expect(d.services.map(s => s.count)).toEqual([142, 97]);
+  });
+
+  it('picks "this Sunday" on St. Louis time, not UTC', () => {
+    // Saturday 2026-09-26, 9pm CDT = Sunday 02:00 UTC — still last week's Sunday locally.
+    expect(currentSundayISO(new Date('2026-09-27T02:00:00Z'))).toBe('2026-09-20');
+    // Sunday 2026-09-27, 9pm CDT = Monday 02:00 UTC — still that Sunday.
+    expect(currentSundayISO(new Date('2026-09-28T02:00:00Z'))).toBe('2026-09-27');
+  });
+
+  it('keeps a typed-but-unsaved count across re-renders, and Enter saves it', () => {
+    expect(MOBILE_ADMIN_HTML).toMatch(/dataset\.svcInput\) state\.svcDraft\[e\.target\.dataset\.svcInput\] = e\.target\.value/);
+    expect(MOBILE_ADMIN_HTML).toMatch(/e\.key !== 'Enter'[\s\S]*?saveSvc\(e\.target\.dataset\.svcInput\)/);
+  });
+
+  it('never shows a stale count after a save on the other screen (no refresh needed)', () => {
+    // Opening Attendance re-fetches; a dashboard save drops the cached history.
+    expect(MOBILE_ADMIN_HTML).toMatch(/if \(screen === 'attendance'\) state\.attHistory = null;/);
+    expect(MOBILE_ADMIN_HTML).toMatch(/if \(svc\) svc\.count = count;\s*state\.attHistory = null;/);
+    // Edits/deletes/adds on the Attendance screen make the dashboard re-fetch.
+    expect((MOBILE_ADMIN_HTML.match(/state\.dashStale = true;/g) || []).length).toBe(3);
+    expect(MOBILE_ADMIN_HTML).toMatch(/if \(!d \|\| state\.dashStale\)/);
   });
 });
 
