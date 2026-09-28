@@ -143,6 +143,9 @@ export const SHELL_STYLES = `
     .inline-form { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
     .inline-form input[type=number] { width:6rem; }
     td.num, th.num { text-align:right; white-space:nowrap; }
+    th a { color:inherit; text-decoration:none; }
+    th a:hover { text-decoration:underline; }
+    .muted { color:var(--muted); }
     tr.total td { border-top:2px solid var(--line); font-weight:600; }
     tr.muted td { color:var(--muted); }
     .comp-basis { border-left:3px solid var(--line); padding:.2rem .9rem; margin:1rem 0; }

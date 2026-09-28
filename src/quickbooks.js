@@ -208,9 +208,11 @@ const QBO_TXN_URL_SLUGS = {
   'credit card credit': 'creditcardcredit',
   'vendor credit': 'vendorcredit',
   'purchase order': 'purchaseorder',
-  'bill payment': 'billpaymentcheck',
-  'bill payment (check)': 'billpaymentcheck',
-  'bill payment (credit card)': 'billpaymentcreditcard',
+  // QBO opens every bill payment at /app/billpayment; /app/billpaymentcheck is its "can't find
+  // the page" screen (confirmed against the live company 2026-09-28).
+  'bill payment': 'billpayment',
+  'bill payment (check)': 'billpayment',
+  'bill payment (credit card)': 'billpayment',
   'journal entry': 'journal',
   'deposit': 'deposit',
   'transfer': 'transfer',
