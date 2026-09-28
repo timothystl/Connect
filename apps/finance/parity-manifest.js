@@ -49,6 +49,12 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     ],
   },
   {
+    // Moved from Connect (Andrew, Sept 28 2026). Connect's own planner, served inside Finance.
+    id: 'tuition', label: 'Tuition Aid', group: 'Tuition Aid', permission: 'tuitionaid',
+    capabilities: ['K-8 aid planner', 'Lutheran High School aid', 'aid budget and policy', 'year navigator and history', 'pipeline'],
+    pages: [{ id: 'planner', label: 'Tuition Aid planner', status: 'live' }],
+  },
+  {
     id: 'charts', label: 'Charts', group: 'Charts', permission: 'finance',
     capabilities: ['giving pace', 'cash and reserve', 'expense mix', 'revenue mix', 'giving concentration'],
     pages: [
@@ -236,7 +242,7 @@ export function resolveFinancePage(section, pageId) {
 
 // Explicit sidebar group order, independent of each section's position in FINANCE_PARITY_SECTIONS.
 const GROUP_ORDER = [
-  'Financial Health', 'Gift Entry', 'Giving', 'Charts', 'Church', 'Balance Sheet', 'Daycare',
+  'Financial Health', 'Gift Entry', 'Giving', 'Tuition Aid', 'Charts', 'Church', 'Balance Sheet', 'Daycare',
   'Commercial Property', 'Facilities', 'Planning', 'Compensation', 'Payroll', 'HR & Staff',
   'QuickBooks', 'Board packet', 'Accounts & Data',
 ];

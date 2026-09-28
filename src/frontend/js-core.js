@@ -4,7 +4,7 @@
 // version bump
 // automatically invalidates the long-lived browser cache on those files, with nowhere else that
 // needs updating in step.
-export const DEPLOY_VERSION = '0.1.0-alpha.8';
+export const DEPLOY_VERSION = '0.1.0-alpha.9';
 
 export const JS_CORE = String.raw`<script>
 // ── DEPLOY VERSION ───────────────────────────────────────────────────
@@ -359,6 +359,20 @@ function finNavGo(id) {
   var item = FIN_TOPNAV_ITEMS.filter(function(i) { return i.id === id; })[0];
   if (!item) return;
   showTab('finance', item.finSection);
+}
+
+// Tuition Aid moved to Finance for good (Andrew, Sept 28 2026): the planner runs at
+// finance.timothystl.org/?section=tuition. Local development keeps the embedded tab.
+function openTuitionAid() {
+  if (location.hostname === 'connect.timothystl.org') {
+    location.assign('https://finance.timothystl.org/?section=tuition');
+    return;
+  }
+  if (location.hostname === 'connect-staging.timothystl.org') {
+    location.assign('https://finance-staging.timothystl.org/?section=tuition');
+    return;
+  }
+  showTab('tuitionaid');
 }
 
 // Live accounting work belongs in the standalone Finance app. Budget and Compensation remain
