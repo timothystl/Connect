@@ -153,7 +153,7 @@ function renderLayoutEditor(rows, layout, entryStatus, entryMessage) {
     ${renderSectionHeading({ eyebrow: 'Chart of Accounts', heading: 'Budget layout', badge: 'Relayed live to Connect' })}
     ${entryStatus === 'ok' ? '<p class="status">Saved in Connect.</p>' : ''}
     ${entryStatus === 'error' ? `<p class="status status-error">Not saved: ${e(entryMessage || 'unknown error')}</p>` : ''}
-    <p>This is how the Budget builder groups its lines. Rename a heading, move accounts between categories, rename an account for display, or give it a purpose tag. QuickBooks account numbers, names and groups are untouched.</p>
+    <p>This is how the Budget planner groups its lines. Rename a heading, move accounts between categories, rename an account for display, or give it a purpose tag. QuickBooks account numbers, names and groups are untouched.</p>
     <details class="panel panel-spaced"><summary>Category headings</summary>
       <form method="POST" action="/api/v1/connect-board-categories-write">
         <input type="hidden" name="form_kind" value="headings">

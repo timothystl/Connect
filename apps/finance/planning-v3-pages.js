@@ -25,7 +25,7 @@ function statusBanner(status) {
 }
 
 function noPlan(fiscalYear) {
-  return `<div class="panel"><h2>No FY${fiscalYear} budget plan yet</h2><p class="muted-line">Scenarios and the forecast start from the budget plan. Build it on the <a href="${href('builder')}">Budget builder</a> page first.</p></div>`;
+  return `<div class="panel"><h2>No FY${fiscalYear} budget plan yet</h2><p class="muted-line">Scenarios and the forecast start from the budget plan. Build it on the <a href="${href('builder')}">Budget planner</a> page first.</p></div>`;
 }
 
 function unavailable(message) {

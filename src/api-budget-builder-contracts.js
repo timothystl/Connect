@@ -1,5 +1,5 @@
 // ── connect.finance-budget-builder.v1 ─────────────────────────────────────────────────────────
-// Finance's v3 Budget builder table: every line of the target year's plan beside the two years it
+// Finance's Budget planner table: every line of the target year's plan beside the two years it
 // is built from. For target year Y it returns, per category, the FY(Y-2) actual, the FY(Y-1)
 // budget, the FY(Y-1) projection, and the FY(Y) plan row. The projection follows the same rules as
 // Connect's own planner and generate-all: the base year's actual annualized by weeks elapsed while
@@ -22,9 +22,10 @@ function lastSegment(path) {
   return parts.length ? parts[parts.length - 1].trim() : String(path || '');
 }
 
-export async function buildFinanceBudgetBuilderV1(db, { targetYear, now = new Date() }) {
-  const baseYear = targetYear - 1;
-  const priorYear = targetYear - 2;
+// baseYear defaults to the year before the target; Finance's Budget planner may build from an
+// earlier year (Connect's own planner has the same Base year input).
+export async function buildFinanceBudgetBuilderV1(db, { targetYear, baseYear = targetYear - 1, now = new Date() }) {
+  const priorYear = baseYear - 1;
   const [base, prior, planResult, overrideRow] = await Promise.all([
     resolvedYear(db, baseYear),
     resolvedYear(db, priorYear),
@@ -87,5 +88,10 @@ export async function respondWithFinanceBudgetBuilderV1(url, db) {
   if (!Number.isInteger(targetYear) || targetYear < 2000 || targetYear > 2100) {
     return json({ error: 'target_year is required as a 4-digit year' }, 400);
   }
-  return json(await buildFinanceBudgetBuilderV1(db, { targetYear }));
+  const rawBase = url.searchParams.get('base_year');
+  const baseYear = rawBase ? Number(rawBase) : targetYear - 1;
+  if (!Number.isInteger(baseYear) || baseYear < 2000 || baseYear >= targetYear) {
+    return json({ error: 'base_year must be a 4-digit year before target_year' }, 400);
+  }
+  return json(await buildFinanceBudgetBuilderV1(db, { targetYear, baseYear }));
 }

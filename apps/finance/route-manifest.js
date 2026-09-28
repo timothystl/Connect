@@ -59,6 +59,14 @@ const ROUTES = [
   // (never writes to Finance's own database), matching the legacy in-Connect Church Report's own
   // finance/church/actual-override route exactly.
   { id: 'church-actual-override-v1', paths: ['/api/v1/connect-church-actual-override'], methods: WRITE_METHODS, dataSource: 'live-relay', writer: true, contract: 'connect.finance-church-actual-override-relay.v1' },
+  // Planning › Budget planner's one "Save changes" form: only the changed cells are relayed, to the
+  // same three Connect contracts as the routes above (finance-budget-write-v1 for Plan cells, with
+  // council saving to their own draft; finance-base-projection-write-v1 and
+  // finance-church-actual-override-v1 for an admin's Projected and Actual corrections). Never
+  // writes to Finance's own database.
+  { id: 'budget-planner-save-v1', paths: ['/api/v1/budget-planner-save'], methods: WRITE_METHODS, dataSource: 'live-relay', writer: true, contract: 'connect.finance-budget-planner-save-relay.v1' },
+  // The Budget planner's current view as CSV, read live from connect.finance-budget-builder.v1.
+  { id: 'budget-planner-csv-v1', paths: ['/api/v1/budget-planner-csv'], dataSource: 'live-relay-read', contract: 'connect.finance-budget-builder.v1' },
   // Same deliberate exception as the relays above, for the two remaining legacy Excel import
   // routes: Church Report's annual "Budget vs. Actuals" import and Balance Sheet's single-snapshot
   // "Statement of Financial Position" import. Each relays an uploaded file to its own Connect
@@ -240,6 +248,8 @@ const ROUTES = [
   { id: 'property-bank-rec-remove-v1', paths: ['/api/v1/property/bank-rec-remove'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.property-bank-rec-remove.v1' },
   { id: 'planning-scenario-save-v1', paths: ['/api/v1/planning/scenario-save'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.planning-scenario-save.v1' },
   { id: 'planning-scenario-basis-v1', paths: ['/api/v1/planning/scenario-basis'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.planning-scenario-basis.v1' },
+  { id: 'planning-scenario-create-v1', paths: ['/api/v1/planning/scenario-create'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.planning-scenario-create.v1' },
+  { id: 'planning-scenario-delete-v1', paths: ['/api/v1/planning/scenario-delete'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.planning-scenario-delete.v1' },
   { id: 'hr-person-save-v1', paths: ['/api/v1/hr/person-save'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.hr-person-save.v1' },
   { id: 'hr-credential-save-v1', paths: ['/api/v1/hr/credential-save'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.hr-credential-save.v1' },
   { id: 'hr-review-save-v1', paths: ['/api/v1/hr/review-save'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.hr-review-save.v1' },

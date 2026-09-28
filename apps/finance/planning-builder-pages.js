@@ -1,29 +1,369 @@
-// Planning → Budget builder, v3 design. One table: each line of next year's plan beside last
-// year's actual, this year's budget and this year's projection (connect.finance-budget-builder.v1),
-// with the plan amount and the projection correction editable in place. Every save goes through the
-// existing relay routes to Connect (budget-plan-write, base-projection-write, generate, generate-all,
-// commit, remove); nothing here stores a copy.
+// Planning → Budget planner. Connect's Budget Planner (src/frontend/js-finance.js, finRenderPlanning
+// and its print sheet and outlook), rebuilt as a server-rendered Finance page with the builder's
+// three tools (Grow every line, Project one category, Commit to Church report) kept on top.
+//
+// Every figure comes from connect.finance-budget-builder.v1: each line of the target year's plan
+// beside the base year's budget, actual and projection. Every save goes through the existing relay
+// routes to Connect; nothing here stores a copy. Finance pages run no script, so:
+//   - the view (base and target year, Board view or QuickBooks order, which columns show, which
+//     lines are left out, the outlook's rates) is a set of GET parameters;
+//   - the whole table is ONE form. Each editable cell carries its original value in a hidden
+//     orig_ field, and /api/v1/budget-planner-save relays only the cells that changed: Plan cells
+//     to finance-budget-write-v1 (a council member's go to their own draft in Connect, as today),
+//     base-year Projected to finance-base-projection-write-v1 and base-year Actual to
+//     finance-church-actual-override-v1 (both admin only, re-checked by Connect);
+//   - "Choose rows" puts a checkbox on each line that belongs to a separate GET form (the HTML
+//     form attribute), so leaving lines out never submits the edit form;
+//   - Export CSV is a GET route returning the current view, and Print is print=1.
 import { escapeHtml as e } from './render-helpers.js';
 import { accountDisplayName, buildBoardSections } from './board-layout.js';
+import { csvNum, csvText } from './payroll-report-render.js';
 
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-const money = (cents) => (cents == null ? '—' : USD.format(Math.round(cents / 100)));
+const money = (cents) => (cents == null ? '—' : `${cents < 0 ? '−' : ''}${USD.format(Math.abs(Math.round(cents / 100)))}`);
 const signed = (cents) => `${cents < 0 ? '−' : '+'}${USD.format(Math.abs(Math.round(cents / 100)))}`;
 const dollars = (cents) => (cents == null ? '' : String(Math.round(cents / 100)));
+const pctText = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}%`;
 const TABS = [['grow', 'Grow every line'], ['project', 'Project one category'], ['commit', 'Commit to Church report']];
 
-function href(params) {
-  return `/?${new URLSearchParams({ section: 'planning', page: 'builder', ...params }).toString().replace(/&/g, '&amp;')}`;
+// Screen columns, in Connect's order. 'change' is print-only (plan less base budget).
+export const PLANNER_COLUMNS = Object.freeze(['bud', 'act', 'proj', 'plan', 'delta']);
+const COLUMN_LABELS = { bud: (p) => `FY${p.base} Budget`, act: (p) => `FY${p.base} Actual`, proj: (p) => `FY${p.base} Projected`, plan: (p) => `FY${p.target} Plan`, change: () => 'Change', delta: () => 'Δ%' };
+export const OUTLOOK_DEFAULTS = Object.freeze({ expense: 3, revenue: 0 });
+
+// ── View parameters ──────────────────────────────────────────────────────────────────────────
+
+function rate(raw, fallback) {
+  if (raw == null || raw === '') return fallback;
+  const n = Number(String(raw).replace(/[%\s+]/g, ''));
+  return Number.isFinite(n) ? Math.min(15, Math.max(-15, Math.round(n * 10) / 10)) : fallback;
 }
 
-// A line's shown name: its Chart of Accounts rename when the board layout is loaded, else its
-// QuickBooks name.
+// Everything the page reads from its query string, validated. Defaults: projecting for next year
+// from this year, Board view, every column, no lines left out, 3% expense growth and flat revenue.
+export function plannerParams(params, now = new Date()) {
+  const get = (k) => (params && params.get(k)) || '';
+  const t = Number(get('target'));
+  const target = Number.isInteger(t) && t >= 2001 && t <= 2100 ? t : now.getUTCFullYear() + 1;
+  const b = Number(get('base'));
+  const base = Number.isInteger(b) && b >= 2000 && b < target ? b : target - 1;
+  const rawCols = get('cols');
+  const cols = rawCols === 'none' ? [] : rawCols ? PLANNER_COLUMNS.filter((c) => rawCols.split(',').includes(c)) : [...PLANNER_COLUMNS];
+  const exclude = [...new Set((params && params.getAll ? params.getAll('x') : []).map((x) => String(x).slice(0, 200)).filter(Boolean))].slice(0, 400);
+  const tab = TABS.some(([k]) => k === get('tab')) ? get('tab') : '';
+  return {
+    target, base, view: get('view') === 'qb' ? 'qb' : 'board', cols, exclude, pick: get('pick') === '1', tab,
+    printMode: get('print_mode') === 'thisyear' ? 'thisyear' : 'plan', draft: get('draft') === '1',
+    outExp: rate(get('out_exp'), OUTLOOK_DEFAULTS.expense), outRev: rate(get('out_rev'), OUTLOOK_DEFAULTS.revenue),
+  };
+}
+
+// The view as query pairs (only what differs from the defaults, plus both years), with overrides.
+// `omit` drops keys a form supplies itself.
+export function plannerQuery(p, overrides = {}, omit = []) {
+  const v = { ...p, ...overrides };
+  const pairs = [['target', String(v.target)], ['base', String(v.base)]];
+  if (v.view === 'qb') pairs.push(['view', 'qb']);
+  if (v.cols.length !== PLANNER_COLUMNS.length) pairs.push(['cols', v.cols.length ? v.cols.join(',') : 'none']);
+  for (const x of v.exclude) pairs.push(['x', x]);
+  if (v.pick) pairs.push(['pick', '1']);
+  if (v.tab) pairs.push(['tab', v.tab]);
+  if (v.outExp !== OUTLOOK_DEFAULTS.expense) pairs.push(['out_exp', String(v.outExp)]);
+  if (v.outRev !== OUTLOOK_DEFAULTS.revenue) pairs.push(['out_rev', String(v.outRev)]);
+  return pairs.filter(([k]) => !omit.includes(k));
+}
+
+function href(p, overrides = {}) {
+  const q = new URLSearchParams([['section', 'planning'], ['page', 'builder'], ...plannerQuery(p, overrides)]);
+  return `/?${q.toString().replace(/&/g, '&amp;')}`;
+}
+
+function hiddenView(p, omit = []) {
+  return [['section', 'planning'], ['page', 'builder'], ...plannerQuery(p, {}, omit)]
+    .map(([k, v]) => `<input type="hidden" name="${e(k)}" value="${e(v)}">`).join('');
+}
+
+// ── Model ────────────────────────────────────────────────────────────────────────────────────
+
+// A council member's own draft, read back through Connect (their saved Plan edits merged over the
+// shared plan): every target-year row whose amount differs from the shared plan replaces it, marked
+// as the draft. Rows are whatever Connect's planning/church GET returned for this viewer.
+export function applyCouncilDraft(builder, draftRows) {
+  if (!Array.isArray(draftRows) || !draftRows.length) return builder;
+  const byCategory = new Map(builder.lines.map((l) => [l.category, l]));
+  const lines = builder.lines.map((l) => ({ ...l }));
+  const index = new Map(lines.map((l, i) => [l.category, i]));
+  for (const r of draftRows) {
+    if (Number(r?.fiscal_year) !== builder.targetYear || !r.category) continue;
+    const cents = Math.round(Number(r.planned_amount_cents));
+    if (!Number.isFinite(cents)) continue;
+    const shared = byCategory.get(r.category);
+    if (shared?.plan && shared.plan.plannedAmountCents === cents) continue;
+    const plan = { basis: 'manual', growthPct: null, baseAmountCents: null, ...(shared?.plan || {}), notes: r.notes ?? shared?.plan?.notes ?? '', plannedAmountCents: cents, draft: true };
+    if (index.has(r.category)) lines[index.get(r.category)] = { ...lines[index.get(r.category)], plan };
+    else {
+      index.set(r.category, lines.length);
+      lines.push({ category: r.category, classification: r.classification === 'Income' ? 'Income' : 'Expenses', name: String(r.category).split(':').pop().trim(), priorActualCents: null, baseBudgetCents: null, baseActualCents: null, projectedCents: null, projectedOverridden: false, plan });
+    }
+  }
+  return { ...builder, lines };
+}
+
+function sumLines(lines) {
+  const out = { bud: 0, hasBud: false, act: 0, proj: 0, plan: 0, hasPlan: false };
+  for (const l of lines) {
+    if (l.baseBudgetCents != null) { out.bud += l.baseBudgetCents; out.hasBud = true; }
+    out.act += l.baseActualCents || 0;
+    out.proj += l.projectedCents || 0;
+    if (l.plan) { out.plan += l.plan.plannedAmountCents || 0; out.hasPlan = true; }
+  }
+  return out;
+}
+
+function lineFigures(l) {
+  return { bud: l.baseBudgetCents, hasBud: l.baseBudgetCents != null, act: l.baseActualCents || 0, proj: l.projectedCents || 0, plan: l.plan ? l.plan.plannedAmountCents : 0, hasPlan: Boolean(l.plan) };
+}
+
+// Board view: legacy's board categories (Chart of Accounts), Unrestricted and Restricted gifts
+// under the Donor Income wrapper.
+function boardTree(lines, layout) {
+  const sections = buildBoardSections(lines, layout, (l) => ({ path: l.category, name: l.name, isRevenue: l.classification === 'Income' }));
+  const group = (g, depth) => ({ kind: 'group', label: g.label, depth, children: g.items.map((line) => ({ kind: 'leaf', line, depth: depth + 1 })) });
+  const side = (list) => list.map((s) => (s.kind === 'wrapper'
+    ? { kind: 'group', label: s.label, depth: 0, children: s.groups.map((g) => group(g, 1)) } : group(s, 0)));
+  return { revenue: side(sections.revenue), expense: side(sections.expense) };
+}
+
+// QuickBooks order: the account paths as a tree ("Expenses:Property:Utilities" sits under
+// Expenses › Property), each parent with its own "Total" row, as Connect's QuickBooks view does.
+function qbTree(lines) {
+  const side = (isRevenue) => {
+    const root = { children: new Map() };
+    for (const line of lines.filter((l) => (l.classification === 'Income') === isRevenue)) {
+      const parts = String(line.category).split(':').map((s) => s.trim()).filter(Boolean);
+      if (!parts.length) parts.push(line.category || '(no category)');
+      let node = root;
+      for (const part of parts) {
+        if (!node.children.has(part)) node.children.set(part, { label: part, children: new Map(), line: null });
+        node = node.children.get(part);
+      }
+      node.line = line;
+    }
+    const convert = (n, depth) => {
+      if (!n.children.size) return { kind: 'leaf', line: n.line, depth };
+      const kids = [...n.children.values()].map((c) => convert(c, depth + 1));
+      if (n.line) kids.unshift({ kind: 'leaf', line: n.line, depth: depth + 1 });
+      return { kind: 'group', label: n.label, depth, children: kids };
+    };
+    return [...root.children.values()].map((c) => convert(c, 0));
+  };
+  return { revenue: side(true), expense: side(false) };
+}
+
+function leavesOf(node) {
+  return node.kind === 'leaf' ? [node.line] : node.children.flatMap(leavesOf);
+}
+
+export function buildPlannerModel(builder, { layout = null, params }) {
+  const excluded = new Set(params.exclude);
+  const kept = (l) => !excluded.has(l.category);
+  const boardView = Boolean(layout) && params.view !== 'qb';
+  const tree = boardView ? boardTree(builder.lines, layout) : qbTree(builder.lines);
+  const keptLines = builder.lines.filter(kept);
+  return {
+    builder, layout, boardView, tree, kept,
+    excludedCount: builder.lines.length - keptLines.length,
+    revenue: sumLines(keptLines.filter((l) => l.classification === 'Income')),
+    expense: sumLines(keptLines.filter((l) => l.classification !== 'Income')),
+  };
+}
+
+// The table as a flat list of rows (side headers, group headers, lines, "Total" rows, the net
+// row), shared by the page, the CSV and the print sheet so the three always agree. Left-out lines
+// are skipped (or, while choosing rows, listed dimmed) and never counted in a total.
+export function plannerRows(model, { includeExcluded = false } = {}) {
+  const rows = [];
+  let current = 'revenue';
+  const push = (row) => rows.push({ ...row, side: current });
+  const walk = (node) => {
+    if (node.kind === 'leaf') {
+      const isKept = model.kept(node.line);
+      if (isKept || includeExcluded) push({ kind: 'leaf', line: node.line, depth: node.depth, fig: lineFigures(node.line), excluded: !isKept });
+      return;
+    }
+    const keptLeaves = leavesOf(node).filter(model.kept);
+    if (!keptLeaves.length && !includeExcluded) return;
+    push({ kind: 'header', label: node.label, depth: node.depth });
+    node.children.forEach(walk);
+    push({ kind: 'total', label: `Total ${node.label}`, depth: node.depth, fig: sumLines(keptLeaves) });
+  };
+  const side = (key, label, roots, fig) => {
+    current = key;
+    if (!roots.length) return;
+    if (model.boardView) push({ kind: 'side', label });
+    roots.forEach(walk);
+    if (model.boardView || roots.length !== 1) push({ kind: 'sidetotal', label: `Total ${label}`, fig });
+  };
+  side('revenue', 'Revenue', model.tree.revenue, model.revenue);
+  side('expense', 'Expenses', model.tree.expense, model.expense);
+  if (rows.length) {
+    const r = model.revenue;
+    const x = model.expense;
+    current = 'net';
+    push({ kind: 'net', label: 'Net (Revenue − Expenses)', fig: { bud: r.bud - x.bud, hasBud: r.hasBud || x.hasBud, act: r.act - x.act, proj: r.proj - x.proj, plan: r.plan - x.plan, hasPlan: r.hasPlan || x.hasPlan } });
+  }
+  return rows;
+}
+
 function lineName(l, layout) {
   return layout ? accountDisplayName(layout, l.category, l.name) : l.name;
 }
 
-function statusLine({ budgetEntryStatus, budgetEntryMessage, planOpKind, planOpStatus, planOpMessage, baseProjectionEntryStatus, baseProjectionEntryMessage }) {
+// Δ% is the plan against the base-year budget, as in Connect: terracotta above +4%, green when
+// the plan shrinks, muted otherwise; no budget to compare against shows as —.
+export function deltaPct(budgetCents, planCents) {
+  return budgetCents ? ((planCents - budgetCents) / Math.abs(budgetCents)) * 100 : null;
+}
+
+function deltaTone(pct) {
+  return pct == null ? 'tone-muted' : pct > 4 ? 'bp-up' : pct < 0 ? 'bp-down' : 'bp-flat';
+}
+
+function cellText(key, f, net = false) {
+  const m = net ? (c) => (c < 0 ? `−${USD.format(Math.abs(Math.round(c / 100)))}` : USD.format(Math.round(c / 100))) : money;
+  if (key === 'bud') return f.hasBud ? m(f.bud) : '—';
+  if (key === 'act') return m(f.act);
+  if (key === 'proj') return m(f.proj);
+  if (key === 'plan') return f.hasPlan ? m(f.plan) : '—';
+  if (key === 'change') return f.hasBud && f.hasPlan ? signed(f.plan - f.bud) : '—';
+  const pct = f.hasBud && f.hasPlan ? deltaPct(f.bud, f.plan) : null;
+  return pct == null ? '—' : pctText(pct);
+}
+
+function figureCell(key, f, kind) {
+  if (kind === 'net' && key === 'delta') return '<td></td>';
+  if (kind === 'net' && key === 'change') return '<td></td>';
+  if (kind === 'net') {
+    const v = { bud: f.bud, act: f.act, proj: f.proj, plan: f.plan }[key];
+    if ((key === 'bud' && !f.hasBud) || (key === 'plan' && !f.hasPlan)) return '<td class="tone-muted">—</td>';
+    return `<td class="${v < 0 ? 'bp-down-net' : 'bp-up-net'}">${cellText(key, f, true)}</td>`;
+  }
+  if (key === 'delta') {
+    const pct = f.hasBud && f.hasPlan ? deltaPct(f.bud, f.plan) : null;
+    return `<td class="${deltaTone(pct)}">${cellText(key, f)}</td>`;
+  }
+  const text = cellText(key, f);
+  return `<td${text === '—' ? ' class="tone-muted"' : ''}>${text}</td>`;
+}
+
+// ── CSV ──────────────────────────────────────────────────────────────────────────────────────
+
+// The current view as CSV: the same rows and columns as the table, dollars with cents, Δ% as a
+// percentage. Left-out lines are not included. Labels go through Finance's one text escaper
+// (csvText, with the formula guard); figures are computed here, so csvNum keeps them numbers.
+export function plannerCsv(model, p) {
+  const cols = p.cols;
+  const d = (c) => (c / 100).toFixed(2);
+  const value = (key, f, kind) => {
+    if (key === 'bud') return f.hasBud ? d(f.bud) : '';
+    if (key === 'act') return d(f.act);
+    if (key === 'proj') return d(f.proj);
+    if (key === 'plan') return f.hasPlan ? d(f.plan) : '';
+    if (kind === 'net') return '';
+    const pct = f.hasBud && f.hasPlan ? deltaPct(f.bud, f.plan) : null;
+    return pct == null ? '' : `${pct.toFixed(1)}%`;
+  };
+  const lines = [['Category', ...cols.map((c) => COLUMN_LABELS[c](p))]];
+  for (const r of plannerRows(model)) {
+    if (r.kind === 'side' || r.kind === 'header') lines.push([r.label, ...cols.map(() => '')]);
+    else if (r.kind === 'leaf') lines.push([lineName(r.line, model.layout), ...cols.map((c) => value(c, r.fig, 'leaf'))]);
+    else lines.push([r.label, ...cols.map((c) => value(c, r.fig, r.kind))]);
+  }
+  return `${lines.map(([label, ...figures]) => [csvText(label), ...figures.map(csvNum)].join(',')).join('\r\n')}\r\n`;
+}
+
+// ── Saving: the one form, reduced to the cells that changed ──────────────────────────────────
+
+const clean = (v) => String(v ?? '').replace(/[$,\s]/g, '');
+const sameNumber = (a, b) => a === b || (a !== '' && b !== '' && Number(a) === Number(b));
+
+// Returns { targetYear, baseYear, plan, projections, actuals, errors }. Plan and Projected are whole
+// dollars (rounded, as Connect does); Actual keeps cents. A blank Projected or Actual clears that
+// correction; a blank Plan cell is left alone (Remove takes a line out of the plan). Only an admin's
+// Projected and Actual cells are read at all.
+export function parsePlannerForm(form, { canEditActuals = false } = {}) {
+  const errors = [];
+  const year = (v) => { const n = Number(v); return Number.isInteger(n) && n >= 2000 && n <= 2100 ? n : null; };
+  const targetYear = year(form.get('target_year'));
+  const baseYear = year(form.get('base_year'));
+  if (!targetYear || !baseYear || baseYear >= targetYear) errors.push('The plan’s years could not be read.');
+  const plan = [];
+  const projections = [];
+  const actuals = [];
+  for (let i = 0; form.has(`p_${i}`) && i < 2000; i += 1) {
+    const category = String(form.get(`p_${i}`) || '').trim();
+    if (!category) continue;
+    const classification = form.get(`c_${i}`) === 'Income' ? 'Income' : 'Expenses';
+    const name = String(form.get(`n_${i}`) || category.split(':').pop() || category).trim();
+    if (form.has(`plan_${i}`)) {
+      const v = clean(form.get(`plan_${i}`));
+      if (v !== '' && !sameNumber(v, clean(form.get(`orig_plan_${i}`)))) {
+        if (!/^-?\d+(\.\d+)?$/.test(v)) errors.push(`The FY${targetYear} plan for ${name} is not a dollar amount.`);
+        else plan.push({ category, classification, fiscal_year: targetYear, planned_amount: String(Math.round(Number(v))), notes: String(form.get(`notes_${i}`) || '') });
+      }
+    }
+    if (canEditActuals && form.has(`proj_${i}`)) {
+      const v = clean(form.get(`proj_${i}`));
+      if (!sameNumber(v, clean(form.get(`orig_proj_${i}`)))) {
+        if (v !== '' && !/^-?\d+(\.\d+)?$/.test(v)) errors.push(`The FY${baseYear} projection for ${name} is not a dollar amount.`);
+        else projections.push({ category, amount: v === '' ? '' : String(Math.round(Number(v))) });
+      }
+    }
+    if (canEditActuals && form.has(`act_${i}`)) {
+      const v = clean(form.get(`act_${i}`));
+      if (!sameNumber(v, clean(form.get(`orig_act_${i}`)))) {
+        if (v !== '' && !/^-?\d+(\.\d{1,2})?$/.test(v)) errors.push(`The FY${baseYear} actual for ${name} must be dollars and cents.`);
+        else actuals.push({ category, classification, account_name: name, amount: v });
+      }
+    }
+  }
+  return { targetYear, baseYear, plan, projections, actuals, errors };
+}
+
+// The view to return to after a save: only the planner's own view keys survive.
+export function plannerBackQuery(raw) {
+  const src = new URLSearchParams(String(raw || '').slice(0, 4000));
+  const out = new URLSearchParams([['section', 'planning'], ['page', 'builder']]);
+  for (const [k, v] of src) if (['target', 'base', 'view', 'cols', 'x', 'out_exp', 'out_rev'].includes(k)) out.append(k, v.slice(0, 200));
+  return out;
+}
+
+// "Project one category": the line's classification travels with it ("Income|Income:Offerings").
+export function parseProjectLine(value) {
+  const s = String(value || '');
+  const cut = s.indexOf('|');
+  if (cut < 0) return null;
+  const classification = s.slice(0, cut);
+  const category = s.slice(cut + 1).trim();
+  if (!['Income', 'Expenses'].includes(classification) || !category) return null;
+  return { classification, category };
+}
+
+// A blank starting amount starts from the line's base-year projection, then its actual, then its
+// budget -- what Connect's planner shows beside the line.
+export function defaultProjectBaseCents(line) {
+  if (!line) return null;
+  if (line.projectedCents) return line.projectedCents;
+  if (line.baseActualCents) return line.baseActualCents;
+  return line.baseBudgetCents ?? null;
+}
+
+// ── Page pieces ──────────────────────────────────────────────────────────────────────────────
+
+function statusLine({ budgetEntryStatus, budgetEntryMessage, planOpKind, planOpStatus, planOpMessage, baseProjectionEntryStatus, baseProjectionEntryMessage, plannerStatus, plannerMessage }) {
   const verbs = { generate: 'Projection', 'generate-all': 'Grown lines', commit: 'Committed plan', remove: 'Removed line' };
+  if (plannerStatus === 'ok') return `<p class="status">${e(plannerMessage || 'Saved in Connect.')}</p>`;
+  if (plannerStatus === 'error') return `<p class="status status-error">${e(plannerMessage || 'Not saved.')}</p>`;
   if (budgetEntryStatus === 'ok') return '<p class="status">Line saved in Connect.</p>';
   if (budgetEntryStatus === 'error') return `<p class="status status-error">Not saved: ${e(budgetEntryMessage || 'unknown error')}</p>`;
   if (baseProjectionEntryStatus === 'ok') return '<p class="status">Projection correction saved in Connect.</p>';
@@ -49,23 +389,25 @@ export function summarizeBuilder(builder) {
   };
 }
 
-function tabPanel(builder, tab, layout) {
+function tabPanel(builder, p, layout) {
   const { targetYear, baseYear } = builder;
-  const current = TABS.find(([k]) => k === tab)?.[0] || 'grow';
+  const current = TABS.find(([k]) => k === p.tab)?.[0] || 'grow';
   const nav = `<div class="bb-tabs" role="tablist">${TABS.map(([k, label]) => (k === current
     ? `<span class="is-on" role="tab" aria-selected="true">${label}</span>`
-    : `<a href="${href({ tab: k })}" role="tab">${label}</a>`)).join('')}</div>`;
+    : `<a href="${href(p, { tab: k })}" role="tab">${label}</a>`)).join('')}</div>`;
   let body;
   if (current === 'project') {
+    const options = (cls) => builder.lines.filter((l) => l.classification === cls)
+      .map((l) => `<option value="${e(`${cls}|${l.category}`)}">${e(lineName(l, layout))}${l.projectedCents ? ` — FY${baseYear} ${money(l.projectedCents)}` : ''}</option>`).join('');
     body = `<form method="POST" action="/api/v1/connect-budget-generate" class="bb-form">
-        <label class="field"><span>Category</span><select name="category" required>${builder.lines.map((l) => `<option value="${e(l.category)}">${e(lineName(l, layout))}</option>`).join('')}</select></label>
-        <label class="field"><span>Income or expense</span><select name="classification"><option value="Expenses">Expense</option><option value="Income">Income</option></select></label>
-        <label class="field"><span>Starting amount ($)</span><input type="number" name="base_amount" step="1" min="0" required></label>
+        <input type="hidden" name="target_year" value="${targetYear}"><input type="hidden" name="base_year" value="${baseYear}">
+        <label class="field"><span>Category</span><select name="line" required><optgroup label="Income">${options('Income')}</optgroup><optgroup label="Expense">${options('Expenses')}</optgroup></select></label>
+        <label class="field"><span>Starting amount ($)</span><input type="number" name="base_amount" step="1" min="0" placeholder="FY${baseYear} projection"></label>
         <label class="field"><span>Growth per year (%)</span><input type="number" name="growth_percent" step="0.1" value="3" required></label>
         <label class="field"><span>Years</span><input name="target_years" value="${targetYear},${targetYear + 1},${targetYear + 2}" required></label>
         <button type="submit">Project this line</button>
       </form>
-      <p class="muted-line">Compounds the starting amount once per listed year and saves each year as a grown line.</p>`;
+      <p class="muted-line">Income or expense follows the line chosen. Leave the starting amount blank to start from the line’s FY${baseYear} projection (or its actual, or its budget). Compounds once per listed year and saves each year as a grown line.</p>`;
   } else if (current === 'commit') {
     body = `<form method="POST" action="/api/v1/connect-budget-commit" class="bb-form">
         <input type="hidden" name="fiscal_year" value="${targetYear}">
@@ -75,107 +417,284 @@ function tabPanel(builder, tab, layout) {
   } else {
     body = `<form method="POST" action="/api/v1/connect-budget-generate-all" class="bb-form">
         <input type="hidden" name="base_year" value="${baseYear}"><input type="hidden" name="target_year" value="${targetYear}">
-        <label class="field"><span>Growth rate for every grown line (%)</span><input type="number" name="growth_percent" step="0.1" value="3" required></label>
-        <button type="submit">Apply to every grown line</button>
+        <label class="field"><span>Growth assumption for every grown line (%)</span><input type="number" name="growth_percent" step="0.1" value="3" required></label>
+        <button type="submit">Generate all: apply to every grown line</button>
       </form>
       <p class="muted-line">Grows each line from its FY${baseYear} ${builder.prorated ? 'projection (year-to-date actual extended to a full year)' : 'actual'}, or its budget when there is no actual. Manual lines are left alone.</p>`;
   }
   return `<div class="panel panel-spaced bb-tools">${nav}${body}</div>`;
 }
 
-function lineRow(l, builder, { canEditBudget, canManageBudgetPlan, layout }) {
-  const { targetYear, baseYear } = builder;
-  const plan = l.plan;
-  const change = plan && l.baseBudgetCents != null ? plan.plannedAmountCents - l.baseBudgetCents : null;
-  const basis = !plan ? '<span class="bb-badge is-none">Not planned</span>'
-    : plan.basis === 'grown' ? '<span class="bb-badge is-grown">Grown</span>' : '<span class="bb-badge is-manual">Manual</span>';
-  const growth = plan && plan.basis === 'grown' && plan.growthPct != null ? `${plan.growthPct >= 0 ? '+' : ''}${(plan.growthPct * 100).toFixed(1).replace(/\.0$/, '')}%` : '—';
-  const projected = canManageBudgetPlan
-    ? `<form method="POST" action="/api/v1/connect-base-projection-write" class="bb-cell-form"><input type="hidden" name="year" value="${baseYear}"><input type="hidden" name="category" value="${e(l.category)}"><input type="number" name="amount" step="1" value="${dollars(l.projectedCents)}" aria-label="FY${baseYear} projection for ${e(l.name)}"${l.projectedOverridden ? ' class="is-corrected"' : ''}><button type="submit" class="link-button">Set</button></form>`
-    : `${money(l.projectedCents)}${l.projectedOverridden ? ' <small>corrected</small>' : ''}`;
-  const planCell = canEditBudget
-    ? `<form method="POST" action="/api/v1/connect-budget-plan-write" class="bb-cell-form"><input type="hidden" name="category" value="${e(l.category)}"><input type="hidden" name="classification" value="${l.classification}"><input type="hidden" name="fiscal_year" value="${targetYear}"><input type="hidden" name="notes" value="${e(plan?.notes || '')}"><input type="number" name="planned_amount" step="1" min="0" value="${dollars(plan?.plannedAmountCents)}" aria-label="FY${targetYear} plan for ${e(l.name)}" required><button type="submit" class="link-button">Save</button></form>`
-    : `<b>${money(plan?.plannedAmountCents)}</b>`;
-  const remove = canManageBudgetPlan && plan
-    ? `<form method="POST" action="/api/v1/connect-budget-plan-remove" class="bb-cell-form"><input type="hidden" name="category" value="${e(l.category)}"><input type="hidden" name="fiscal_year" value="${targetYear}"><button type="submit" class="link-button" title="Remove this line from the FY${targetYear} plan">Remove</button></form>` : '';
-  const shown = lineName(l, layout);
-  return `<tr><td><b>${e(shown)}</b><small>${e(shown !== l.name ? `${l.name} · ${l.category}` : l.category)}</small></td>
-    <td>${money(l.priorActualCents)}</td><td>${money(l.baseBudgetCents)}</td><td>${projected}</td>
-    <td>${basis}</td><td>${growth}</td><td>${planCell}</td>
-    <td class="${change == null ? '' : change < 0 ? 'tone-bad' : 'tone-good'}">${change == null ? '—' : signed(change)}</td>
-    <td class="bb-notes">${e(plan?.notes || '')}${remove}</td></tr>`;
-}
-
-// One subtotal row over `rows`, in the table's column order.
-function totalRow(label, rows, cls = 'bb-total') {
-  const sum = (pick) => rows.reduce((s, l) => s + (pick(l) || 0), 0);
-  const plan = sum((l) => l.plan?.plannedAmountCents);
-  const baseBudget = sum((l) => l.baseBudgetCents);
-  return `<tr class="${cls}"><td>${e(label)}</td><td>${money(sum((l) => l.priorActualCents))}</td><td>${money(baseBudget)}</td><td>${money(sum((l) => l.projectedCents))}</td><td></td><td></td><td>${money(plan)}</td><td class="${plan - baseBudget < 0 ? 'tone-bad' : 'tone-good'}">${signed(plan - baseBudget)}</td><td></td></tr>`;
-}
-
-// Legacy's Board view: each side split into board categories in the fixed order, each with a
-// heading and a "Total ..." row, Unrestricted and Restricted gifts nested under the Donor Income
-// wrapper, then the side's own total.
-function boardRows(builder, layout, opts) {
-  const sections = buildBoardSections(builder.lines, layout, (l) => ({ path: l.category, name: l.name, isRevenue: l.classification === 'Income' }));
-  const renderGroup = (g, cls) => `<tr class="${cls}"><td colspan="9">${e(g.label)}</td></tr>
-      ${g.items.map((l) => lineRow(l, builder, opts)).join('')}
-      ${totalRow(`Total ${g.label}`, g.items, 'bb-subtotal')}`;
-  const side = (label, list) => {
-    const all = list.flatMap((s) => (s.kind === 'wrapper' ? s.groups.flatMap((g) => g.items) : s.items));
-    const body = list.map((s) => (s.kind === 'wrapper'
-      ? `<tr class="bb-cat"><td colspan="9">${e(s.label)}</td></tr>${s.groups.map((g) => renderGroup(g, 'bb-subcat')).join('')}${totalRow(`Total ${s.label}`, s.groups.flatMap((g) => g.items), 'bb-subtotal')}`
-      : renderGroup(s, 'bb-cat'))).join('');
-    return `<tr class="bb-group"><td colspan="9">${label}</td></tr>${body || '<tr><td colspan="9" class="tone-muted">No lines.</td></tr>'}${totalRow(`Total ${label.toLowerCase()}`, all)}`;
-  };
-  return side('Revenue', sections.revenue) + side('Expenses', sections.expense);
-}
-
-export function renderBudgetBuilderPage({ builder, canEditBudget, canManageBudgetPlan, tab, statuses, councilViewer = false, layout = null, view = 'board' }) {
-  const { targetYear, baseYear, priorYear } = builder;
-  const t = summarizeBuilder(builder);
-  const result = t.incomeCents - t.expenseCents;
-  const baseResult = t.baseBudgetIncomeCents - t.baseBudgetExpenseCents;
-  const boardView = Boolean(layout) && view !== 'qb';
-  const banner = `<div class="bb-banner">
-      <div><small>Planned income</small><strong>${money(t.incomeCents)}</strong><span>${signed(t.incomeCents - t.baseBudgetIncomeCents)} vs. FY${baseYear} budget</span></div>
-      <div><small>Planned expenses</small><strong>${money(t.expenseCents)}</strong><span>${signed(t.expenseCents - t.baseBudgetExpenseCents)} vs. FY${baseYear} budget</span></div>
-      <div><small>Planned result</small><strong>${signed(result)}</strong><span>FY${baseYear} budget: ${signed(baseResult)}</span></div>
-      <div><small>Lines</small><strong>${t.planned}</strong><span>${t.grown} grown · ${t.manual} manual${t.unplanned ? ` · ${t.unplanned} not planned` : ''}</span></div>
+function header(builder, p, now) {
+  const thisYear = now.getUTCFullYear();
+  const targets = [];
+  for (let y = Math.min(p.target, thisYear - 1); y <= Math.max(p.target, thisYear + 3); y += 1) targets.push(y);
+  const bases = [];
+  for (let y = p.target - 6; y < p.target; y += 1) bases.push(y);
+  const opt = (y, sel) => `<option value="${y}"${y === sel ? ' selected' : ''}>${y}</option>`;
+  return `<div class="bp-head">
+      <div><h2>Budget FY${p.target}</h2><p class="muted-line">Base year ${p.base}${builder.prorated ? ` (annualized from ${Math.round(builder.throughWeek)} weeks of actuals)` : ''} · independent of QuickBooks until you commit</p></div>
+      <form method="GET" action="/" class="bp-years">${hiddenView(p, ['target', 'base', 'x', 'pick', 'tab'])}
+        <label class="field"><span>Base year</span><select name="base">${bases.map((y) => opt(y, p.base)).join('')}</select></label>
+        <label class="field"><span>Projecting for</span><select name="target">${targets.map((y) => opt(y, p.target)).join('')}</select></label>
+        <button type="submit" class="button-outline">Show</button>
+      </form>
     </div>`;
-  const opts = { canEditBudget, canManageBudgetPlan, layout };
-  const group = (cls, label) => {
-    const rows = builder.lines.filter((l) => l.classification === cls);
-    return `<tr class="bb-group"><td colspan="9">${label}</td></tr>
-      ${rows.map((l) => lineRow(l, builder, opts)).join('') || '<tr><td colspan="9" class="tone-muted">No lines.</td></tr>'}
-      ${totalRow(`Total ${label.toLowerCase()}`, rows)}`;
+}
+
+// Connect's navy strip: what the base year is projected to cost, what the plan costs, the change,
+// and what revenue would have to be for the plan to balance against this year's.
+function summaryStrip(model, p) {
+  const baseExp = model.expense.proj;
+  const planExp = model.expense.plan;
+  const change = planExp - baseExp;
+  const pct = baseExp ? (change / Math.abs(baseExp)) * 100 : null;
+  const gap = planExp - model.revenue.proj;
+  return `<div class="bb-banner bp-strip">
+      <div><small>FY${p.base} projected expenses</small><strong>${money(baseExp)}</strong></div>
+      <div><small>FY${p.target} planned</small><strong class="bp-gold">${money(planExp)}</strong></div>
+      <div><small>Change</small><strong>${signed(change)}</strong><span>${pct == null ? '' : pctText(pct)}</span></div>
+      <div class="bp-strip-last"><small>Revenue needed to balance</small><strong class="bp-green">${money(planExp)}</strong><span>${gap >= 0 ? '+' : '−'}${money(Math.abs(gap))} on this year’s revenue (FY${p.base} projected ${money(model.revenue.proj)})</span></div>
+    </div>`;
+}
+
+function toolbar(model, p, { pickFormId }) {
+  const chip = (key) => {
+    const on = p.cols.includes(key);
+    const cols = on ? p.cols.filter((c) => c !== key) : PLANNER_COLUMNS.filter((c) => c === key || p.cols.includes(c));
+    return `<a class="chip${on ? ' is-on' : ' bp-chip-off'}" href="${href(p, { cols })}" aria-pressed="${on}">${e(COLUMN_LABELS[key](p))}</a>`;
   };
+  const pick = p.pick
+    ? `<form method="GET" action="/" id="${pickFormId}" class="bp-pick">${hiddenView(p, ['x', 'pick'])}<button type="submit" class="button-outline">Done choosing rows</button></form>`
+    : `<a class="button-outline bp-button" href="${href(p, { pick: true })}">Choose rows</a>`;
+  const csv = `/api/v1/budget-planner-csv?${new URLSearchParams(plannerQuery(p, {}, ['pick', 'tab'])).toString().replace(/&/g, '&amp;')}`;
+  return `<div class="bp-toolbar">
+      <span class="bp-label">Columns</span><div class="chip-row bp-chips">${PLANNER_COLUMNS.map(chip).join('')}</div>
+      ${pick}
+      ${model.excludedCount ? `<span class="muted-line">${model.excludedCount} line${model.excludedCount === 1 ? '' : 's'} left out</span><a href="${href(p, { exclude: [], pick: false })}">Include all lines</a>` : ''}
+      <span class="bp-spacer"></span>
+      <a class="button-outline bp-button" href="${csv}">Export CSV</a>
+      <form method="GET" action="/" class="bp-print">${hiddenView(p, ['pick', 'tab'])}<input type="hidden" name="print" value="1">
+        <label><input type="radio" name="print_mode" value="plan"${p.printMode === 'plan' ? ' checked' : ''}> Plan for next year</label>
+        <label><input type="radio" name="print_mode" value="thisyear"${p.printMode === 'thisyear' ? ' checked' : ''}> Just this year</label>
+        <label title="Stamps a DRAFT watermark across the printed sheet, for a plan not yet committed"><input type="checkbox" name="draft" value="1"${p.draft ? ' checked' : ''}> Mark DRAFT</label>
+        <button type="submit">Print</button>
+      </form>
+    </div>`;
+}
+
+function basisNote(l) {
+  const plan = l.plan;
+  if (!plan) return 'Not planned';
+  if (plan.draft) return 'Your draft';
+  if (plan.basis === 'grown') return `Grown${plan.growthPct != null ? ` ${plan.growthPct >= 0 ? '+' : ''}${(plan.growthPct * 100).toFixed(1).replace(/\.0$/, '')}%` : ''}`;
+  return 'Manual';
+}
+
+// One account line. Editable cells carry their original value so only changes are saved.
+function leafRow(r, ctx) {
+  const l = r.line;
+  const { p, canEditPlan, canEditActuals, layout } = ctx;
+  const shown = lineName(l, layout);
+  const editable = !r.excluded && (canEditPlan || canEditActuals);
+  const i = editable ? ctx.counter++ : null;
+  const ids = editable ? `<input type="hidden" name="p_${i}" value="${e(l.category)}"><input type="hidden" name="c_${i}" value="${l.classification === 'Income' ? 'Income' : 'Expenses'}"><input type="hidden" name="n_${i}" value="${e(l.name || shown)}"><input type="hidden" name="notes_${i}" value="${e(l.plan?.notes || '')}">` : '';
+  const pickBox = p.pick ? `<input type="checkbox" form="${ctx.pickFormId}" name="x" value="${e(l.category)}"${r.excluded ? ' checked' : ''} aria-label="Leave out ${e(shown)}" title="Tick to leave this line out of the totals, the export and the printed sheet">` : '';
+  const remove = ctx.canManage && l.plan && !l.plan.draft && ctx.form
+    ? `<button type="submit" class="link-button bp-remove" formaction="/api/v1/connect-budget-plan-remove" formnovalidate name="category" value="${e(l.category)}" title="Remove this line from the FY${p.target} plan">Remove</button>` : '';
+  const sub = `${shown !== l.name ? `${e(l.name)} · ` : ''}${e(basisNote(l))}${l.plan?.notes ? ` · ${e(l.plan.notes)}` : ''}`;
+  const label = `<td class="bp-name" style="padding-left:${10 + r.depth * 16}px">${pickBox}${ids}<b>${e(shown)}</b><small>${sub}${remove}</small></td>`;
+  const f = r.fig;
+  const input = (name, value, extra, aria) => `<input type="text" inputmode="${extra.inputmode}" name="${name}_${i}" value="${e(value)}" class="bp-input${extra.cls ? ` ${extra.cls}` : ''}" aria-label="${e(aria)}"${extra.title ? ` title="${e(extra.title)}"` : ''}><input type="hidden" name="orig_${name}_${i}" value="${e(value)}">`;
+  const cells = p.cols.map((key) => {
+    if (!editable) return figureCell(key, f, 'leaf');
+    if (key === 'plan' && canEditPlan) return `<td>${input('plan', dollars(l.plan?.plannedAmountCents), { inputmode: 'numeric', cls: l.plan?.draft ? 'is-draft' : '' }, `FY${p.target} plan for ${shown}`)}</td>`;
+    if (key === 'proj' && canEditActuals) return `<td>${input('proj', dollars(l.projectedCents), { inputmode: 'numeric', cls: l.projectedOverridden ? 'is-corrected' : '', title: 'Whole dollars. Clear the box to go back to the computed projection.' }, `FY${p.base} projection for ${shown}`)}</td>`;
+    if (key === 'act' && canEditActuals) return `<td>${input('act', String((l.baseActualCents || 0) / 100), { inputmode: 'decimal', title: 'Corrects this account’s imported or synced actual. Clear the box to go back to the real figure.' }, `FY${p.base} actual for ${shown}`)}</td>`;
+    return figureCell(key, f, 'leaf');
+  }).join('');
+  return `<tr class="${r.excluded ? 'bp-excluded' : ''}">${label}${cells}</tr>`;
+}
+
+function tableRows(model, ctx) {
+  const rows = plannerRows(model, { includeExcluded: ctx.p.pick });
+  const span = ctx.p.cols.length + 1;
+  if (!rows.length) return `<tr><td colspan="${span}" class="tone-muted">No budget lines for FY${ctx.p.base} or FY${ctx.p.target} yet — sync or import FY${ctx.p.base} on the Church report first.</td></tr>`;
+  return rows.map((r) => {
+    if (r.kind === 'leaf') return leafRow(r, ctx);
+    if (r.kind === 'side') return `<tr class="bb-group"><td colspan="${span}">${e(r.label)}</td></tr>`;
+    if (r.kind === 'header') return `<tr class="bp-header"><td colspan="${span}" style="padding-left:${10 + r.depth * 16}px">${e(r.label)}</td></tr>`;
+    const cls = r.kind === 'net' ? 'bb-result' : r.kind === 'sidetotal' ? 'bb-total' : 'bb-subtotal';
+    const pad = r.kind === 'total' ? ` style="padding-left:${10 + r.depth * 16}px"` : '';
+    return `<tr class="${cls}"><td${pad}>${e(r.label)}</td>${ctx.p.cols.map((k) => figureCell(k, r.fig, r.kind)).join('')}</tr>`;
+  }).join('');
+}
+
+// ── Five-year outlook ────────────────────────────────────────────────────────────────────────
+
+export function outlookYears({ firstYear, revenueCents, expenseCents, revenuePct, expensePct, years = 5 }) {
+  const out = [];
+  let rev = revenueCents;
+  let exp = expenseCents;
+  for (let i = 0; i < years; i += 1) {
+    out.push({ year: firstYear + i, revenueCents: rev, expenseCents: exp, gapCents: exp - rev });
+    rev = Math.round(rev * (1 + revenuePct / 100));
+    exp = Math.round(exp * (1 + expensePct / 100));
+  }
+  return out;
+}
+
+// Connect's gap chart: expenses compounding (solid terracotta) against revenue (dashed teal), the
+// band between them filled. Server-rendered SVG.
+export function outlookChart(years) {
+  const all = years.flatMap((y) => [y.revenueCents, y.expenseCents]);
+  const maxV = Math.max(1, ...all);
+  const minV = Math.min(0, ...all);
+  const span = Math.max(1, maxV - minV);
+  const x0 = 70; const x1 = 458; const yTop = 20; const yBot = 140;
+  const px = (i) => (years.length > 1 ? x0 + ((x1 - x0) * i) / (years.length - 1) : x0);
+  const py = (c) => yBot - ((c - minV) / span) * (yBot - yTop);
+  const pts = (key) => years.map((y, i) => `${px(i).toFixed(1)},${py(y[key]).toFixed(1)}`).join(' ');
+  const band = `${pts('expenseCents')} ${years.map((y, i) => `${px(years.length - 1 - i).toFixed(1)},${py(years[years.length - 1 - i].revenueCents).toFixed(1)}`).join(' ')}`;
+  const grid = [0, 1, 2].map((i) => {
+    const y = yBot - ((yBot - yTop) * i) / 2;
+    return `<line x1="64" y1="${y.toFixed(1)}" x2="470" y2="${y.toFixed(1)}" stroke="#E3E7EE"/><text x="60" y="${(y + 3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="#6B7280">${money(minV + (span * i) / 2)}</text>`;
+  }).join('');
+  const last = years[years.length - 1];
+  return `<svg viewBox="0 0 480 180" width="100%" class="bp-outlook-chart" role="img" aria-label="Outlook: expenses from ${money(years[0].expenseCents)} to ${money(last.expenseCents)} against revenue from ${money(years[0].revenueCents)} to ${money(last.revenueCents)}">
+    ${grid}
+    <polygon points="${band}" fill="#F6E1DA"/>
+    <polyline points="${pts('expenseCents')}" fill="none" stroke="#B5412F" stroke-width="3"/>
+    <polyline points="${pts('revenueCents')}" fill="none" stroke="#2E7EA6" stroke-width="3" stroke-dasharray="6 5"/>
+    ${years.map((y, i) => `<text x="${px(i).toFixed(1)}" y="158" text-anchor="middle" font-size="10" fill="#4B5563">FY${y.year}</text>`).join('')}
+    <text x="70" y="176" font-size="10.5" font-weight="700" fill="#B5412F">— Expenses</text><text x="160" y="176" font-size="10.5" font-weight="700" fill="#2E7EA6">- - Revenue</text>
+  </svg>`;
+}
+
+function outlook(model, p) {
+  const years = outlookYears({ firstYear: p.target, revenueCents: model.revenue.plan, expenseCents: model.expense.plan, revenuePct: p.outRev, expensePct: p.outExp });
+  const last = years[years.length - 1];
+  const rates = `${p.outExp}% expense growth and ${p.outRev === 0 ? 'flat revenue' : `${p.outRev}% revenue growth`}`;
+  return `<div class="panel panel-spaced bp-outlook">
+      <div class="panel-head"><h2>Five-year outlook</h2><span class="muted">From the FY${p.target} plan</span></div>
+      <p class="muted-line">At ${rates}, the gap ${last.gapCents > 0 ? `compounds to ${money(last.gapCents)} by FY${last.year}` : `stays closed through FY${last.year}`}. Not a forecast so much as the question “if nothing changes on the revenue side, what does this plan cost us?”</p>
+      <form method="GET" action="/" class="pl-rates">${hiddenView(p, ['out_exp', 'out_rev', 'pick'])}
+        <label>Expenses grow <span><input type="number" name="out_exp" value="${p.outExp}" step="0.1" min="-15" max="15">% / yr</span></label>
+        <label>Revenue grows <span><input type="number" name="out_rev" value="${p.outRev}" step="0.1" min="-15" max="15">% / yr</span></label>
+        <button type="submit">Recalculate</button><a class="pl-reset" href="${href(p, { outExp: OUTLOOK_DEFAULTS.expense, outRev: OUTLOOK_DEFAULTS.revenue })}">Reset</a>
+      </form>
+      <div class="bp-outlook-body">${outlookChart(years)}
+        <div class="table-scroll"><table class="pm-table pl-num"><thead><tr><th>Year</th><th>Revenue</th><th>Expenses</th><th>Gap</th></tr></thead>
+          <tbody>${years.map((y) => `<tr><td>FY${y.year}</td><td>${money(y.revenueCents)}</td><td>${money(y.expenseCents)}</td><td class="${y.gapCents > 0 ? 'tone-bad' : 'tone-good'}">${y.gapCents > 0 ? money(y.gapCents) : `${money(-y.gapCents)} surplus`}</td></tr>`).join('')}</tbody></table></div>
+      </div>
+    </div>`;
+}
+
+// ── The page ─────────────────────────────────────────────────────────────────────────────────
+
+export function renderBudgetBuilderPage({ builder: rawBuilder, params, canEditPlan = false, canEditActuals = false, canManageBudgetPlan = false, statuses = {}, councilViewer = false, councilDraft = null, councilDraftFailed = false, layout = null, now = new Date() }) {
+  const p = plannerParams(params, now);
+  const builder = councilDraft ? applyCouncilDraft(rawBuilder, councilDraft) : rawBuilder;
+  const model = buildPlannerModel(builder, { layout, params: p });
+  const pickFormId = 'bp-pick';
+  const form = canEditPlan || canEditActuals;
+  const ctx = { p, canEditPlan, canEditActuals, canManage: canManageBudgetPlan, layout, counter: 0, pickFormId, form };
+  const rows = tableRows(model, ctx);
+  const drafts = builder.lines.filter((l) => l.plan?.draft).length;
   const viewToggle = layout
-    ? `<div class="bb-view" role="group" aria-label="Layout">${boardView ? '<span class="is-on">Board layout</span>' : `<a href="${href({ view: 'board' })}">Board layout</a>`}${boardView ? `<a href="${href({ view: 'qb' })}">QuickBooks order</a>` : '<span class="is-on">QuickBooks order</span>'}${canManageBudgetPlan ? '<a href="/?section=accounts&amp;page=chart#layout">Edit the layout in Chart of Accounts</a>' : ''}</div>`
+    ? `<div class="bb-view" role="group" aria-label="Layout">${model.boardView ? '<span class="is-on">Board view</span>' : `<a href="${href(p, { view: 'board' })}">Board view</a>`}${model.boardView ? `<a href="${href(p, { view: 'qb' })}">QuickBooks order</a>` : '<span class="is-on">QuickBooks order</span>'}${canManageBudgetPlan ? '<a href="/?section=accounts&amp;page=chart#layout">Edit the layout in Chart of Accounts</a>' : ''}</div>`
     : '<p class="muted-line">The board layout from Chart of Accounts could not be read, so lines are listed in QuickBooks order.</p>';
-  const table = `<div class="panel panel-spaced list-panel"><div class="table-scroll"><table class="pm-table bb-table"><thead><tr>
-      <th>Category</th><th>FY${String(priorYear).slice(2)} actual</th><th>FY${String(baseYear).slice(2)} budget</th><th>FY${String(baseYear).slice(2)} projected</th><th>Basis</th><th>Growth</th><th>FY${String(targetYear).slice(2)} plan</th><th>Change</th><th>Notes</th>
-    </tr></thead><tbody>
-      ${boardView ? boardRows(builder, layout, opts) : `${group('Income', 'Income')}${group('Expenses', 'Expenses')}`}
-      <tr class="bb-result"><td>Planned result</td><td></td><td>${signed(baseResult)}</td><td></td><td></td><td></td><td>${signed(result)}</td><td>${signed(result - baseResult)}</td><td></td></tr>
-    </tbody></table></div></div>`;
-  return `<p class="lede">The FY${targetYear} church budget plan. Each line is either grown from FY${baseYear}, entered by hand, or not planned yet. Saved to Connect’s budget plan; FY${baseYear} “projected” is ${builder.prorated ? `the year-to-date actual extended to a full year (week ${builder.throughWeek} of 52)` : 'the full-year actual'}, unless a correction has been set.</p>
-    ${statusLine(statuses)}
-    ${councilViewer ? '<p class="muted-line">This is the shared plan. A council member’s own changes to budget lines are kept as a private copy in Connect’s Budget Planner.</p>' : ''}
-    ${banner}
-    ${canManageBudgetPlan ? tabPanel(builder, tab, layout) : ''}
-    ${viewToggle}
-    ${table}
-    ${canEditBudget ? `<details class="panel panel-spaced edit-panel"><summary>Add a line that is not listed</summary>
+  const table = `<div class="table-scroll"><table class="pm-table bb-table bp-table"><thead><tr><th>Category</th>${p.cols.map((k) => `<th>${e(COLUMN_LABELS[k](p))}</th>`).join('')}</tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  const editNote = canEditActuals
+    ? `Plan, FY${p.base} Projected and FY${p.base} Actual are editable; only the cells you change are saved. A blank Projected or Actual goes back to the computed or imported figure.`
+    : 'Your Plan figures are saved as your own draft in Connect; the shared plan is not changed.';
+  const body = form
+    ? `<form method="POST" action="/api/v1/budget-planner-save" class="bp-form">
+        <button type="submit" class="bp-default-submit" tabindex="-1" aria-hidden="true">Save changes</button>
+        <input type="hidden" name="target_year" value="${p.target}"><input type="hidden" name="base_year" value="${p.base}"><input type="hidden" name="fiscal_year" value="${p.target}">
+        <input type="hidden" name="back" value="${e(new URLSearchParams(plannerQuery(p, {}, ['pick', 'tab'])).toString())}">
+        ${table}
+        <div class="bp-actions"><button type="submit">Save changes</button><span class="muted-line">${editNote}</span></div>
+      </form>`
+    : table;
+  const lede = `<p class="lede">The FY${p.target} church budget, category by category, built from FY${p.base}. Grouped the way the board reads a budget, not the way QuickBooks numbers it (set on Chart of Accounts). Δ% flags anything planned to grow more than 4% over the FY${p.base} budget. FY${p.base} projected is ${builder.prorated ? `the year-to-date actual extended to a full year (week ${builder.throughWeek} of 52)` : 'the full-year actual'}, unless a correction has been set.</p>`;
+  return `${statusLine(statuses)}
+    ${header(builder, p, now)}
+    ${lede}
+    ${councilDraftFailed ? '<p class="status status-error">Your own draft could not be read from Connect, so these are the shared plan’s figures and the Plan column cannot be edited right now.</p>' : ''}
+    ${councilViewer ? `<p class="muted-line">${drafts ? `${drafts} Plan figure${drafts === 1 ? ' is' : 's are'} your own draft (marked “Your draft”). ` : ''}A council member’s Plan changes are kept as a private draft in Connect; the shared plan and other members’ drafts are not changed.</p>` : ''}
+    ${summaryStrip(model, p)}
+    ${canManageBudgetPlan ? tabPanel(builder, p, layout) : ''}
+    <div class="panel panel-spaced list-panel bp-panel">
+      <div class="bp-panel-head"><h2>Category by category</h2>${viewToggle}</div>
+      ${toolbar(model, p, { pickFormId })}
+      ${p.pick ? '<p class="muted-line">Tick the lines to leave out of the totals, the export and the printed sheet, then choose Done choosing rows.</p>' : ''}
+      ${body}
+    </div>
+    ${outlook(model, p)}
+    ${canManageBudgetPlan ? `<details class="panel panel-spaced edit-panel"><summary>Add a line that is not listed</summary>
       <form method="POST" action="/api/v1/connect-budget-plan-write" class="bb-form">
         <label class="field"><span>Category</span><input name="category" placeholder="e.g. Expenses:Utilities" required></label>
         <label class="field"><span>Income or expense</span><select name="classification"><option value="Expenses">Expense</option><option value="Income">Income</option></select></label>
-        <input type="hidden" name="fiscal_year" value="${targetYear}">
-        <label class="field"><span>FY${targetYear} plan ($)</span><input type="number" name="planned_amount" step="1" min="0" required></label>
+        <input type="hidden" name="fiscal_year" value="${p.target}">
+        <label class="field"><span>FY${p.target} plan ($)</span><input type="number" name="planned_amount" step="1" min="0" required></label>
         <label class="field"><span>Notes</span><input name="notes"></label>
         <button type="submit">Add line</button>
       </form></details>` : ''}`;
+}
+
+// ── Print sheet (print=1) ────────────────────────────────────────────────────────────────────
+// Connect's printed budget: a summary page (tiles and a short narrative), then Revenue and
+// Expenses on their own pages. "Plan for next year" prints Budget, Actual, Projected, Plan, Change
+// and Δ%; "Just this year" prints the base year alone. DRAFT stamps a watermark on every page.
+export function renderPlannerPrint({ builder: rawBuilder, params, councilDraft = null, layout = null, now = new Date() }) {
+  const p = plannerParams(params, now);
+  const builder = councilDraft ? applyCouncilDraft(rawBuilder, councilDraft) : rawBuilder;
+  const model = buildPlannerModel(builder, { layout, params: p });
+  const showPlan = p.printMode !== 'thisyear';
+  const cols = showPlan ? ['bud', 'act', 'proj', 'plan', 'change', 'delta'] : ['bud', 'act', 'proj'];
+  const today = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+  const r = model.revenue;
+  const x = model.expense;
+  const pctNote = (bud, plan, suffix) => (bud ? `${pctText(((plan - bud) / Math.abs(bud)) * 100)} ${suffix}` : '');
+  const tile = (label, value, sub) => `<div class="bp-print-tile"><small>${e(label)}</small><strong>${value}</strong><span>${e(sub)}</span></div>`;
+  const basis = builder.prorated ? 'annualized from actuals' : 'full year actuals';
+  const tiles = showPlan
+    ? tile('Planned revenue', money(r.plan), pctNote(r.hasBud ? r.bud : 0, r.plan, `on FY${p.base} budget`))
+      + tile('Planned expenses', money(x.plan), pctNote(x.hasBud ? x.bud : 0, x.plan, `on FY${p.base} budget`))
+      + tile('Planned net', signed(r.plan - x.plan), 'revenue less expenses')
+      + tile(`FY${p.base} net, projected`, signed(r.proj - x.proj), basis)
+    : tile(`FY${p.base} budget revenue`, money(r.bud), '') + tile(`FY${p.base} budget expenses`, money(x.bud), '')
+      + tile('Net so far', signed(r.act - x.act), `actual through ${today}`) + tile('Net, projected', signed(r.proj - x.proj), basis);
+  const narrative = showPlan
+    ? `The proposed FY${p.target} budget plans ${money(r.plan)} of revenue against ${money(x.plan)} of expenses, ${r.plan - x.plan >= 0 ? `a surplus of ${money(r.plan - x.plan)}` : `a deficit of ${money(x.plan - r.plan)}`}. Expenses are ${x.proj ? `${signed(x.plan - x.proj)} (${pctText(((x.plan - x.proj) / Math.abs(x.proj)) * 100)}) against` : 'compared with'} FY${p.base}’s projected ${money(x.proj)}; balancing the plan needs ${money(x.plan)} of revenue, ${x.plan - r.proj >= 0 ? `${money(x.plan - r.proj)} more` : `${money(r.proj - x.plan)} less`} than this year is projected to bring in.`
+    : `Through ${today}, FY${p.base} has brought in ${money(r.act)} and spent ${money(x.act)}. At the current pace the year ends with ${money(r.proj)} of revenue and ${money(x.proj)} of expenses, ${r.proj - x.proj >= 0 ? `a surplus of ${money(r.proj - x.proj)}` : `a deficit of ${money(x.proj - r.proj)}`}${r.hasBud || x.hasBud ? `, against a budgeted net of ${signed(r.bud - x.bud)}` : ''}.`;
+  const rows = plannerRows(model);
+  const renderRow = (row) => {
+    if (row.kind === 'leaf') return `<tr><td style="padding-left:${6 + row.depth * 12}px">${e(lineName(row.line, layout))}</td>${cols.map((k) => figureCell(k, row.fig, 'leaf')).join('')}</tr>`;
+    if (row.kind === 'side') return '';
+    if (row.kind === 'header') return `<tr class="bp-print-group"><td colspan="${cols.length + 1}" style="padding-left:${6 + row.depth * 12}px">${e(row.label)}</td></tr>`;
+    return `<tr class="bp-print-total${row.kind === 'net' ? ' is-net' : ''}"><td>${e(row.label)}</td>${cols.map((k) => figureCell(k, row.fig, row.kind)).join('')}</tr>`;
+  };
+  const thead = `<thead><tr><th>Category</th>${cols.map((k) => `<th class="n">${e(COLUMN_LABELS[k](p).replace('Projected', 'Proj.'))}</th>`).join('')}</tr></thead>`;
+  const watermark = p.draft ? '<div class="bp-watermark" aria-hidden="true">DRAFT</div>' : '';
+  if (!rows.length) return `${watermark}<p>No budget lines for FY${p.base} or FY${p.target}.</p>`;
+  const revenueRows = rows.filter((row) => row.side === 'revenue');
+  const expenseRows = rows.filter((row) => row.side === 'expense');
+  const net = rows.find((row) => row.kind === 'net');
+  return `${watermark}
+    <div class="bp-print-hd"><span>Timothy Lutheran Church · St. Louis</span><span>${showPlan ? `Proposed FY${p.target} Budget` : `FY${p.base} Budget`} · prepared ${e(today)}</span></div>
+    <div class="print-eyebrow">Church Budget</div>
+    <h2 class="bp-print-h1">Fiscal Year ${showPlan ? p.target : p.base} Budget</h2>
+    <p class="bp-print-sub">${showPlan ? `Built on FY${p.base} (${builder.prorated ? `annualized from ${Math.round(builder.throughWeek)} weeks of actuals` : 'a full year of actuals'}) · independent of QuickBooks until committed` : `Actual through ${e(today)}${builder.prorated ? `, annualized from ${Math.round(builder.throughWeek)} weeks of actuals to project year end` : ''}`}</p>
+    <div class="bp-print-tiles">${tiles}</div>
+    <p>${narrative}</p>
+    ${model.excludedCount ? `<p class="bp-print-foot">${model.excludedCount} line${model.excludedCount === 1 ? '' : 's'} left out of this sheet with Choose rows.</p>` : ''}
+    <div class="print-newpage"><h3>Revenue</h3><p class="bp-print-foot">Grouped ${model.boardView ? 'the way the board reads a budget (Board view)' : 'in QuickBooks order'}, whole dollars.</p>
+      <table class="bp-print-table">${thead}<tbody>${revenueRows.map(renderRow).join('')}</tbody></table></div>
+    <div class="print-newpage"><h3>Expenses</h3>
+      <table class="bp-print-table">${thead}<tbody>${expenseRows.map(renderRow).join('')}${net ? renderRow(net) : ''}</tbody></table></div>`;
 }
 
 export const BUDGET_BUILDER_STYLES = `
@@ -183,36 +702,56 @@ export const BUDGET_BUILDER_STYLES = `
     .bb-banner small { display:block; color:#C9D2E2; font-size:13px; }
     .bb-banner strong { display:block; font-size:28px; margin:4px 0; font-family:Outfit, sans-serif; }
     .bb-banner span { color:#C9D2E2; font-size:12px; }
+    .bp-strip .bp-gold { color:#E4C47A; } .bp-strip .bp-green { color:#9FD3B0; }
+    .bp-strip-last { border-left:1px solid rgba(255,255,255,.18); padding-left:18px; }
     .bb-tabs { display:flex; gap:22px; border-bottom:1px solid #E3E7EE; margin:-6px 0 14px; }
     .bb-tabs a, .bb-tabs span { padding:10px 0; font-weight:600; font-size:14px; color:#4B5563; text-decoration:none; }
     .bb-tabs .is-on { color:var(--navy); border-bottom:2px solid #9A6B12; }
     .bb-form { display:flex; flex-wrap:wrap; gap:12px 16px; align-items:flex-end; }
     .bb-form button { margin-top:0; }
     .bb-table td, .bb-table th:not(:first-child) { text-align:right; white-space:nowrap; }
-    .bb-table td:first-child, .bb-table td.bb-notes { text-align:left; white-space:normal; }
-    .bb-table td:first-child { min-width:150px; }
+    .bb-table td:first-child { text-align:left; white-space:normal; min-width:180px; }
     .bb-table th, .bb-table td { padding-left:8px; padding-right:8px; }
     .bb-table td:first-child small { display:block; color:#6B7280; font-size:11px; }
-    .bb-table td.bb-notes { font-size:13px; color:#4B5563; min-width:120px; max-width:180px; }
     .bb-group td { font-weight:700; background:#F4F6F9; text-align:left !important; }
-    .bb-total td { font-weight:700; border-top:1px solid #C3CDDD; }
-    .bb-cat td { font-weight:700; color:var(--navy); text-align:left !important; padding-top:12px; }
-    .bb-subcat td { font-weight:600; color:#374151; text-align:left !important; padding-left:20px; }
+    .bb-total td { font-weight:700; border-top:1px solid #C3CDDD; background:#F7F8FA; }
+    .bp-header td { font-weight:700; color:var(--navy); text-align:left !important; padding-top:12px; }
     .bb-subtotal td { font-weight:600; font-size:13px; color:#374151; border-top:1px dashed #D5DAE3; }
-    .bb-view { display:flex; flex-wrap:wrap; gap:16px; margin:14px 0 4px; font-size:14px; }
+    .bb-view { display:flex; flex-wrap:wrap; gap:16px; margin:0; font-size:14px; }
     .bb-view .is-on { font-weight:700; color:var(--navy); }
     .coa-layout td { vertical-align:top; }
     .coa-side td { font-weight:700; background:#F4F6F9; }
     .coa-cat td, .coa-wrapper td { padding-top:12px; color:var(--navy); }
     .coa-sub td { padding-left:20px; color:#374151; }
     .bb-result td { font-weight:700; background:#FBF5E6; border-top:2px solid var(--navy); }
-    .bb-badge { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px; font-weight:600; }
-    .bb-badge.is-grown { background:#EEF0F4; color:#374151; }
-    .bb-badge.is-manual { background:#FBF0D9; color:#8A5A0B; }
-    .bb-badge.is-none { background:#fff; color:#9CA3AF; border:1px dashed #D5DAE3; }
-    .bb-cell-form { display:inline-flex; align-items:center; gap:6px; margin:0; }
-    .bb-cell-form input { width:88px; text-align:right; padding:4px 6px; }
-    .bb-cell-form input.is-corrected { border-color:#C9962E; }
-    .bb-cell-form button { margin-top:0; }
-    .bb-notes .bb-cell-form { display:block; margin-top:4px; }
+    .bp-head { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-top:8px; }
+    .bp-head h2 { margin:0; font-size:26px; }
+    .bp-years { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
+    .bp-years button { margin:0; }
+    .bp-panel-head { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; }
+    .bp-panel-head h2 { margin:0; }
+    .bp-toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; border-top:1px solid #E3E7EE; border-bottom:1px solid #E3E7EE; padding:9px 0; margin:10px 0 6px; font-size:13px; }
+    .bp-label { font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:#6B7280; }
+    .bp-chips { margin:0; }
+    .bp-chip-off { text-decoration:line-through; color:#9CA3AF; }
+    .bp-spacer { flex:1; }
+    .bp-button { padding:6px 12px; font-size:13px; }
+    .bp-pick, .bp-print { display:inline-flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0; }
+    .bp-pick button, .bp-print button { margin:0; }
+    .bp-print label { display:inline-flex; gap:4px; align-items:center; font-weight:600; color:#4B5563; }
+    .bp-table .bp-name small { display:block; color:#6B7280; font-size:11px; }
+    .bp-table .bp-name input[type=checkbox] { margin-right:8px; vertical-align:middle; }
+    .bp-excluded td { opacity:.45; }
+    .bp-input { width:100px; text-align:right; padding:4px 6px; }
+    .bp-input.is-corrected { border-color:#C9962E; }
+    .bp-input.is-draft { border-color:#2E7EA6; background:#F2F8FC; }
+    .bp-up { color:#B5412F; font-weight:600; } .bp-down { color:#2F7D5B; font-weight:600; } .bp-flat { color:#4B5563; font-weight:600; }
+    .bp-up-net { color:#2F7D5B; } .bp-down-net { color:#B5412F; }
+    .bp-remove { margin-left:8px; font-size:11px; }
+    .bp-default-submit { position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden; }
+    .bp-actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+    .bp-actions button { margin:0; }
+    .bp-outlook-body { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(0,1fr); gap:18px; align-items:start; }
+    @media(max-width:900px){ .bp-outlook-body { grid-template-columns:1fr; } }
+    .bp-outlook-chart { display:block; height:auto; }
 `;
