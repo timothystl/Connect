@@ -55,7 +55,7 @@ import { HR_STYLES, renderHrPage } from './hr-pages.js';
 import { FACILITIES_WRITERS, buildFacilitiesView, isoDay, readFacilities } from './facilities-service.js';
 import { canEditFacilities, describeFacilitiesStatus, ensureFacilitiesSchema, handleFacilitiesWrite } from './facilities-routes.js';
 import { serveFacilityFile } from './facility-files.js';
-import { PLANNING_WRITERS, canEditPlanning, readPlanningScenarios } from './planning-scenarios-service.js';
+import { PLANNING_WRITERS, canEditPlanning, ensurePlanningSchema, readPlanningScenarios } from './planning-scenarios-service.js';
 import { PLANNING_V3_STYLES, renderForecastPage, renderScenariosPage } from './planning-v3-pages.js';
 import { describePlanningBasisFailure, fetchPlanningBasis } from './connect-planning-client.js';
 import { fetchBudgetBuilder, fetchCouncilBudgetDraft } from './finance-budget-builder-client.js';
@@ -1547,8 +1547,13 @@ function renderSectionBody(ctx) {
     if (!ctx.planningScenarios || isSyntheticUnavailable(ctx.planningScenarios)) {
       return renderDataUnavailablePage({ eyebrow: section.label, heading: page.label, reason: 'Planning scenarios could not be read for this request.' });
     }
-    if (page.id === 'multi-year') return renderForecastPage({ basis, planning: ctx.planningScenarios, runway: ctx.planningRunway, params: ctx.searchParams });
-    return renderScenariosPage({ basis, planning: ctx.planningScenarios, canEdit: !councilPreview && canEditPlanning(roleResult), status: describeFormStatus(ctx.searchParams, 'planning') });
+    // The Chart of Accounts board layout places each plan line in its board category, for the
+    // scenarios' category changes; without it the name rules place them.
+    if (page.id === 'multi-year') return renderForecastPage({ basis, planning: ctx.planningScenarios, runway: ctx.planningRunway, params: ctx.searchParams, layout: ctx.boardLayout || null });
+    return renderScenariosPage({
+      basis, planning: ctx.planningScenarios, canEdit: !councilPreview && canEditPlanning(roleResult), status: describeFormStatus(ctx.searchParams, 'planning'),
+      params: ctx.searchParams, layout: ctx.boardLayout || null,
+    });
   }
   // Connect's own Chart of Accounts (the accounting workspace, which runs Connect's screens
   // unchanged), framed here beside Finance's pages for side-by-side use. The Budget Planner is
@@ -3689,7 +3694,7 @@ export default {
     }
 
     if (PLANNING_WRITERS[route.id]) {
-      await ensureFinanceOwnedSchema(env.FINANCE_DB, 'planning');
+      await ensurePlanningSchema(env.FINANCE_DB);
       return handleFinanceFormWrite({ request, env, url, section: 'planning', writer: PLANNING_WRITERS[route.id], canEdit: canEditPlanning });
     }
 
@@ -4059,12 +4064,12 @@ export default {
           ? fetchCouncilBudgetDraft(env, accessJwt) : null;
         // The Chart of Accounts board layout (categories, headings, renames, purpose tags) lays out
         // the Budget planner and scenarios, and is what the Chart of Accounts editor edits.
-        let boardLayoutResult = (['builder', 'scenarios'].includes(planningPageId) || section.id === 'accounts') ? fetchBoardLayout(env) : null;
+        let boardLayoutResult = (['builder', 'scenarios', 'multi-year'].includes(planningPageId) || section.id === 'accounts') ? fetchBoardLayout(env) : null;
         let boardLayout = after(boardLayoutResult, (result) => (result && result.ok ? normalizeBoardLayout(result.layout) : null));
         const planningLoads = planningV3 ? Promise.all([
           fetchPlanningBasis(env, defaultLiveBudgetFiscalYear()),
           safeSyntheticRead(async () => {
-            await ensureFinanceOwnedSchema(env.FINANCE_DB, 'planning');
+            await ensurePlanningSchema(env.FINANCE_DB);
             return readPlanningScenarios(env.FINANCE_DB, defaultLiveBudgetFiscalYear());
           }),
           planningPageId === 'multi-year' ? fetchLiveFinanceCashRunway(env, new Date().getUTCFullYear()) : null,
