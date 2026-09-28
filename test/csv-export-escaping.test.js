@@ -131,11 +131,12 @@ describe('giving statement CSV (had no escaping at all)', () => {
       CREATE TABLE funds (id INTEGER PRIMARY KEY, name TEXT);
       CREATE TABLE giving_batches (id INTEGER PRIMARY KEY, batch_date TEXT);
       CREATE TABLE giving_entries (id INTEGER PRIMARY KEY, person_id INTEGER, fund_id INTEGER,
-        batch_id INTEGER, amount INTEGER, method TEXT, contribution_date TEXT, notes TEXT);
+        batch_id INTEGER, amount INTEGER, method TEXT, contribution_date TEXT, notes TEXT,
+        original_amount_cents INTEGER NOT NULL DEFAULT 0);
       INSERT INTO people VALUES (1,'Jane','O"Brien','j@x.com','','','','','');
       INSERT INTO funds VALUES (1,'Building, Phase 2'), (2,'=cmd|calc');
       INSERT INTO giving_batches VALUES (1,'2026-01-05');
-      INSERT INTO giving_entries VALUES
+      INSERT INTO giving_entries (id,person_id,fund_id,batch_id,amount,method,contribution_date,notes) VALUES
         (1,1,1,1,25000,'check','2026-01-05',''),
         (2,1,2,1,-5000,'cash','2026-01-12','');
     `);

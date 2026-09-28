@@ -671,12 +671,13 @@ function renderBatchDetail(b) {
         // Refund/void only makes sense for a gift this mockup itself charged through Stax — a
         // real transaction id to act on. Manual/Tithe.ly entries get refunded where they were
         // recorded, same as always.
+        // A void or refund (here or from Finance's Transactions page) nets e.amount; the badge
+        // says what happened to the first-recorded amount.
         var refundCell = '';
-        if (e.processor === 'stax' && e.external_txn_id) {
-          if (e.voided_at) refundCell = '<span class="badge-closed" title="Voided ' + fmtDate(e.voided_at) + '">Voided</span>';
-          else if (e.refunded_cents >= e.amount) refundCell = '<span class="badge-closed" title="Refunded">Refunded</span>';
-          else refundCell = '<button class="del-entry" style="color:var(--color-navy);" onclick="voidOrRefundEntry(' + e.id + ')" title="Void or refund this gift through Stax">Refund</button>';
-        }
+        if (e.voided_at) refundCell = '<span class="badge-closed" title="Voided ' + fmtDate(e.voided_at) + (e.void_reason ? ' · ' + esc(e.void_reason) : '') + '">Voided</span>';
+        else if (e.refunded_cents > 0 && e.amount <= 0) refundCell = '<span class="badge-closed" title="Refunded">Refunded</span>';
+        else if (e.refunded_cents > 0) refundCell = '<span class="badge-closed" title="' + fmtMoney(e.refunded_cents) + ' refunded">Part refunded</span>';
+        else if (e.processor === 'stax' && e.external_txn_id) refundCell = '<button class="del-entry" style="color:var(--color-navy);" onclick="voidOrRefundEntry(' + e.id + ')" title="Void or refund this gift through Stax">Refund</button>';
         return '<tr><td>' + nameCell + '</td>'
           + '<td>' + esc(e.fund_name) + '</td>'
           + '<td class="amt-col">' + fmtMoney(e.amount) + '</td>'

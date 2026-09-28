@@ -37,7 +37,7 @@ describe('Online giving form settings (Finance Giving Entry)', () => {
   it('shows the live fee percentage and public funds from Connect', async () => {
     const { env, calls } = makeEnv();
     const html = await (await get(env)).text();
-    expect(html).toContain('<h1 class="page-title">Online giving form</h1>');
+    expect(html).toContain('<h1 class="page-title">Online form settings</h1>');
     expect(calls.find((c) => c.path.endsWith('/giving-online-settings-v1'))).toMatchObject({ jwt: 'jwt' });
     expect(html).toContain('<strong>2.9%</strong>');
     expect(html).toContain('name="fee_percent"');

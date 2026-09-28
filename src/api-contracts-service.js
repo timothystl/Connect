@@ -54,7 +54,7 @@ export async function handleContractsServiceApi(req, env, path) {
   env = { ...env, DB: financeStorageDb(env) };
 
   // Gift Entry batches (Finance v3): donor-level, identity-checked -- see api-giving-batch-contracts.js.
-  if (path.startsWith('/api/contracts/giving-batch-')) {
+  if (path.startsWith('/api/contracts/giving-batch-') || path === '/api/contracts/giving-transactions-v1' || path === '/api/contracts/giving-online-v1') {
     const batchResponse = await handleGivingBatchContracts(req, env, path);
     if (batchResponse) return batchResponse;
   }

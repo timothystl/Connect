@@ -2295,7 +2295,7 @@ async function _doInitDb(db) {
     "ALTER TABLE giving_stax_recurring_schedules ADD COLUMN stax_error TEXT NOT NULL DEFAULT ''",
     // (see migrations/0056_giving_entry_void_refund.sql): Andrew asked directly for an in-app
     // refund button on a Stax gift instead of having to go to the Stax dashboard. These track
-    // the outcome locally; they do not change any batch/deposit/statement total calculation.
+    // the outcome locally. Since 0059 the refund or void also nets giving_entries.amount.
     "ALTER TABLE giving_entries ADD COLUMN refunded_cents INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE giving_entries ADD COLUMN voided_at TEXT NOT NULL DEFAULT ''",
     // (see migrations/0057_giving_followups.sql): who a giving nudge was handed to and whether
@@ -2330,6 +2330,28 @@ async function _doInitDb(db) {
        sent_by TEXT NOT NULL DEFAULT ''
      )`,
     `CREATE INDEX IF NOT EXISTS idx_scheduler_email_log_sent_at ON scheduler_email_log(sent_at)`,
+    // (see migrations/0059_giving_entry_corrections.sql): a voided or refunded gift keeps its
+    // first-recorded amount in original_amount_cents and `amount` becomes the net the church
+    // kept, so every total, rollup and statement counts the net gift. giving_entry_changes is
+    // each gift's correction history.
+    "ALTER TABLE giving_entries ADD COLUMN original_amount_cents INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE giving_entries ADD COLUMN void_reason TEXT NOT NULL DEFAULT ''",
+    `CREATE TABLE IF NOT EXISTS giving_entry_changes (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       entry_id INTEGER NOT NULL,
+       changed_at TEXT NOT NULL DEFAULT (datetime('now')),
+       changed_by TEXT NOT NULL DEFAULT '',
+       action TEXT NOT NULL DEFAULT '',
+       field TEXT NOT NULL DEFAULT '',
+       old_value TEXT NOT NULL DEFAULT '',
+       new_value TEXT NOT NULL DEFAULT '',
+       reason TEXT NOT NULL DEFAULT ''
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_giving_entry_changes_entry ON giving_entry_changes(entry_id, changed_at)`,
+    `UPDATE giving_entries
+        SET original_amount_cents = amount,
+            amount = CASE WHEN voided_at != '' THEN 0 ELSE MAX(amount - refunded_cents, 0) END
+      WHERE original_amount_cents = 0 AND (voided_at != '' OR refunded_cents > 0)`,
   ];
   // Every statement here is either an idempotent CREATE ... IF NOT EXISTS, or an ALTER TABLE
   // ADD COLUMN — SQLite has no "ADD COLUMN IF NOT EXISTS", so a re-run always throws "duplicate

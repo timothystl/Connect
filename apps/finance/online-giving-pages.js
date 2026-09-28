@@ -1,4 +1,4 @@
-// Giving Entry → Online giving form: the "cover the processing fee" percentage and which funds
+// Giving Entry → Online form settings: the "cover the processing fee" percentage and which funds
 // the public giving form offers. Both settings live in Connect (giving-online-settings-v1),
 // which the public form, checkout, and recurring signups read; every change posts to
 // /api/v1/giving-online-settings-write, which relays it to Connect. Finance stores nothing.
@@ -8,7 +8,7 @@ function statusBanner(status) {
   return status ? `<p class="status${status.ok ? '' : ' status-error'}">${e(status.message)}</p>` : '';
 }
 
-export function renderOnlineGivingPage({ result, status, canEdit }) {
+export function renderOnlineFormSettingsPage({ result, status, canEdit }) {
   if (!result.ok) {
     return `${statusBanner(status)}<p class="status status-error">The online giving settings could not be read from Connect: ${e(result.message)}</p>`;
   }

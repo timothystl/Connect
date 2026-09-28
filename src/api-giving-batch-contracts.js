@@ -9,6 +9,9 @@
 import { json } from './auth.js';
 import { verifyAccessJwt } from './access-jwt.js';
 import { getRolePermissions, permissionsForRole, batchDepositStatusFromCounts, computeDepositTotals } from './api-utils.js';
+import { correctGift, voidGift, restoreGift } from './giving-gift-corrections.js';
+import { respondWithGivingTransactionsV1 } from './api-giving-transactions-contract.js';
+import { readOnlineGiving, linkOnlineGift, ignoreOnlineGift, cancelRecurringSchedule, updateRecurringSchedule } from './giving-online.js';
 
 const MAX_SPLITS = 4;
 const METHODS = new Set(['cash', 'check', 'online', 'card', 'ach', 'stock', 'other']);
@@ -113,9 +116,9 @@ export async function respondWithGivingBatchWorkspaceV1(url, db) {
     people = (await db.prepare(
       `SELECT id, first_name, last_name, envelope_number FROM people
         WHERE COALESCE(status,'active')='active' AND COALESCE(deceased,0)=0
-          AND (envelope_number=? OR (first_name||' '||last_name) LIKE ? OR last_name LIKE ?)
+          AND (envelope_number=? OR COALESCE(envelope_history,'') LIKE ? OR (first_name||' '||last_name) LIKE ? OR last_name LIKE ?)
         ORDER BY (envelope_number=?) DESC, last_name, first_name LIMIT 20`
-    ).bind(q, like, like, q).all()).results || [];
+    ).bind(q, `%"${q.replace(/["%_]/g, '')}"%`, like, like, q).all()).results || [];
   }
   return json({ contract: 'connect.giving-batch-workspace.v1', funds, open_batches: openBatches, batch, people, week });
 }
@@ -181,7 +184,7 @@ export async function addBatchGift(db, body) {
   return { ok: true, ids, batch_id: batchId };
 }
 
-export async function applyGivingBatchWrite(db, body, email) {
+export async function applyGivingBatchWrite(db, body, email, env = {}) {
   const op = String(body.op || '');
   if (op === 'create_batch') {
     if (!isDay(body.batch_date)) return { error: 'Choose the batch date.', status: 400 };
@@ -206,6 +209,16 @@ export async function applyGivingBatchWrite(db, body, email) {
     await audit(db, 'giving_batch_gift_removed_via_finance', entry.batch_id, email);
     return { ok: true, batch_id: entry.batch_id };
   }
+  // Corrections from the Transactions page. Any batch, open or closed (Andrew, Sept 2026: correct
+  // in place, keep the history) -- see src/giving-gift-corrections.js.
+  if (op === 'correct_gift') return correctGift(db, body, email);
+  if (op === 'void_gift') return voidGift(db, body, email);
+  if (op === 'restore_gift') return restoreGift(db, body, email);
+  // Online giving page: match an online gift to a person, dismiss one, or change a recurring gift.
+  if (op === 'link_online_gift') return linkOnlineGift(db, parseInt(body.queue_id, 10), parseInt(body.person_id, 10), email);
+  if (op === 'ignore_online_gift') return ignoreOnlineGift(db, parseInt(body.queue_id, 10), email);
+  if (op === 'cancel_recurring') return cancelRecurringSchedule(db, env, parseInt(body.schedule_id, 10));
+  if (op === 'update_recurring') return updateRecurringSchedule(db, env, parseInt(body.schedule_id, 10), body);
   if (op === 'close_batch' || op === 'reopen_batch') {
     const batchId = parseInt(body.batch_id, 10);
     const batch = await db.prepare('SELECT id FROM giving_batches WHERE id=?').bind(batchId).first();
@@ -269,12 +282,22 @@ export async function handleGivingBatchContracts(req, env, path) {
     if (auth.response) return auth.response;
     return respondWithGivingBatchLedgerV1(env.DB);
   }
+  if (path === '/api/contracts/giving-transactions-v1' && req.method === 'GET') {
+    const auth = await authorizeGivingBatchContract(req, env, { write: false });
+    if (auth.response) return auth.response;
+    return respondWithGivingTransactionsV1(url, env.DB);
+  }
+  if (path === '/api/contracts/giving-online-v1' && req.method === 'GET') {
+    const auth = await authorizeGivingBatchContract(req, env, { write: false });
+    if (auth.response) return auth.response;
+    return json(await readOnlineGiving(env.DB));
+  }
   if (path === '/api/contracts/giving-batch-write-v1' && req.method === 'POST') {
     const auth = await authorizeGivingBatchContract(req, env, { write: true });
     if (auth.response) return auth.response;
     let body;
     try { body = await req.json(); } catch { return json({ error: 'Invalid JSON body' }, 400); }
-    const result = await applyGivingBatchWrite(env.DB, body || {}, auth.email);
+    const result = await applyGivingBatchWrite(env.DB, body || {}, auth.email, env);
     if (result.error) return json({ error: result.error }, result.status || 400);
     return json({ ...result, enteredBy: auth.user.username });
   }
