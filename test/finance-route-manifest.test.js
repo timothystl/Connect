@@ -20,7 +20,7 @@ const WRITE_ROUTE_IDS = new Set([
   'budget-plan-write-v1', 'compensation-plan-write-v1', 'payroll-hours-save-v1', 'payroll-period-approve-v1',
   'payroll-staff-save-v1', 'payroll-staff-deactivate-v1', 'payroll-email-v1',
   'budget-generate-v1', 'budget-generate-all-v1', 'budget-commit-v1', 'budget-plan-remove-v1',
-  'church-actual-override-v1', 'church-budget-xlsx-import-write-v1', 'church-balances-xlsx-import-write-v1',
+  'church-actual-override-v1', 'budget-planner-save-v1', 'church-budget-xlsx-import-write-v1', 'church-balances-xlsx-import-write-v1',
   'church-budget-xlsx-commit-v1', 'church-balances-xlsx-commit-v1',
   'church-monthly-xlsx-import-write-v1', 'church-activity-xlsx-import-write-v1',
   'church-budget-multi-year-xlsx-import-write-v1', 'church-balances-multi-year-xlsx-import-write-v1',
@@ -44,7 +44,7 @@ const WRITE_ROUTE_IDS = new Set([
   'connect-planner-save-v1',
 ]);
 const OWN_DB_WRITE_ROUTE_IDS = new Set(['budget-plan-save-v1']);
-const LIVE_READ_ROUTE_IDS = new Set(['accounting-workspace-page', 'board-packet-export-v1', 'payroll-relay-diagnostic-v1', 'payroll-csv-v1', 'connect-planner-read-v1']);
+const LIVE_READ_ROUTE_IDS = new Set(['accounting-workspace-page', 'board-packet-export-v1', 'budget-planner-csv-v1', 'payroll-relay-diagnostic-v1', 'payroll-csv-v1', 'connect-planner-read-v1']);
 const LIVE_POST_READ_ROUTE_IDS = new Set([
   'church-budget-xlsx-preview-v1', 'church-balances-xlsx-preview-v1',
   'church-monthly-xlsx-preview-v1', 'church-activity-xlsx-preview-v1',
@@ -67,7 +67,7 @@ const DB_WRITE_ROUTE_IDS = new Set([
   'facilities-asset-save-v1', 'facilities-service-log-v1', 'facilities-service-remove-v1',
   'facilities-pm-save-v1', 'facilities-pm-done-v1', 'facilities-project-save-v1',
   'facilities-file-upload-v1', 'facilities-file-remove-v1',
-  'planning-scenario-save-v1', 'planning-scenario-basis-v1',
+  'planning-scenario-save-v1', 'planning-scenario-basis-v1', 'planning-scenario-create-v1', 'planning-scenario-delete-v1',
   'property-receivable-save-v1', 'property-receivable-import-v1', 'property-receivable-remove-v1', 'property-bank-rec-save-v1', 'property-bank-rec-remove-v1',
   'hr-person-save-v1', 'hr-credential-save-v1', 'hr-review-save-v1', 'hr-goal-save-v1',
   'hr-position-save-v1', 'hr-policy-save-v1', 'hr-signature-save-v1', 'hr-benefit-change-save-v1',
@@ -87,7 +87,7 @@ describe('Finance staging route manifest', () => {
       '/api/v1/budget-plan-save', '/api/v1/connect-budget-plan-write', '/api/v1/connect-compensation-plan-write',
       '/api/v1/connect-budget-generate', '/api/v1/connect-budget-generate-all', '/api/v1/connect-budget-commit', '/api/v1/connect-budget-plan-remove',
       '/api/v1/connect-base-projection-write',
-      '/api/v1/connect-church-actual-override',
+      '/api/v1/connect-church-actual-override', '/api/v1/budget-planner-save', '/api/v1/budget-planner-csv',
       '/api/v1/connect-church-budget-xlsx-import-write', '/api/v1/connect-church-budget-xlsx-preview', '/api/v1/connect-church-budget-xlsx-commit',
       '/api/v1/connect-church-balances-xlsx-import-write', '/api/v1/connect-church-balances-xlsx-preview', '/api/v1/connect-church-balances-xlsx-commit',
       '/api/v1/connect-church-monthly-xlsx-import-write', '/api/v1/connect-church-monthly-xlsx-preview', '/api/v1/connect-church-monthly-xlsx-commit',
@@ -114,7 +114,7 @@ describe('Finance staging route manifest', () => {
       '/api/v1/facilities/pm-save', '/api/v1/facilities/pm-done', '/api/v1/facilities/project-save',
       '/api/v1/facilities/file-upload', '/api/v1/facilities/file-remove', '/api/v1/facilities/file',
       '/api/v1/property/receivable-save', '/api/v1/property/receivable-import', '/api/v1/property/receivable-remove', '/api/v1/property/bank-rec-save', '/api/v1/property/bank-rec-remove',
-      '/api/v1/planning/scenario-save', '/api/v1/planning/scenario-basis',
+      '/api/v1/planning/scenario-save', '/api/v1/planning/scenario-basis', '/api/v1/planning/scenario-create', '/api/v1/planning/scenario-delete',
       '/api/v1/hr/person-save', '/api/v1/hr/credential-save', '/api/v1/hr/review-save', '/api/v1/hr/goal-save',
       '/api/v1/hr/position-save', '/api/v1/hr/policy-save', '/api/v1/hr/signature-save', '/api/v1/hr/benefit-change-save',
       '/api/v1/gift-batch-write',

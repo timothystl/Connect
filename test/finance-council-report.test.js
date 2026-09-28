@@ -30,6 +30,24 @@ const BOARD = {
   },
 };
 
+const DISTRIBUTION = {
+  contract: 'connect.giving-reports.v1', report: 'distribution', year: 2025, scope: 'household', givers: 180, total_cents: 41000000,
+  mean_cents: 227778, median_cents: 120000, top10_share_pct: 41, top10_givers: 18,
+  tiers: [
+    { label: 'Under $500', givers: 60, givers_pct: 33, total_cents: 1200000, total_pct: 3 },
+    { label: '$500 – $2,499', givers: 70, givers_pct: 39, total_cents: 9000000, total_pct: 22 },
+    { label: '$10,000+', givers: 50, givers_pct: 28, total_cents: 30800000, total_pct: 75 },
+    { label: '$50,000+', givers: 0, givers_pct: 0, total_cents: 0, total_pct: 0 },
+  ],
+};
+const MULTIYEAR = {
+  contract: 'connect.giving-reports.v1', report: 'multiyear', end_year: 2025, base_year: 2025,
+  years: [2021, 2022, 2023, 2024, 2025].map((year, i) => ({
+    year, gifts: 3000 + i, givers: 200 - i * 5, total_cents: 38000000 + i * 1000000, avg_gift_cents: 12000, avg_giver_cents: 190000 + i * 10000,
+    adjusted_cents: 45000000 - i * 1000000, cpi_estimated: year >= 2025,
+  })),
+};
+
 function makeEnv({ giving = 'edit' } = {}) {
   const calls = [];
   const env = {
@@ -42,6 +60,8 @@ function makeEnv({ giving = 'edit' } = {}) {
         if (url.pathname.endsWith('/staff-role-v1')) return new Response(JSON.stringify({ role: 'finance', permissions: { finance: 'edit', giving } }));
         if (url.pathname.endsWith('/giving-board-v1')) return new Response(JSON.stringify(BOARD));
         if (url.pathname.endsWith('/giving-board-email-v1')) return new Response(JSON.stringify({ ok: true, sent: 2, failed: [] }));
+        if (url.pathname.endsWith('/giving-reports-v1') && url.searchParams.get('report') === 'distribution') return new Response(JSON.stringify(DISTRIBUTION));
+        if (url.pathname.endsWith('/giving-reports-v1') && url.searchParams.get('report') === 'multiyear') return new Response(JSON.stringify(MULTIYEAR));
         return new Response('{}', { status: 404 });
       },
     },
@@ -113,6 +133,43 @@ describe('Giving › Council report (Finance)', () => {
     expect(sent.html).toContain('For Tuesday');
     expect(sent.html).toContain('$288,922');
     expect(sent.html).not.toContain('<script');
+  });
+
+  it('adds Connect’s Analysis view: the distribution and a five-year trend, totals only', async () => {
+    const { env, calls } = makeEnv({ giving: 'anon' });
+    const html = await (await get(env, '&page=council&view=analysis&year=2025')).text();
+    expect(calls.some((c) => c.path.endsWith('/giving-board-v1'))).toBe(false);
+    const reads = calls.filter((c) => c.path.endsWith('/giving-reports-v1')).map((c) => c.query);
+    expect(reads).toEqual([{ report: 'distribution', year: '2025', scope: 'household' }, { report: 'multiyear', end: '2025', years: '5' }]);
+    expect(html).toContain('<span class="chip is-on">Analysis</span>');
+    expect(html).toContain('href="/?section=giving-analytics&amp;page=council&amp;period=');
+    expect(html).toContain('<option value="2025" selected>2025</option>');
+    expect(html).toContain('Giving distribution · 2025');
+    expect(html).toContain('$1,200');
+    expect(html).toContain('41%');
+    expect(html).not.toContain('$50,000+');
+    expect(html).toContain('<svg viewBox="0 0 700 200"');
+    expect(html).toContain('Five-year trend · through 2025');
+    expect(html).toContain('<td class="num tone-muted">$450,000</td>');
+    expect(html).toContain('2025 <span class="tone-muted">est.</span>');
+    expect(html).toContain('Related giving reports');
+    expect(html).toContain('href="/?section=giving-reports&amp;page=distribution&amp;year=2025"');
+    const print = await (await get(env, '&page=council&view=analysis&year=2025&print=1')).text();
+    expect(print).toContain('Giving distribution · 2025');
+    expect(print).toContain('<svg viewBox="0 0 700 200"');
+    expect(print).not.toContain('Related giving reports');
+    expect(print).not.toContain('<select name="year">');
+  });
+
+  it('keeps council preview on the Analysis links and reports a failed read honestly', async () => {
+    const { env } = makeEnv();
+    env.CONNECT_SERVICE = { ...env.CONNECT_SERVICE, fetch: async (req) => (new URL(req.url).pathname.endsWith('/staff-role-v1')
+      ? new Response(JSON.stringify({ role: 'admin', permissions: { finance: 'edit', giving: 'edit' } })) : new Response('{}', { status: 500 })) };
+    const html = await (await get(env, '&page=council&view=analysis&council=1')).text();
+    expect(html).toContain('The giving distribution could not be read from Connect');
+    expect(html).toContain('The five-year trend could not be read from Connect');
+    expect(html).toContain('<input type="hidden" name="council" value="1">');
+    expect(html).toContain('page=funds-methods&amp;council=1');
   });
 
   it('groups funds by code and offers the same periods as Connect', () => {

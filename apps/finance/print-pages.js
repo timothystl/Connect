@@ -48,6 +48,20 @@ export const PRINT_STYLES = `
   .print-doc tr.muted td { color: #777; }
   .print-doc .comp-basis { border-left: 3px solid #d9dfda; padding: .1rem .7rem; margin: .8rem 0; font-size: 9.5pt; }
   .print-doc .comp-basis table { width: auto; }
+  .print-doc .bp-print-hd { display: flex; justify-content: space-between; gap: 1rem; font-size: 8.5pt; color: #555; border-bottom: 1px solid #d9dfda; padding-bottom: .3rem; margin-bottom: .8rem; }
+  .print-doc .bp-print-h1 { font-size: 20pt; margin: .2rem 0; }
+  .print-doc .bp-print-sub, .print-doc .bp-print-foot { font-size: 9pt; color: #555; }
+  .print-doc .bp-print-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; margin: .8rem 0; }
+  .print-doc .bp-print-tile { border: 1px solid #d9dfda; border-radius: .4rem; padding: .5rem .6rem; }
+  .print-doc .bp-print-tile small, .print-doc .bp-print-tile span { display: block; font-size: 8pt; color: #555; }
+  .print-doc .bp-print-tile strong { display: block; font-size: 13pt; }
+  .print-doc .bp-print-table th.n, .print-doc .bp-print-table td:not(:first-child) { text-align: right; white-space: nowrap; }
+  .print-doc .bp-print-group td { font-weight: 700; padding-top: .5rem; }
+  .print-doc .bp-print-total td { font-weight: 700; border-top: 1px solid #999; }
+  .print-doc .bp-print-total.is-net td { border-top: 2px solid #172019; }
+  .print-doc .bp-up, .print-doc .bp-down-net { color: #8a2b1e; } .print-doc .bp-down, .print-doc .bp-up-net { color: #1f6b45; }
+  .print-doc .tone-muted { color: #888; }
+  .bp-watermark { position: fixed; top: 42%; left: 0; right: 0; text-align: center; font-size: 110pt; font-weight: 800; letter-spacing: .1em; color: rgba(138, 43, 30, .10); transform: rotate(-28deg); pointer-events: none; z-index: 0; }
   .print-picker { background: #fff; max-width: 8.5in; margin: 1rem auto; padding: 1.5rem; box-sizing: border-box; }
   .print-picker fieldset { border: 1px solid #d9dfda; border-radius: .5rem; margin: 0 0 1rem; padding: .6rem 1rem; }
   .print-picker label { display: block; padding: .25rem 0; }

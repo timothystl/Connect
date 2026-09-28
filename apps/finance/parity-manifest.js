@@ -159,10 +159,11 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
   // established. Unlike those, this carries real money, so dataClassification is 'aggregate'.
   {
     id: 'planning', label: 'Budget', group: 'Planning', permission: 'budget',
-    capabilities: ['budget builder', 'scenarios', 'multi-year forecast', 'outlook', 'board categories', 'purpose tags'],
+    capabilities: ['budget planner', 'scenarios', 'multi-year forecast', 'outlook', 'board categories', 'purpose tags'],
+    // The Budget planner is Connect's Budget Planner rebuilt in Finance (planning-builder-pages.js),
+    // so the framed Connect planner (page=connect) is gone; that address resolves to it.
     pages: [
-      { id: 'builder', label: 'Budget builder', status: 'live' },
-      { id: 'connect', label: 'Connect budget planner', status: 'live' },
+      { id: 'builder', label: 'Budget planner', status: 'live' },
       { id: 'scenarios', label: 'Scenarios', status: 'live' },
       { id: 'multi-year', label: 'Multi-year forecast', status: 'live' },
       { id: 'compensation-link', label: 'Compensation', status: 'live' },

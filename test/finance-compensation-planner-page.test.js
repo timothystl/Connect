@@ -127,10 +127,11 @@ describe('Compensation Planner in Finance', () => {
     expect(councilDraftFromPlan({ compBaselineRosterOnly: 1 })).toEqual({ compBaselineRosterOnly: true });
   });
 
-  it('shows Connect’s Budget Planner and Chart of Accounts as tabs beside Finance’s own pages', async () => {
+  it('shows Connect’s Chart of Accounts as a tab beside Finance’s own pages; the Budget Planner is native now', async () => {
     const budget = await (await call(makeEnv().env, '/?section=planning&page=connect')).text();
-    expect(budget).toContain('<iframe src="/accounting?section=planning"');
-    expect(budget).toContain('Connect budget planner');
+    expect(budget).not.toContain('<iframe src="/accounting?section=planning"');
+    expect(budget).not.toContain('Connect budget planner');
+    expect(budget).toContain('<h1 class="page-title">Budget planner</h1>');
     const coa = await (await call(makeEnv().env, '/?section=accounts&page=connect')).text();
     expect(coa).toContain('<iframe src="/accounting?section=accounts"');
     const workspace = await call(makeEnv().env, '/accounting?section=planning');

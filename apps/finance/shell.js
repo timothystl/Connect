@@ -30,7 +30,7 @@ import { describeGivingBatchFailure, fetchGivingBatchLedger, fetchGivingBatchWor
 import { GIFT_TRANSACTIONS_STYLES, buildTransactionsCsv, normalizeTransactionParams, renderOnlineGivingPage, renderTransactionsPage, transactionsCsvFilename, transactionsCsvParams } from './gift-transactions-pages.js';
 import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, fetchGivingBoard, fetchGivingReport, postGivingBoardEmail, postGivingFollowupWrite, postGivingImpactWrite } from './connect-giving-analytics-client.js';
 import { GIVING_REPORTS_STYLES, givingReportParams, givingReportRequests, impactStatementsFromForm, renderGivingReportPage } from './giving-reports-pages.js';
-import { COUNCIL_REPORT_STYLES, councilParams, renderCouncilEmailHtml, renderCouncilReportPage } from './council-report-pages.js';
+import { COUNCIL_REPORT_STYLES, councilAnalysisRequests, councilParams, renderCouncilEmailHtml, renderCouncilReportPage } from './council-report-pages.js';
 import { fetchAccessRoles } from './connect-access-client.js';
 import { fetchFinanceClassification } from './finance-classification-client.js';
 import { fetchFinancePropertyDebt } from './finance-property-debt-client.js';
@@ -55,17 +55,17 @@ import { HR_STYLES, renderHrPage } from './hr-pages.js';
 import { FACILITIES_WRITERS, buildFacilitiesView, isoDay, readFacilities } from './facilities-service.js';
 import { canEditFacilities, describeFacilitiesStatus, ensureFacilitiesSchema, handleFacilitiesWrite } from './facilities-routes.js';
 import { serveFacilityFile } from './facility-files.js';
-import { PLANNING_WRITERS, canEditPlanning, readPlanningScenarios } from './planning-scenarios-service.js';
+import { PLANNING_WRITERS, canEditPlanning, ensurePlanningSchema, readPlanningScenarios } from './planning-scenarios-service.js';
 import { PLANNING_V3_STYLES, renderForecastPage, renderScenariosPage } from './planning-v3-pages.js';
 import { describePlanningBasisFailure, fetchPlanningBasis } from './connect-planning-client.js';
-import { fetchBudgetBuilder } from './finance-budget-builder-client.js';
+import { fetchBudgetBuilder, fetchCouncilBudgetDraft } from './finance-budget-builder-client.js';
 import { fetchBoardLayout } from './finance-board-layout-client.js';
 import {
   churchYearFromReport, councilDraftFromPlan, plannerViewer,
 } from './connect-planner.js';
 import { PLANNER_APP_JS } from './planner/bundle.generated.js';
 import { buildBoardLayoutWrites, normalizeBoardLayout } from './board-layout.js';
-import { BUDGET_BUILDER_STYLES, renderBudgetBuilderPage } from './planning-builder-pages.js';
+import { BUDGET_BUILDER_STYLES, buildPlannerModel, defaultProjectBaseCents, parsePlannerForm, parseProjectLine, plannerBackQuery, plannerCsv, plannerParams, plannerYears, renderBudgetBuilderPage, renderPlannerPrint, applyCouncilDraft } from './planning-builder-pages.js';
 import { fetchLiveFinanceCashRunway } from './finance-cash-runway-client.js';
 import { defaultLiveBudgetFiscalYear } from './finance-budget-client.js';
 import { FACILITIES_STYLES, renderFacilitiesPage } from './facilities-pages.js';
@@ -1045,12 +1045,86 @@ function budgetGrowthFraction(form) {
   return form.get('growth_pct') || '';
 }
 
+// Planning › Budget planner › Save changes. The table is one form; only cells whose value differs
+// from the hidden orig_ value are relayed. Plan cells go to finance-budget-write-v1 (Connect saves a
+// council member's to their own draft); an admin's FY{base} Projected and Actual corrections go to
+// finance-base-projection-write-v1 and finance-church-actual-override-v1. Connect re-checks the
+// signed-in person on every write; Finance only avoids sending what the role could never save.
+async function handleBudgetPlannerSave(request, env, url) {
+  let form = null;
+  try { form = await request.formData(); } catch { /* reported below */ }
+  const query = plannerBackQuery(form ? form.get('back') : '');
+  const back = (status, msg) => {
+    query.set('op', 'planner');
+    query.set('status', status);
+    query.set('msg', String(msg).slice(0, 300));
+    return response(null, { status: 303, headers: { Location: `/?${query.toString()}` } });
+  };
+  if (!isSameOriginPost(request, url)) return back('error', 'Not saved: that form did not come from Timothy Finance.');
+  if (!form) return back('error', 'Not saved: the form could not be read.');
+  const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
+  const role = await fetchVerifiedRole(env, accessJwt);
+  const isAdmin = role.ok && role.role === 'admin';
+  const isCouncilEditor = role.ok && role.role === 'council' && role.permissions?.budget === 'edit';
+  if (!isAdmin && !isCouncilEditor) return back('error', 'Not saved: changing the budget plan needs admin access, or budget edit access for council.');
+  const parsed = parsePlannerForm(form, { canEditActuals: isAdmin });
+  if (parsed.errors.length) return back('error', `Not saved: ${parsed.errors.slice(0, 3).join(' ')}`);
+  if (!parsed.plan.length && !parsed.projections.length && !parsed.actuals.length) return back('ok', 'No changes to save.');
+  const saved = [];
+  const failed = [];
+  const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const why = (r) => (r.message ? String(r.message) : r.reason === 'network_error' ? 'Connect could not be reached' : `Connect refused the request${r.status ? ` (${r.status})` : ''}`);
+  if (parsed.plan.length) {
+    const r = await postConnectFinanceBudgetWrite(env, accessJwt, parsed.plan);
+    const what = `${count(parsed.plan.length, 'plan figure', 'plan figures')}${isAdmin ? '' : ' to your draft'}`;
+    (r.ok ? saved : failed).push(r.ok ? what : `${what}: ${why(r)}`);
+  }
+  if (parsed.projections.length) {
+    const r = await postConnectBaseProjectionWrite(env, accessJwt, { year: parsed.baseYear, rows: parsed.projections });
+    const what = count(parsed.projections.length, `FY${parsed.baseYear} projection`, `FY${parsed.baseYear} projections`);
+    (r.ok ? saved : failed).push(r.ok ? what : `${what}: ${why(r)}`);
+  }
+  if (parsed.actuals.length) {
+    const r = await postConnectFinanceChurchActualOverride(env, accessJwt, { year: parsed.baseYear, rows: parsed.actuals });
+    const what = count(parsed.actuals.length, `FY${parsed.baseYear} actual correction`, `FY${parsed.baseYear} actual corrections`);
+    (r.ok ? saved : failed).push(r.ok ? what : `${what}: ${why(r)}`);
+  }
+  if (!failed.length) return back('ok', `Saved in Connect: ${saved.join(', ')}.`);
+  return back('error', `${saved.length ? `Saved ${saved.join(', ')}. ` : ''}Not saved: ${failed.join('; ')}.`);
+}
+
+// Planning › Budget planner › Export CSV: the current view (years, layout, columns, left-out lines)
+// as the page shows it, for anyone who may open Planning. A council member's export carries their
+// own draft, as their page does.
+async function handleBudgetPlannerCsv(request, env, url) {
+  const plain = (text, status) => new Response(text, { status, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
+  const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
+  const role = await fetchVerifiedRole(env, accessJwt);
+  const planningSection = FINANCE_PARITY_SECTIONS.find((s) => s.id === 'planning');
+  if (!role.ok || !roleCanAccessSection(role.role, planningSection, role.permissions)) return plain('Access denied', 403);
+  const asked = plannerParams(url.searchParams);
+  const [read, layoutResult, draft] = await Promise.all([
+    fetchBudgetBuilder(env, asked.target, asked.base),
+    fetchBoardLayout(env),
+    role.role === 'council' ? fetchCouncilBudgetDraft(env, accessJwt) : null,
+  ]);
+  if (!read.ok) return plain('The budget plan could not be read from Connect right now.', 502);
+  const p = plannerYears(asked, read.builder);
+  const builder = draft?.ok ? applyCouncilDraft(read.builder, draft.rows) : read.builder;
+  const csv = plannerCsv(buildPlannerModel(builder, { layout: layoutResult.ok ? normalizeBoardLayout(layoutResult.layout) : null, params: p }), p);
+  if (request.method === 'HEAD') return new Response(null, { headers: { 'Content-Type': 'text/csv; charset=utf-8' } });
+  return new Response(csv, { headers: {
+    'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+    'Content-Disposition': `attachment; filename="budget-FY${p.target}-from-FY${p.base}.csv"`,
+  } });
+}
+
 function renderEntityCards(entities) {
   return entities.map((entity) => (entity.available === false ? renderUnavailableCard(`${entity.label} · ${entity.periodLabel}`, entity.unavailableNote) : `<div class="card"><small>${escapeHtml(entity.label)} · ${escapeHtml(entity.periodLabel)}</small><strong>${formatSignedCents(entity.resultCents)}</strong><span>Income ${formatCents(entity.incomeCents)} · expenses ${formatCents(entity.expenseCents)} · ${entity.source === 'live' ? 'live from Connect' : 'synthetic fixture'}</span></div>`)).join('');
 }
 
 function renderConnectWorkspaceFrame(workspaceSection) {
-  const label = workspaceSection === 'planning' ? 'Budget Planner' : 'Chart of Accounts';
+  const label = 'Chart of Accounts';
   const src = `/accounting?section=${workspaceSection}`;
   return `<p class="muted-line">Connect’s ${label}, running in Finance with the same controls and autosave. It edits the same saved data as Finance’s own pages. <a href="${src}" target="_blank" rel="noopener">Open full screen</a></p>
     <iframe src="${src}" title="${label} (Connect)" style="width:100%;height:calc(100vh - 150px);min-height:720px;border:1px solid #E3E7EE;border-radius:10px;background:#F3F7FA"></iframe>`;
@@ -1316,7 +1390,8 @@ function renderSectionBody(ctx) {
     const keep = councilPreview ? { council: '1' } : {};
     switch (page.id) {
       case 'council': return renderCouncilReportPage({
-        result: totals, params: ctx.searchParams, today: isoDay(new Date()), status,
+        result: totals, analysisResults: ctx.councilAnalysis ? ctx.councilAnalysis.map(asResult) : null,
+        params: ctx.searchParams, today: isoDay(new Date()), status,
         canEmail: canEditNudges, print: ctx.searchParams.get('print') === '1', council: councilPreview,
       });
       case 'year-over-year': return renderYearOverYearPage({ result: totals, keep });
@@ -1487,26 +1562,42 @@ function renderSectionBody(ctx) {
     if (!ctx.planningScenarios || isSyntheticUnavailable(ctx.planningScenarios)) {
       return renderDataUnavailablePage({ eyebrow: section.label, heading: page.label, reason: 'Planning scenarios could not be read for this request.' });
     }
-    if (page.id === 'multi-year') return renderForecastPage({ basis, planning: ctx.planningScenarios, runway: ctx.planningRunway, params: ctx.searchParams });
-    return renderScenariosPage({ basis, planning: ctx.planningScenarios, canEdit: !councilPreview && canEditPlanning(roleResult), status: describeFormStatus(ctx.searchParams, 'planning') });
+    // The Chart of Accounts board layout places each plan line in its board category, for the
+    // scenarios' category changes; without it the name rules place them.
+    if (page.id === 'multi-year') return renderForecastPage({ basis, planning: ctx.planningScenarios, runway: ctx.planningRunway, params: ctx.searchParams, layout: ctx.boardLayout || null });
+    return renderScenariosPage({
+      basis, planning: ctx.planningScenarios, canEdit: !councilPreview && canEditPlanning(roleResult), status: describeFormStatus(ctx.searchParams, 'planning'),
+      params: ctx.searchParams, layout: ctx.boardLayout || null,
+    });
   }
-  // Connect's own Budget Planner and Chart of Accounts (the accounting workspace, which runs
-  // Connect's screens unchanged), framed here beside Finance's pages for side-by-side use.
-  if ((section.id === 'planning' || section.id === 'accounts') && page.id === 'connect') {
-    return renderConnectWorkspaceFrame(section.id === 'planning' ? 'planning' : 'accounts');
+  // Connect's own Chart of Accounts (the accounting workspace, which runs Connect's screens
+  // unchanged), framed here beside Finance's pages for side-by-side use. The Budget Planner is
+  // Finance's own page now (Planning › Budget planner); its old page=connect address resolves to it.
+  if (section.id === 'accounts' && page.id === 'connect') {
+    return renderConnectWorkspaceFrame('accounts');
   }
   if (section.id === 'planning' && page.id === 'builder' && ctx.budgetBuilder?.ok) {
+    const isAdmin = !councilPreview && roleResult.ok && roleResult.role === 'admin';
+    const isCouncil = roleResult.ok && roleResult.role === 'council';
+    // A council member's Plan figures are their own draft (read back through Connect); without
+    // that read they are not offered for editing, so a save never lands on figures they cannot see.
+    const draft = ctx.councilBudgetDraft?.ok ? ctx.councilBudgetDraft.rows : null;
+    const shared = { builder: ctx.budgetBuilder.builder, params: ctx.searchParams, layout: ctx.boardLayout || null, councilDraft: draft };
+    if (ctx.searchParams.get('print') === '1') return renderPlannerPrint(shared);
+    const plannerOp = ctx.searchParams.get('op') === 'planner';
     return renderBudgetBuilderPage({
-      builder: ctx.budgetBuilder.builder,
-      // Council's budget edits are saved to their own copy in Connect, which this shared table does
-      // not show, so in-place editing here is admin-only.
-      canEditBudget: !councilPreview && roleResult.ok && roleResult.role === 'admin',
-      councilViewer: roleResult.ok && roleResult.role === 'council',
-      canManageBudgetPlan: !councilPreview && roleResult.ok && roleResult.role === 'admin',
-      tab: ctx.searchParams.get('tab'),
-      layout: ctx.boardLayout || null,
-      view: ctx.searchParams.get('view') === 'qb' ? 'qb' : 'board',
-      statuses: { budgetEntryStatus, budgetEntryMessage, planOpKind, planOpStatus, planOpMessage, baseProjectionEntryStatus, baseProjectionEntryMessage },
+      ...shared,
+      // Council with budget edit may change Plan cells only, saved to their own draft by Connect;
+      // Projected and Actual corrections, and the plan tools, stay admin-only (Connect re-checks).
+      canEditPlan: isAdmin || (!councilPreview && isCouncil && roleResult.permissions?.budget === 'edit' && Boolean(draft)),
+      canEditActuals: isAdmin,
+      councilViewer: isCouncil,
+      councilDraftFailed: isCouncil && !councilPreview && Boolean(ctx.councilBudgetDraft) && !ctx.councilBudgetDraft.ok,
+      canManageBudgetPlan: isAdmin,
+      statuses: {
+        budgetEntryStatus, budgetEntryMessage, planOpKind, planOpStatus, planOpMessage, baseProjectionEntryStatus, baseProjectionEntryMessage,
+        plannerStatus: plannerOp ? ctx.searchParams.get('status') : null, plannerMessage: plannerOp ? ctx.searchParams.get('msg') : null,
+      },
     });
   }
   if (section.id === 'planning') {
@@ -2030,9 +2121,27 @@ export default {
       let result;
       if (opKind === 'generate') {
         const targetYears = String(form.get('target_years') || '').split(',').map((s) => s.trim()).filter(Boolean);
+        // The Budget planner's "Project one category" sends the line with its own classification
+        // ("Income|Income:Offerings"), and may leave the starting amount blank: it then starts
+        // from the line's base-year projection (then actual, then budget), read from Connect.
+        const picked = parseProjectLine(form.get('line'));
+        const category = picked ? picked.category : String(form.get('category') || '');
+        const classification = picked ? picked.classification : (form.get('classification') || 'Expenses');
+        let baseAmount = String(form.get('base_amount') || '').trim();
+        if (baseAmount === '' && category) {
+          const target = Number(form.get('target_year'));
+          const base = Number(form.get('base_year'));
+          const read = Number.isInteger(target) ? await fetchBudgetBuilder(env, target, Number.isInteger(base) && base < target ? base : target - 1) : { ok: false };
+          const cents = read.ok ? defaultProjectBaseCents(read.builder.lines.find((l) => l.category === category)) : null;
+          if (cents == null) {
+            const params = new URLSearchParams({ section: 'planning', op: opKind, status: 'error', reason: 'http_error', message: read.ok ? 'Enter a starting amount: this line has no projection, actual or budget to start from.' : 'Enter a starting amount: the line’s projection could not be read from Connect.' });
+            return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
+          }
+          baseAmount = String(Math.round(cents / 100));
+        }
         result = await postConnectFinanceBudgetGenerate(env, accessJwt, {
-          category: form.get('category') || '', classification: form.get('classification') || 'Expenses',
-          base_amount: form.get('base_amount') || '', growth_pct: budgetGrowthFraction(form), target_years: targetYears,
+          category, classification,
+          base_amount: baseAmount, growth_pct: budgetGrowthFraction(form), target_years: targetYears,
           notes: form.get('notes') || '',
         });
       } else if (opKind === 'generate-all') {
@@ -2080,6 +2189,10 @@ export default {
       if (result.message) params.set('message', String(result.message).slice(0, 200));
       return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
     }
+
+    // Planning › Budget planner: Save changes, and the current view as CSV.
+    if (route.id === 'budget-planner-save-v1') return handleBudgetPlannerSave(request, env, url);
+    if (route.id === 'budget-planner-csv-v1') return handleBudgetPlannerCsv(request, env, url);
 
     // Church Report's admin-only actual-figure correction, same 303-redirect-after-POST shape as
     // the routes above.
@@ -3577,7 +3690,7 @@ export default {
     }
 
     if (PLANNING_WRITERS[route.id]) {
-      await ensureFinanceOwnedSchema(env.FINANCE_DB, 'planning');
+      await ensurePlanningSchema(env.FINANCE_DB);
       return handleFinanceFormWrite({ request, env, url, section: 'planning', writer: PLANNING_WRITERS[route.id], canEdit: canEditPlanning });
     }
 
@@ -3950,16 +4063,22 @@ export default {
         // own scenario settings, and, for the forecast, today's operating cash.
         const planningPageId = section.id === 'planning' ? resolveFinancePage(section, pageId).id : null;
         const planningV3 = ['scenarios', 'multi-year'].includes(planningPageId);
-        let budgetBuilder = planningPageId === 'builder' ? fetchBudgetBuilder(env, defaultLiveBudgetFiscalYear()) : null;
+        // The Budget planner's base and target years come from its own view parameters.
+        const plannerView = planningPageId === 'builder' ? plannerParams(url.searchParams) : null;
+        let budgetBuilder = plannerView ? fetchBudgetBuilder(env, plannerView.target, plannerView.base) : null;
+        // A council member sees their own Plan draft, read back through Connect as themselves.
+        const councilBudgetDraftLoad = plannerView && !councilPreview && roleResult.ok && roleResult.role === 'council'
+          ? fetchCouncilBudgetDraft(env, accessJwt) : null;
         // The Chart of Accounts board layout (categories, headings, renames, purpose tags) lays out
-        // the Budget builder and is what the Chart of Accounts editor edits.
-        let boardLayoutResult = (planningPageId === 'builder' || section.id === 'accounts'
+        // the Budget planner and scenarios, and is what the Chart of Accounts editor (also on
+        // QuickBooks › Account mapping) edits.
+        let boardLayoutResult = (['builder', 'scenarios', 'multi-year'].includes(planningPageId) || section.id === 'accounts'
           || (section.id === 'quickbooks' && resolveFinancePage(section, pageId).id === 'account-mapping')) ? fetchBoardLayout(env) : null;
         let boardLayout = after(boardLayoutResult, (result) => (result && result.ok ? normalizeBoardLayout(result.layout) : null));
         const planningLoads = planningV3 ? Promise.all([
           fetchPlanningBasis(env, defaultLiveBudgetFiscalYear()),
           safeSyntheticRead(async () => {
-            await ensureFinanceOwnedSchema(env.FINANCE_DB, 'planning');
+            await ensurePlanningSchema(env.FINANCE_DB);
             return readPlanningScenarios(env.FINANCE_DB, defaultLiveBudgetFiscalYear());
           }),
           planningPageId === 'multi-year' ? fetchLiveFinanceCashRunway(env, new Date().getUTCFullYear()) : null,
@@ -4283,9 +4402,14 @@ export default {
               : reportsPage === 'bands' && givingReportParams(url.searchParams, isoDay(new Date())).bandsView === 'annual' ? 'household-bands' : null;
         let accessRoles = section.id === 'accounts' && resolveFinancePage(section, pageId).id === 'access'
           ? fetchAccessRoles(env, accessJwt) : null;
+        // Council report › Analysis reads the distribution and five-year trend (both totals only)
+        // instead of the board.
+        const councilView = analyticsPageId === 'council' ? councilParams(url.searchParams, isoDay(new Date())) : null;
+        const councilAnalysisLoad = councilView?.mode === 'analysis'
+          ? Promise.all(councilAnalysisRequests(councilView.year).map(([report, query]) => fetchGivingReport(env, accessJwt, report, query))) : null;
         const givingAnalyticsLoads = analyticsPageId ? Promise.all([
-          analyticsPageId === 'statements' ? null
-            : analyticsPageId === 'council' ? fetchGivingBoard(env, accessJwt, { period: councilParams(url.searchParams, isoDay(new Date())).period })
+          analyticsPageId === 'statements' || councilAnalysisLoad ? null
+            : analyticsPageId === 'council' ? fetchGivingBoard(env, accessJwt, { period: councilView.period })
               // Charts › Giving vs. pace: one period for one fund scope (totals only).
               : analyticsPageId === 'giving-pace' ? (() => {
                 const pace = givingPaceParams(url.searchParams, isoDay(new Date()));
@@ -4335,6 +4459,8 @@ export default {
         const shellResponse = response((printMode ? renderPrintPage : renderShell)({
           printFragment: printMode && url.searchParams.get('fragment') === '1',
           givingReports: givingReportsLoad ? await givingReportsLoad : null,
+          councilAnalysis: councilAnalysisLoad ? await councilAnalysisLoad : null,
+          councilBudgetDraft: councilBudgetDraftLoad ? await councilBudgetDraftLoad : null,
           healthView: url.searchParams.get('view'), healthAppeal: url.searchParams.get('appeal'), healthFlow: url.searchParams.get('flow'), financeHealth, facilities, hr, givingBatch, givingAnalytics, givingAnalyticsPeople, givingMdoBooks, gymIncome, accessRoles, budgetBuilder, boardLayout, planningBasis, planningScenarios, planningRunway, propertyBooks, searchParams: url.searchParams,
           metadata, summary, giving, givingSource, section, pageId, councilPreview, roleResult, churchReport, churchReportLive, churchTrendLive,
           balanceSheet, balanceTrends, balancePriorYear, balancePropertyValue, balanceMortgageHistory, balanceSelection, daycareReport, daycareReportLive, daycareEntries, daycareEditId, propertyReport, propertyReportLive, propertyReserves,

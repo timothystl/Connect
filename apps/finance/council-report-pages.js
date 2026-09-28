@@ -1,9 +1,11 @@
 // Giving › Council report: the Giving Report to the Church Council, ported from Connect's Giving
-// › Reports board (Dashboard and Narrative). Every figure comes from Connect's giving-board-v1,
-// the same computation Connect's own board page uses, so the two can never disagree. Aggregate
-// only; no donor is named, so council may read it. Finance pages run no script: the lens, period
-// and view are GET parameters, and Print is the shell's print=1 version of this page (with a
-// summary of the other categories appended). Email packet posts to /api/v1/giving-board-email.
+// › Reports board (Dashboard, Narrative and Analysis). Dashboard and Narrative come from Connect's
+// giving-board-v1, the same computation Connect's own board page uses, so the two can never
+// disagree; Analysis reads the giving distribution and five-year trend through giving-reports-v1
+// (both totals only). Aggregate only; no donor is named, so council may read it. Finance pages
+// run no script: the lens, period, year and view are GET parameters, and Print is the shell's
+// print=1 version of this page (Dashboard and Narrative append a summary of the other
+// categories). Email packet posts to /api/v1/giving-board-email.
 import { escapeHtml as e } from './render-helpers.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -57,9 +59,19 @@ export function councilPeriods(today) {
 export function councilParams(params, today) {
   const periods = councilPeriods(today);
   const period = periods.some((p) => p.value === params.get('period')) ? params.get('period') : periods[0].value;
-  const mode = params.get('view') === 'narrative' ? 'narrative' : 'dashboard';
+  const mode = ['narrative', 'analysis'].includes(params.get('view')) ? params.get('view') : 'dashboard';
   const lens = /^[a-z_]{2,20}$/.test(params.get('lens') || '') ? params.get('lens') : 'general';
-  return { period, mode, lens, periods };
+  // Analysis year: this year by default, never before 2000 or after this year.
+  const thisYear = Number(String(today).slice(0, 4));
+  const y = Number(params.get('year'));
+  const year = Number.isInteger(y) && y >= 2000 && y <= thisYear ? y : thisYear;
+  return { period, mode, lens, periods, year, thisYear };
+}
+
+// The two Connect reads the Analysis view makes, as [report, query] pairs for fetchGivingReport:
+// the same calls as Connect's givAnalysisLoad (households, and five years ending at the year).
+export function councilAnalysisRequests(year) {
+  return [['distribution', { year, scope: 'household' }], ['multiyear', { end: year, years: 5 }]];
 }
 
 function href(params) {
@@ -318,10 +330,116 @@ function otherCategoriesSummary(data, lens) {
   }).join('')}</div>`;
 }
 
-function controls(data, ctx, periods) {
-  const tab = (mode, label) => (ctx.mode === mode ? `<span class="chip is-on">${label}</span>` : `<a class="chip" href="${href({ ...ctx, view: mode === 'dashboard' ? '' : mode })}">${label}</a>`);
+// ── Analysis ─────────────────────────────────────────────────────────────────────────────────
+// Connect's Giving Analysis: households grouped by full-year giving, and five years of giving
+// beside the same totals restated in the last year's dollars (CPI-U). Both reports are totals
+// only; no household is named or counted below its tier.
+
+// Five years as grouped bars: actual dollars (navy) and inflation-adjusted (gold), in thousands.
+export function multiyearChart(m) {
+  const years = m.years || [];
+  const maxCents = Math.max(0, ...years.map((r) => Math.max(r.total_cents || 0, r.adjusted_cents || 0)));
+  const maxK = maxCents / 100000;
+  const stepK = niceStepK(maxK);
+  const axisMaxK = Math.max(stepK * 2, Math.ceil(maxK / stepK) * stepK);
+  const baseline = 170;
+  const span = 140;
+  const h = (cents) => Math.max(0, ((cents || 0) / 100000 / axisMaxK) * span);
+  let svg = `<svg viewBox="0 0 700 200" class="cr-chart" width="100%" role="img" aria-label="Giving by year, ${e(years[0]?.year ?? '')} to ${e(m.base_year ?? '')}, actual and in ${e(m.base_year ?? '')} dollars, in thousands of dollars">`;
+  for (const val of [0, axisMaxK / 2, axisMaxK]) {
+    const yy = baseline - (val / axisMaxK) * span;
+    svg += `<line x1="40" y1="${yy.toFixed(1)}" x2="700" y2="${yy.toFixed(1)}" stroke="${val === 0 ? '#E3E6EC' : '#EEF0F4'}" stroke-width="1"/>`;
+    svg += `<text x="34" y="${(yy + 3).toFixed(1)}" text-anchor="end" fill="#8A93A5" font-size="10">${Math.round(val).toLocaleString('en-US')}</text>`;
+  }
+  const x0 = 44;
+  const pitch = (700 - x0 - 6) / Math.max(1, years.length);
+  const barW = Math.min(46, pitch / 3);
+  years.forEach((r, i) => {
+    const gs = x0 + i * pitch + (pitch - (barW * 2 + 4)) / 2;
+    [[r.total_cents, '#1B2A4A'], [r.adjusted_cents, '#C9973A']].forEach(([v, fill], bi) => {
+      const bh = h(v);
+      const x = gs + bi * (barW + 4);
+      svg += `<rect x="${x.toFixed(1)}" y="${(baseline - bh).toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${fill}" rx="2"><title>${e(r.year)}${bi ? ` in ${e(m.base_year)} dollars` : ''}: ${boardMoney(v)}</title></rect>`;
+      svg += `<text x="${(x + barW / 2).toFixed(1)}" y="${(baseline - bh - 4).toFixed(1)}" text-anchor="middle" fill="#5B6475" font-size="9">$${Math.round((v || 0) / 100000).toLocaleString('en-US')}k</text>`;
+    });
+    svg += `<text x="${(x0 + i * pitch + pitch / 2).toFixed(1)}" y="188" text-anchor="middle" fill="#5B6475" font-size="11">${e(r.year)}${r.cpi_estimated ? '*' : ''}</text>`;
+  });
+  return `${svg}</svg>`;
+}
+
+function analysisDistribution(dist) {
+  if (!dist.ok) return `<div class="panel panel-spaced"><h2>Giving distribution</h2><p class="status status-error">The giving distribution could not be read from Connect: ${e(dist.message)} Nothing here is a real $0.</p></div>`;
+  const d = dist.data || {};
+  if (!d.givers) return `<div class="panel panel-spaced"><h2>Giving distribution</h2><div class="empty-note">No giving recorded for ${e(d.year ?? '')}.</div></div>`;
+  const tiers = (d.tiers || []).filter((t) => t.givers > 0);
+  const maxTotal = Math.max(1, ...tiers.map((t) => t.total_cents || 0));
+  const rows = tiers.map((t) => `<tr><td>${e(t.label)}</td><td class="num">${Number(t.givers).toLocaleString('en-US')}</td><td class="num tone-muted">${e(t.givers_pct)}%</td><td class="num">${boardMoney(t.total_cents)}</td>
+      <td class="cr-share"><i style="display:block;height:12px;background:#EEF0F4;border-radius:3px;overflow:hidden"><b style="display:block;height:12px;background:#2E7EA6;width:${Math.round(((t.total_cents || 0) / maxTotal) * 100)}%"></b></i><span>${e(t.total_pct)}% of total</span></td></tr>`).join('');
+  return `<div class="panel panel-spaced cr-analysis-card"><h2>Giving distribution · ${e(d.year)}</h2>
+    <p class="muted-line">Households grouped by their full-year giving. The <strong>median</strong> is the honest “typical” gift; a few large gifts pull the mean up. Anonymous gifts and organizations are left out.</p>
+    <div class="cr-kpis">
+      ${kpi('#2E7EA6', 'Giving households', Number(d.givers).toLocaleString('en-US'), `${e(d.year)}`)}
+      ${kpi('#1B2A4A', 'Total', boardMoney(d.total_cents), 'Given by households')}
+      ${kpi('#C9973A', 'Median gift / yr', boardMoney(d.median_cents), `The typical household · mean ${boardMoney(d.mean_cents)}`)}
+      ${kpi('#6B8F71', 'Top 10% share', `${e(d.top10_share_pct)}%`, `${Number(d.top10_givers || 0).toLocaleString('en-US')} households`)}
+    </div>
+    <div class="table-scroll"><table class="pm-table cr-table"><thead><tr><th>Annual giving</th><th class="num">Households</th><th class="num">%</th><th class="num">Total</th><th>Share of total</th></tr></thead>
+      <tbody>${rows}</tbody></table></div></div>`;
+}
+
+function analysisTrend(multi) {
+  if (!multi.ok) return `<div class="panel panel-spaced"><h2>Five-year trend</h2><p class="status status-error">The five-year trend could not be read from Connect: ${e(multi.message)} Nothing here is a real $0.</p></div>`;
+  const m = multi.data || {};
+  const years = m.years || [];
+  if (!years.length) return '<div class="panel panel-spaced"><h2>Five-year trend</h2><div class="empty-note">No giving recorded for these years.</div></div>';
+  const estimated = years.some((r) => r.cpi_estimated);
+  const rows = years.map((r) => `<tr><td>${e(r.year)}${r.cpi_estimated ? ' <span class="tone-muted">est.</span>' : ''}</td><td class="num">${Number(r.givers || 0).toLocaleString('en-US')}</td><td class="num">${boardMoney(r.total_cents)}</td><td class="num">${boardMoney(r.avg_giver_cents)}</td><td class="num tone-muted">${boardMoney(r.adjusted_cents)}</td></tr>`).join('');
+  return `<div class="panel panel-spaced cr-analysis-card">
+    <div class="cr-chart-head"><h2>Five-year trend · through ${e(m.base_year)}</h2>
+      <span class="cr-legend"><i style="background:#1B2A4A"></i>Actual dollars <i style="background:#C9973A"></i>${e(m.base_year)} dollars (inflation-adjusted)</span></div>
+    <p class="muted-line">Actual giving beside the same totals restated in ${e(m.base_year)} dollars (CPI-U). If the gold bars are flat while the navy bars rise, giving is only keeping pace with inflation. Thousands of dollars.</p>
+    ${multiyearChart(m)}
+    <div class="table-scroll"><table class="pm-table cr-table"><thead><tr><th>Year</th><th class="num">Givers</th><th class="num">Total</th><th class="num">Avg / giver</th><th class="num">In ${e(m.base_year)} $</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    ${estimated ? '<p class="muted-line">“est.” (and * on the chart) years use an estimated price index until the BLS annual average is published.</p>' : ''}
+  </div>`;
+}
+
+// The related giving reports, all totals only, so the council may open each of them.
+function analysisLinks(ctx) {
+  const keep = ctx.council ? { council: '1' } : {};
+  const link = (section, page, label, note, extra = {}) => `<li><a href="/?${new URLSearchParams({ section, page, ...extra, ...keep }).toString().replace(/&/g, '&amp;')}">${label}</a><span>${note}</span></li>`;
+  return `<div class="panel panel-spaced cr-related"><h2>Related giving reports</h2><ul>
+    ${link('giving-reports', 'distribution', 'Distribution', 'Tiers and median, by household or by person', { year: ctx.year })}
+    ${link('giving-reports', 'funds-methods', 'By fund and method', 'Where gifts go and how they arrive')}
+    ${link('giving-reports', 'attendance', 'Giving and attendance', 'Week by week, side by side')}
+    ${link('giving-analytics', 'trends', 'Trends', 'Month by month, this year and last')}
+    ${link('giving-analytics', 'year-over-year', 'Year over year', 'Each month against the same month last year')}
+    ${link('giving-analytics', 'household-bands', 'Household bands', 'How many households give at each level')}
+  </ul></div>`;
+}
+
+function analysis(results, ctx) {
+  const [dist = { ok: false, message: 'not requested' }, multi = { ok: false, message: 'not requested' }] = results || [];
+  return `${analysisDistribution(dist)}${analysisTrend(multi)}`;
+}
+
+function controls(data, ctx, periods, thisYear) {
+  const tab = (mode, label) => (ctx.mode === mode ? `<span class="chip is-on">${label}</span>` : `<a class="chip" href="${href({ ...ctx, view: mode === 'dashboard' ? '' : mode, year: '' })}">${label}</a>`);
+  const tabs = `<div class="chip-row">${tab('dashboard', 'Dashboard')}${tab('narrative', 'Narrative')}${tab('analysis', 'Analysis')}</div>`;
+  if (ctx.mode === 'analysis') {
+    return `<div class="cr-controls">
+    ${tabs}
+    <form method="GET" action="/" class="cr-picks">
+      <input type="hidden" name="section" value="giving-analytics"><input type="hidden" name="page" value="council"><input type="hidden" name="view" value="analysis">
+      ${ctx.council ? '<input type="hidden" name="council" value="1">' : ''}
+      <label class="field"><span>Year</span><select name="year">${Array.from({ length: 7 }, (_, i) => thisYear - i).map((y) => `<option value="${y}"${String(y) === ctx.year ? ' selected' : ''}>${y}${y === thisYear ? ' (so far)' : ''}</option>`).join('')}</select></label>
+      <button type="submit" class="button-outline">Show</button>
+    </form>
+  </div>`;
+  }
   return `<div class="cr-controls">
-    <div class="chip-row">${tab('dashboard', 'Dashboard')}${tab('narrative', 'Narrative')}</div>
+    ${tabs}
     <form method="GET" action="/" class="cr-picks">
       <input type="hidden" name="section" value="giving-analytics"><input type="hidden" name="page" value="council">
       ${ctx.mode === 'narrative' ? '<input type="hidden" name="view" value="narrative">' : ''}
@@ -352,10 +470,18 @@ function emailForm(data, g, ctx) {
   </details>`;
 }
 
-export function renderCouncilReportPage({ result, params, today, status, canEmail = false, print = false, council = false }) {
-  const { period, mode, lens, periods } = councilParams(params, today);
-  const ctx = { period, lens, mode, view: mode === 'narrative' ? 'narrative' : '', council: council ? '1' : '' };
+export function renderCouncilReportPage({ result, analysisResults = null, params, today, status, canEmail = false, print = false, council = false }) {
+  const { period, mode, lens, periods, year, thisYear } = councilParams(params, today);
+  const ctx = { period, lens, mode, view: mode === 'dashboard' ? '' : mode, council: council ? '1' : '', year: mode === 'analysis' ? String(year) : '' };
   const banner = status ? `<p class="status${status.ok ? '' : ' status-error'}">${e(status.message)}</p>` : '';
+  // Analysis reads its own two reports and not the board, so it is rendered before the board's
+  // own failure check.
+  if (mode === 'analysis') {
+    const head = `<p class="lede">Giving analysis · ${year}${year === thisYear ? ' so far' : ''} · distribution and multi-year trends · no individual donors named</p>`;
+    if (print) return `${head}${analysis(analysisResults, ctx)}`;
+    return `${banner}${controls(null, ctx, periods, thisYear)}${head}${analysis(analysisResults, ctx)}${analysisLinks(ctx)}
+    <p class="muted-line">Print prints the distribution and the five-year trend.</p>`;
+  }
   if (!result.ok) return `${banner}<p class="status status-error">The council giving report could not be read from Connect: ${e(result.message)} Nothing here is a real $0.</p>`;
   const data = result.data;
   const g = lensBlock(data, lens);
@@ -364,7 +490,7 @@ export function renderCouncilReportPage({ result, params, today, status, canEmai
     ? `<div class="panel panel-spaced"><div class="empty-note">${g.fund_count === 0 ? `No funds are mapped to ${e(g.label)} yet. Give each fund a category in Connect’s Giving settings.` : `No ${e(g.label)} giving recorded for ${e(data.period_label)} yet.`}</div></div>`
     : mode === 'narrative' ? narrative(data, g, lens) : dashboard(data, g, ctx);
   if (print) return `${head}${body}${otherCategoriesSummary(data, lens)}`;
-  return `${banner}${controls(data, ctx, periods)}${head}${elseStrip(data, ctx)}${body}
+  return `${banner}${controls(data, ctx, periods, thisYear)}${head}${elseStrip(data, ctx)}${body}
     <p class="muted-line">Print prints this view plus a one-page summary of the other categories.</p>
     ${canEmail && (g.given_ytd_cents || 0) > 0 ? emailForm(data, g, ctx) : ''}`;
 }
@@ -463,5 +589,13 @@ export const COUNCIL_REPORT_STYLES = `
     .cr-footnote { margin-top:26px; padding-top:12px; border-top:1px solid var(--line); font-size:11.5px; color:var(--muted); line-height:1.6; }
     .cr-print-summary h3 { font-size:14px; margin:14px 0 6px; }
     .cr-email textarea { width:100%; }
-    @media print { .cr-print-summary { page-break-before:always; } .cr-navy { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+    .cr-analysis-card .cr-kpis { margin:12px 0 14px; }
+    .cr-share { min-width:180px; }
+    .cr-share i { display:block; height:12px; background:#EEF0F4; border-radius:3px; overflow:hidden; }
+    .cr-share b { display:block; height:100%; background:#2E7EA6; }
+    .cr-share span { display:block; font-size:11.5px; color:var(--muted); margin-top:2px; }
+    .cr-related ul { list-style:none; margin:8px 0 0; padding:0; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px 18px; }
+    .cr-related li a { font-weight:600; }
+    .cr-related li span { display:block; font-size:13px; color:var(--muted); }
+    @media print { .cr-print-summary { page-break-before:always; } .cr-navy, .cr-chart, .cr-share { -webkit-print-color-adjust:exact; print-color-adjust:exact; } .cr-analysis-card { page-break-inside:avoid; } }
 `;

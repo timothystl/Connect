@@ -64,5 +64,16 @@ describe('connect.finance-budget-builder.v1', () => {
     expect((await call('?target_year=2027')).status).toBe(200);
     expect((await call('?target_year=x')).status).toBe(400);
     expect((await call('?target_year=2027', 'bad')).status).toBe(401);
+    expect((await call('?target_year=2027&base_year=2027')).status).toBe(400);
+  });
+
+  it('builds from an earlier base year when asked', async () => {
+    const db = makeDb();
+    seed(db);
+    const b = await buildFinanceBudgetBuilderV1(db, { targetYear: 2027, baseYear: 2025, now: new Date(2026, 8, 20) });
+    expect(b).toMatchObject({ targetYear: 2027, baseYear: 2025, priorYear: 2024, prorated: false });
+    const by = Object.fromEntries(b.lines.map((l) => [l.category, l]));
+    expect(by['Income:Offerings']).toMatchObject({ baseActualCents: 91845000, baseBudgetCents: 96000000, projectedCents: 91845000 });
+    expect(by['Expenses:Utilities']).toMatchObject({ projectedCents: 8390000, projectedOverridden: false });
   });
 });
