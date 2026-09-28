@@ -2220,7 +2220,7 @@ function renderPvGiving(filterYear) {
   var rows = entries.length ? entries.map(function(e){
     var canDel = !e.batch_closed;
     var batchCell = isFinUser
-      ? '<button onclick="event.stopPropagation();goToBatch('+e.batch_id+')" style="background:none;border:none;color:var(--sky-steel);cursor:pointer;font-size:12px;padding:0;font-weight:600;" title="'+esc(e.batch_description||'')+'">Batch '+e.batch_id+'</button>'
+      ? '<button onclick="event.stopPropagation();ensureExtLoaded(function(){goToBatch('+e.batch_id+');})" style="background:none;border:none;color:var(--sky-steel);cursor:pointer;font-size:12px;padding:0;font-weight:600;" title="'+esc(e.batch_description||'')+'">Batch '+e.batch_id+'</button>'
       : '<span style="font-size:12px;color:var(--warm-gray);">Batch '+e.batch_id+'</span>';
     return '<tr style="cursor:pointer;" onclick="openEditGiftModal('+e.id+',\''+filterYear+'\')">'
       + '<td style="padding:6px 8px;white-space:nowrap;font-size:12px;">'+(e.contribution_date||'—')+'</td>'
