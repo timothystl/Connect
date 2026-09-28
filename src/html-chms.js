@@ -245,8 +245,8 @@ self.addEventListener('fetch', function(event) {
 // app-core.js is therefore cut in two along the role line:
 //   app-member.js  core + people + households  — everything a member session can reach
 //   app-staff.js   settings + dashboard + register — the rest of the old app-core
-// A member is served app-member.js alone; every other role is served member + staff + ext, in
-// that order, which is the same total payload as before, just as three files instead of two.
+// A member is served app-member.js alone; every other role is served member + staff. app-ext.js
+// (below) is fetched lazily by every role, the first time one of its tabs is opened.
 //
 // ORDER: people/households now parse before settings/dashboard/register, where they used to
 // come after. That is safe because none of the six modules calls another module's function at
@@ -256,6 +256,12 @@ self.addEventListener('fetch', function(event) {
 // test/member-bundle.test.js, which also asserts the two halves still add up to app-core.
 const APP_MEMBER_JS_RAW = JS_CORE + JS_PEOPLE + JS_HOUSEHOLDS;
 const APP_STAFF_JS_RAW = JS_SETTINGS + JS_DASHBOARD + JS_REGISTER;
+// ── app-ext.js: loaded lazily for every role ──────────────────────────────────────────────
+// Giving, Reports, Export/Import, Attendance, Tuition Aid and Volunteers. No role lands on any of
+// these tabs, so this is not in the shell's script tags at all; js-core's ensureExtLoaded()
+// fetches it on the first open of one of them (or of Finance, which reuses its helpers). See
+// that function for every entry point. Home's attendance card only needs attSundayMap() and
+// attSaveSunday(), which live in js-dashboard.js (app-staff.js) for that reason.
 const APP_EXT_JS_RAW = JS_GIVING + JS_REPORTS + JS_EXPORT_IMPORT + JS_ATTENDANCE + JS_TUITION_AID + JS_VOLUNTEERS;
 const stripScriptTags = (s) => s.replace(/^<script>\n/, '').replace(/<\/script>\n$/, '');
 export const CHMS_APP_MEMBER_JS = stripScriptTags(APP_MEMBER_JS_RAW);
@@ -334,12 +340,12 @@ const CHMS_SHELL = HTML_HEAD_LINKED
 // the DOM finishes parsing (they're listener registrations; js-core's actual boot work waits for
 // the `load` event, which fires after every deferred script has already executed), and the tags
 // already sit at the very end of the document. It lets the browser keep parsing/painting while
-// the bundle downloads instead of blocking on it, and keeps execution order (member, staff, ext)
+// the bundle downloads instead of blocking on it, and keeps execution order (member, then staff)
 // exactly as today — deferred scripts run in source order, same as plain ones would have.
 const scriptTag = (name) => `<script src="/admin/${name}.js?v=${DEPLOY_VERSION}" defer></script>\n`;
 export function chmsHtmlForRole(role) {
   // A member gets the directory bundle only. If an admin has granted them the Reports tab,
-  // js-core lazy-loads the other two on first open (ensureFullAppLoaded).
+  // js-core lazy-loads the other two on first open (ensureExtLoaded).
   //
   // Fail SAFE, not small: any role this doesn't recognize — including a null/undefined role
   // from a future caller — gets the full set. Under-serving scripts to a staff account would
@@ -347,9 +353,12 @@ export function chmsHtmlForRole(role) {
   //
   // P25-F: the document itself never closed </body></html> — harmless (browsers recover), but
   // not to spec, and it's what the served bytes should actually say.
+  //
+  // app-ext.js is in nobody's eager tags: js-core fetches it the first time a tab that needs it
+  // is opened (ensureExtLoaded), the same way it fetches app-finance.js.
   const scripts = role === 'member'
     ? scriptTag('app-member')
-    : scriptTag('app-member') + scriptTag('app-staff') + scriptTag('app-ext');
+    : scriptTag('app-member') + scriptTag('app-staff');
   return CHMS_SHELL + scripts + '</body>\n</html>\n';
 }
 // Full-access shell. Kept as an export because the test suite and the div-balance scans read it

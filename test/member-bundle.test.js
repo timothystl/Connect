@@ -47,7 +47,7 @@ function fakeEl(id) {
  * Build a context and run the given bundles in the order the shell emits them.
  * Records every script the app asks the browser to load, so the lazy path is observable.
  */
-function runBundles(bundles) {
+function runBundles(bundles, { serve = null, fail = [] } = {}) {
   const store = {};
   const injected = [];
   const ctx = {
@@ -84,10 +84,17 @@ function runBundles(bundles) {
   ctx.globalThis = ctx;
   // Appending a <script> is how both lazy loaders pull code in. Record the src and resolve, so
   // a test can assert WHICH bundles a member is sent to fetch without a real network.
+  // With `serve`, the requested bundle's code is actually run before onload, as a browser would;
+  // a path listed in `fail` fires onerror instead.
   ctx.document.body.appendChild = function (el) {
     if (el && el.tagName === 'SCRIPT' && el.src) {
       injected.push(el.src);
-      setTimeout(() => { if (typeof el.onload === 'function') el.onload(); }, 0);
+      const path = el.src.split('?')[0];
+      setTimeout(() => {
+        if (fail.includes(path)) { if (typeof el.onerror === 'function') el.onerror(); return; }
+        if (serve && serve[path]) vm.runInContext(serve[path], ctx, { filename: path });
+        if (typeof el.onload === 'function') el.onload();
+      }, 0);
     }
     return el;
   };
@@ -339,6 +346,157 @@ describe('P25-E: Finance split out of app-ext.js along the permission line', () 
   });
 });
 
+describe('app-ext.js is lazy for every role', () => {
+  const SERVE = {
+    '/admin/app-staff.js': CHMS_APP_STAFF_JS,
+    '/admin/app-ext.js': CHMS_APP_EXT_JS,
+    '/admin/app-finance.js': CHMS_APP_FINANCE_JS,
+  };
+  // What a non-member role is served eagerly now: member + staff, no ext.
+  const staffCtx = (opts) => runBundles([
+    ['app-member.js', CHMS_APP_MEMBER_JS],
+    ['app-staff.js', CHMS_APP_STAFF_JS],
+  ], { serve: SERVE, ...opts });
+  const names = (ctx) => ctx.__injected.map((s) => s.split('?')[0]);
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+  const activate = (ctx, tab) => ctx.document.getElementById('tab-' + tab).classList.add('active');
+
+  it('is not needed to land on Home, attendance entry included', async () => {
+    const ctx = staffCtx();
+    ctx.applyRoleUI('admin', '', null);
+    expect(() => ctx.showTab('home')).not.toThrow();
+    await tick();
+    expect(names(ctx)).toEqual([]);
+    // Home's attendance card checks for these before rendering its entry form.
+    expect(typeof ctx.attSaveSunday).toBe('function');
+    expect(typeof ctx.attSundayMap).toBe('function');
+    expect(typeof ctx.initReports, 'app-ext.js code is in the eager bundles').toBe('undefined');
+  });
+
+  for (const tab of ['giving', 'attendance', 'reports', 'tuitionaid', 'volunteers', 'import']) {
+    it('fetches app-ext.js (only) the first time ' + tab + ' is opened', async () => {
+      const ctx = staffCtx();
+      ctx.applyRoleUI('admin', '', null);
+      ctx.showTab(tab);
+      await tick();
+      expect(names(ctx)).toEqual(['/admin/app-ext.js']);
+      expect(typeof ctx.initReports).toBe('function');
+    });
+  }
+
+  it('runs the tab\'s own load once the bundle has arrived', async () => {
+    // A later declaration in the same script wins, so this records the call showTab defers.
+    const ctx = staffCtx({ serve: { ...SERVE, '/admin/app-ext.js': CHMS_APP_EXT_JS + '\nvar __seen = []; function givSetView(v) { __seen.push(v); }' } });
+    ctx.applyRoleUI('admin', '', null);
+    activate(ctx, 'giving');
+    ctx.showTab('giving');
+    expect(ctx.__seen).toBeUndefined(); // nothing ran before the bundle arrived
+    await tick();
+    expect(ctx.__seen).toEqual([ctx._givView]);
+  });
+
+  it('skips the deferred load when the user has already left the tab', async () => {
+    const ctx = staffCtx({ serve: { ...SERVE, '/admin/app-ext.js': CHMS_APP_EXT_JS + '\nvar __extLoadCalls = 0; function loadTuitionAid() { __extLoadCalls++; }' } });
+    ctx.applyRoleUI('admin', '', null);
+    ctx.showTab('tuitionaid'); // panel never marked active in this harness = user moved on
+    await tick();
+    expect(ctx.__extLoadCalls).toBe(0);
+  });
+
+  it('asks once, across every tab that needs it', async () => {
+    const ctx = staffCtx();
+    ctx.applyRoleUI('admin', '', null);
+    for (const tab of ['giving', 'attendance', 'reports', 'giving', 'volunteers']) ctx.showTab(tab);
+    await tick();
+    expect(names(ctx)).toEqual(['/admin/app-ext.js']);
+  });
+
+  it('loads Register at once and fetches app-ext.js for its People prompt', async () => {
+    const ctx = staffCtx();
+    ctx.applyRoleUI('admin', '', null);
+    let registerLoaded = false;
+    ctx.loadRegister = () => { registerLoaded = true; };
+    ctx.showTab('register');
+    expect(registerLoaded).toBe(true);
+    await tick();
+    expect(names(ctx)).toEqual(['/admin/app-ext.js']);
+    expect(typeof ctx.openRegFromPeoplePrompt).toBe('function');
+  });
+
+  it('loads Settings at once and fetches app-ext.js for its exports and imports', async () => {
+    const ctx = staffCtx();
+    ctx.applyRoleUI('admin', '', null);
+    let settingsLoaded = false;
+    ctx.loadSettings = () => { settingsLoaded = true; };
+    ctx.showTab('settings');
+    expect(settingsLoaded).toBe(true);
+    await tick();
+    expect(names(ctx)).toEqual(['/admin/app-ext.js']);
+    expect(typeof ctx.exportPeople).toBe('function');
+  });
+
+  it('Finance fetches app-ext.js first, since js-finance.js reuses its helpers', async () => {
+    const ctx = staffCtx();
+    ctx.applyRoleUI('finance', '', { finance: true, staff: false, register: false, reports: true });
+    ctx.showTab('finance');
+    await tick();
+    expect(names(ctx)).toEqual(['/admin/app-ext.js', '/admin/app-finance.js']);
+    expect(typeof ctx.loadFinance).toBe('function');
+  });
+
+  it('People\'s "go to batch" link waits for the Giving code', () => {
+    const people = CHMS_APP_MEMBER_JS;
+    expect(people).toContain('ensureExtLoaded(function(){goToBatch(');
+    expect(people).not.toMatch(/[;"]goToBatch\(/);
+  });
+
+  it('the eager bundles reach into app-ext.js only at the reviewed call sites', () => {
+    // Every name below is either called inside an ensureExtLoaded() callback (showTab, the boot
+    // Giving deep links, People's batch link), or in the Giving tab's letter-template preview
+    // (js-settings.js), which can only be clicked once Giving has loaded the bundle. A NEW reference here is a potential
+    // ReferenceError for a staff account that has not opened one of those tabs yet: route it
+    // through ensureExtLoaded() (or move the helper out of app-ext.js), then add it here.
+    const defs = (src) => new Set([...src.matchAll(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)|^(?:var|let|const)\s+([A-Za-z_$][\w$]*)/gm)]
+      .map((m) => m[1] || m[2]));
+    const eager = (CHMS_APP_MEMBER_JS + '\n' + CHMS_APP_STAFF_JS)
+      .split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+    const used = [...defs(CHMS_APP_EXT_JS)]
+      .filter((n) => new RegExp('(?<![\\w$.])' + n.replace(/\$/g, '\\$') + '(?![\\w$])').test(eager))
+      .sort();
+    expect(used).toEqual([
+      '_givView', 'givOffSetPane', 'givSetView', 'goToBatch', 'initReports',
+      'letterheadImgHtml', 'loadAttendance', 'loadTuitionAid', 'renderLetterHTML',
+      'volLoadEvents', 'volLoadMinistryRoles', 'volLoadSignups', 'volLoadTemplates',
+    ]);
+  });
+
+  it('reports a failed load and retries on the next open', async () => {
+    const ctx = staffCtx({ fail: ['/admin/app-ext.js'] });
+    ctx.applyRoleUI('admin', '', null);
+    ctx.showTab('giving');
+    await tick();
+    const banner = ctx.document.getElementById('error-boundary');
+    expect(banner.innerHTML).toContain('Could not load that section');
+    ctx.showTab('giving');
+    await tick();
+    expect(names(ctx)).toEqual(['/admin/app-ext.js', '/admin/app-ext.js']);
+  });
+
+  it('a failed app-ext.js load does not wedge the Finance loader', async () => {
+    const failing = ['/admin/app-ext.js'];
+    const ctx = staffCtx({ fail: failing });
+    ctx.applyRoleUI('finance', '', { finance: true, staff: false, register: false, reports: true });
+    ctx.showTab('finance');
+    await tick();
+    expect(names(ctx)).toEqual(['/admin/app-ext.js']);
+    failing.length = 0; // the connection comes back
+    ctx.showTab('finance');
+    await tick();
+    expect(names(ctx)).toEqual(['/admin/app-ext.js', '/admin/app-ext.js', '/admin/app-finance.js']);
+    expect(typeof ctx.loadFinance).toBe('function');
+  });
+});
+
 describe('the shell decides, because the cached assets cannot', () => {
   const tags = (h) => (h.match(/app-[a-z]+\.js/g) || []);
 
@@ -346,9 +504,9 @@ describe('the shell decides, because the cached assets cannot', () => {
     expect(tags(chmsHtmlForRole('member'))).toEqual(['app-member.js']);
   });
 
-  it('sends every other role all three, in load order', () => {
+  it('sends every other role member + staff, in load order', () => {
     for (const role of ['admin', 'finance', 'staff', 'council']) {
-      expect(tags(chmsHtmlForRole(role)), role).toEqual(['app-member.js', 'app-staff.js', 'app-ext.js']);
+      expect(tags(chmsHtmlForRole(role)), role).toEqual(['app-member.js', 'app-staff.js']);
     }
   });
 
@@ -356,8 +514,13 @@ describe('the shell decides, because the cached assets cannot', () => {
     // Under-serving scripts to a real user breaks their app; over-serving to a member costs
     // bytes. An unknown role must land on the harmless side.
     for (const role of [null, undefined, '', 'future-role']) {
-      expect(tags(chmsHtmlForRole(role)), String(role)).toEqual(
-        ['app-member.js', 'app-staff.js', 'app-ext.js']);
+      expect(tags(chmsHtmlForRole(role)), String(role)).toEqual(['app-member.js', 'app-staff.js']);
+    }
+  });
+
+  it('never puts app-ext.js in the eager script tags', () => {
+    for (const role of ['admin', 'finance', 'staff', 'council', 'volunteer', 'member', null, 'future-role']) {
+      expect(chmsHtmlForRole(role), String(role)).not.toMatch(/app-ext\.js/);
     }
   });
 

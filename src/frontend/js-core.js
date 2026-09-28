@@ -4,7 +4,7 @@
 // version bump
 // automatically invalidates the long-lived browser cache on those files, with nowhere else that
 // needs updating in step.
-export const DEPLOY_VERSION = '0.1.0-alpha.4';
+export const DEPLOY_VERSION = '0.1.0-alpha.5';
 
 export const JS_CORE = String.raw`<script>
 // ── DEPLOY VERSION ───────────────────────────────────────────────────
@@ -445,11 +445,27 @@ function showTab(name, finSection) {
   if (name === 'people') loadPeople();
   if (name === 'households') loadHouseholds();
   if (name === 'organizations') loadOrganizations();
-  // Re-entering Giving lands on whichever sub-view was last open (Offerings on a fresh load),
-  // and givSetView is what actually loads that view's data — calling loadBatches() alone would
-  // refresh a panel that may not even be the one on screen.
-  if (name === 'giving') givSetView(_givView);
-  if (name === 'tuitionaid') loadTuitionAid();
+  // Register and Settings render from app-staff.js; only some of their buttons (Register's
+  // "register someone from People" prompt, Settings' exports and imports) call
+  // into app-ext.js. So these tabs load at once and app-ext.js is fetched alongside them.
+  if (name === 'register') { loadRegister(); ensureExtLoaded(function() {}); }
+  if (name === 'settings') { loadSettings(); ensureExtLoaded(function() {}); }
+  // Every tab below is served by app-ext.js, which is fetched on the first open of any of them
+  // (see ensureExtLoaded). The callback re-checks the active tab so a slow first load does not
+  // fetch data for a tab the user has already left.
+  if (EXT_TABS[name]) {
+    ensureExtLoaded(function() {
+      if (!isTabActive(name)) return;
+      // Re-entering Giving lands on whichever sub-view was last open (Offerings on a fresh
+      // load), and givSetView is what actually loads that view's data — calling loadBatches()
+      // alone would refresh a panel that may not even be the one on screen.
+      if (name === 'giving') givSetView(_givView);
+      if (name === 'tuitionaid') loadTuitionAid();
+      if (name === 'reports') initReports();
+      if (name === 'attendance') loadAttendance();
+      if (name === 'volunteers') { volLoadSignups(); volLoadMinistryRoles(); volLoadEvents(); volLoadTemplates(); }
+    });
+  }
   if (name === 'finance') {
     // 'overview' was retired when the Overview panel became Financial Health — a bookmark or a
     // browser-history entry from before that change would otherwise land on a section id no
@@ -473,13 +489,6 @@ function showTab(name, finSection) {
       if (typeof finShowSection === 'function') finShowSection(_finActiveNavId);
     });
   }
-  // ensureFullAppLoaded is a no-op for every role but member — see its definition. A member
-  // granted Reports has the tab markup already (the shell ships all tabs) but not the code.
-  if (name === 'reports') ensureFullAppLoaded(function() { initReports(); });
-  if (name === 'attendance') loadAttendance();
-  if (name === 'register') loadRegister();
-  if (name === 'settings') loadSettings();
-  if (name === 'volunteers') { volLoadSignups(); volLoadMinistryRoles(); volLoadEvents(); volLoadTemplates(); }
   if (name === 'scheduler') {
     ensureSchedulerLoaded(function() {
       // Set month label directly — bypasses all silent try/catch in schedInitScheduler.
@@ -492,24 +501,34 @@ function showTab(name, finSection) {
     });
   }
 }
-// ── Lazy-load the rest of the app (member sessions only) ────────────────────
-// A member session is served ONE script — /admin/app-member.js (core + people + households).
-// Every other role gets that plus app-staff.js and app-ext.js, so for them the code below never
-// runs: the guard is a typeof check on initReports, which for them is already defined.
+// ── Lazy-load app-ext.js (and, for a member, app-staff.js) ──────────────────
+// The shell sends a member one script (app-member.js: core + people + households) and every
+// other role two (plus app-staff.js: settings + dashboard + register). app-ext.js — Giving,
+// Reports, Export/Import, Attendance, Tuition Aid and Volunteers, ~640KB of source — is in
+// NO role's eager script tags. Most roles land on Home or People, so it is fetched once, the
+// first time one of its tabs is opened (a volunteer, who lands on Volunteers, fetches it right
+// away). Same pattern as app-finance.js and the Scheduler embed below.
 //
-// The one member surface that lives outside the member bundle is the Reports tab, which an
-// admin can grant to the member role (DEFAULT_ROLE_PERMISSIONS has it at 'none', so this is the
-// exception, not the common path). Rather than fold ~180KB of reports+attendance code into
-// every member's first load for a permission most of them will never have, fetch it on the
-// first open.
+// Everything outside app-ext.js that calls into it goes through this loader:
+//   - showTab() for the tabs in EXT_TABS, plus Register and Settings, whose own code is in
+//     app-staff.js but some of whose buttons (exports, imports, "register from People") are
+//     in app-ext.js;
+//   - ensureFinanceModuleLoaded(), since js-finance.js reuses Giving/Reports/Attendance helpers
+//     (givSetView, renderGroupedBarChart, MONTH_NAMES, ...);
+//   - the boot deep link to a Giving pane, and People's "go to batch" link.
+// Home's attendance entry card needs attSundayMap()/attSaveSunday() on first paint, so those two
+// live in js-dashboard.js (app-staff.js) rather than js-attendance.js.
 //
-// Both files are loaded, in the same order the non-member shell emits them, because that is the
-// only combination that has ever been exercised: js-reports calls into js-attendance
-// (_buildAttYoYHtml, _chartResizeHandle, MONTH_NAMES) and reaches for js-settings/js-dashboard
-// helpers in places, so loading ext alone would swap one ReferenceError for another. Loading
-// both lands the member on exactly the bundle set every other role already runs.
-var _fullAppLoadState = 0; // 0 = not loaded, 1 = in flight, 2 = ready
-var _fullAppWaiting = [];
+// A member missing app-staff.js too (Reports granted to the member role) gets both, staff
+// first: js-reports reaches for js-settings/js-dashboard helpers in places. typeof initReports
+// is the readiness check for app-ext.js, typeof loadSettings for app-staff.js — both names are
+// unique to their bundle.
+var EXT_TABS = { giving: 1, tuitionaid: 1, reports: 1, attendance: 1, volunteers: 1, import: 1 };
+var _extPromise = null; // the in-flight or finished load; reset on failure so a retry refetches
+function isTabActive(name) {
+  var p = document.getElementById('tab-' + name);
+  return !p || !p.classList || p.classList.contains('active');
+}
 function loadAppScript(src) {
   return new Promise(function(resolve, reject) {
     var s = document.createElement('script');
@@ -519,24 +538,29 @@ function loadAppScript(src) {
     document.body.appendChild(s);
   });
 }
-function ensureFullAppLoaded(cb) {
-  if (_fullAppLoadState === 2 || typeof initReports === 'function') { cb(); return; }
-  _fullAppWaiting.push(cb);
-  if (_fullAppLoadState === 1) return; // a load is already running; cb rides along
-  _fullAppLoadState = 1;
-  loadAppScript('/admin/app-staff.js?v=' + DEPLOY_VERSION)
-    .then(function() { return loadAppScript('/admin/app-ext.js?v=' + DEPLOY_VERSION); })
-    .then(function() {
-      _fullAppLoadState = 2;
-      var queued = _fullAppWaiting; _fullAppWaiting = [];
-      queued.forEach(function(fn) { try { fn(); } catch (e) { console.error(e); } });
-    })
-    .catch(function(e) {
-      console.error('App bundle load failed:', e);
-      _fullAppLoadState = 0;
-      _fullAppWaiting = [];
-      showErrorBanner('Could not load that section. Check your connection and try again.');
-    });
+// Resolves once app-ext.js has run; rejects (once, with the error banner shown) if it cannot load.
+function loadExtBundle() {
+  if (typeof initReports === 'function') return Promise.resolve();
+  if (!_extPromise) {
+    var staff = typeof loadSettings === 'function' ? Promise.resolve()
+      : loadAppScript('/admin/app-staff.js?v=' + DEPLOY_VERSION);
+    _extPromise = staff
+      .then(function() { return loadAppScript('/admin/app-ext.js?v=' + DEPLOY_VERSION); })
+      .catch(function(e) {
+        console.error('App bundle load failed:', e);
+        _extPromise = null;
+        showErrorBanner('Could not load that section. Check your connection and try again.');
+        throw e;
+      });
+  }
+  return _extPromise;
+}
+// Runs cb once app-ext.js is available — synchronously when it already is.
+function ensureExtLoaded(cb) {
+  if (typeof initReports === 'function') { cb(); return; }
+  loadExtBundle().then(function() {
+    try { cb(); } catch (e) { console.error(e); }
+  }, function() {}); // the failure is already reported by loadExtBundle
 }
 // ── Lazy-load the Finance module (P25-E) ────────────────────────────────────
 // js-finance.js is ~696KB of source and no longer ships in the shell's eager script tags for
@@ -553,7 +577,9 @@ function ensureFinanceModuleLoaded(cb) {
   _financeWaiting.push(cb);
   if (_financeLoadState === 1) return; // a load is already running; cb rides along
   _financeLoadState = 1;
-  loadAppScript('/admin/app-finance.js?v=' + DEPLOY_VERSION)
+  // js-finance.js calls into app-ext.js (see ensureExtLoaded), so that bundle goes first.
+  loadExtBundle()
+    .then(function() { return loadAppScript('/admin/app-finance.js?v=' + DEPLOY_VERSION); })
     .then(function() {
       _financeLoadState = 2;
       var queued = _financeWaiting; _financeWaiting = [];
@@ -772,13 +798,14 @@ window.addEventListener('load', function() {
     // The old standalone /admin/giving/stax-mockup/recurring page now redirects to
     // /?pane=recurring#giving (see connect-worker.js) — land straight on the Recurring pane
     // instead of Offerings' default Batches pane, so the redirect isn't a functional downgrade.
+    // Both run after showTab's own Giving load (same app-ext.js loader, callbacks in order).
     if (hashTab === 'giving' && /(?:^|[?&])pane=recurring(?:&|$)/.test(location.search)) {
-      givOffSetPane('recurring');
+      ensureExtLoaded(function() { givOffSetPane('recurring'); });
     }
     // Finance's Giving statements and nudges pages link here (?pane=letters|receipts|nudges#giving)
     // to prepare and send; givSetView still applies the same role checks as a click would.
     var commsPane = hashTab === 'giving' && /(?:^|[?&])pane=(letters|receipts|nudges)(?:&|$)/.exec(location.search);
-    if (commsPane && _userRole !== 'member') givSetView(commsPane[1]);
+    if (commsPane && _userRole !== 'member') ensureExtLoaded(function() { givSetView(commsPane[1]); });
   });
 });
 // ── ROLE UI ──────────────────────────────────────────────────────────────
