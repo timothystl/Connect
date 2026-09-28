@@ -9,7 +9,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const CONNECT_GIVING = 'https://connect.timothystl.org/';
 const LETTER_LABELS = { year_end: 'Year-end statement', midyear: 'Mid-year update', quarterly: 'Quarterly statement' };
-export const WHAT_IF_FIELDS = Object.freeze(['households', 'average', 'retention', 'new_households']);
+export const WHAT_IF_FIELDS = Object.freeze(['households', 'average', 'retention', 'new_households', 'new_ratio', 'gift_change']);
 
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 function money(cents) {
@@ -361,35 +361,75 @@ export function renderPledgesPage({ result, keep = {} }) {
 
 // ── Giving what-if ────────────────────────────────────────────────────────────────────────────
 
+// The starting values, each from Connect's household totals. Retention and the new-household
+// ratio fall back to fixed guesses (90%, 45%) only when there is no earlier year to measure;
+// `retentionMeasured`/`newRatioMeasured` say which happened, so the page can say so too.
 export function whatIfBaseline(h) {
   const households = h.t12_households || 0;
+  const retentionMeasured = !!h.two_years_ago_households;
+  const newRatioMeasured = !!h.last_year_avg_cents;
   return {
     households,
     average: households ? Math.round(h.t12_cents / households / 100) : 0,
-    retention: h.two_years_ago_households ? Math.round(h.retained_households / h.two_years_ago_households * 100) : 90,
+    retention: retentionMeasured ? Math.round(h.retained_households / h.two_years_ago_households * 100) : 90,
     new_households: h.new_last_year_households || 0,
-    newRatio: h.last_year_avg_cents ? Math.min(1.5, h.new_last_year_avg_cents / h.last_year_avg_cents) : 0.45,
+    newRatio: newRatioMeasured ? Math.min(1.5, h.new_last_year_avg_cents / h.last_year_avg_cents) : 0.45,
+    retentionMeasured,
+    newRatioMeasured,
   };
 }
 
-function readAssumption(params, key, fallback, { min, max }) {
+function readAssumption(params, key, fallback, { min, max, digits = 0 }) {
   const raw = params?.get(key);
   if (raw === null || raw === undefined || raw === '') return fallback;
   const n = Number(String(raw).replace(/[$,%\s]/g, ''));
-  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback;
+  const scale = 10 ** digits;
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n * scale) / scale)) : fallback;
 }
 
+// Returning households give the average gift, changed by `gift_change` percent (0 unless the
+// reader sets it: no growth or inflation is assumed). A new household gives `new_ratio` percent
+// of that same average in its first year.
 export function projectWhatIf(base, params) {
   const inputs = {
     households: readAssumption(params, 'households', base.households, { min: 0, max: 100000 }),
     average: readAssumption(params, 'average', base.average, { min: 0, max: 10000000 }),
     retention: readAssumption(params, 'retention', base.retention, { min: 0, max: 100 }),
     new_households: readAssumption(params, 'new_households', base.new_households, { min: 0, max: 100000 }),
+    new_ratio: readAssumption(params, 'new_ratio', Math.round(base.newRatio * 100), { min: 0, max: 150 }),
+    gift_change: readAssumption(params, 'gift_change', 0, { min: -100, max: 200, digits: 1 }),
   };
+  const averageCents = Math.round(inputs.average * (1 + inputs.gift_change / 100) * 100);
   const returning = Math.round(inputs.households * inputs.retention / 100);
-  const returningCents = returning * inputs.average * 100;
-  const newCents = Math.round(inputs.new_households * inputs.average * base.newRatio) * 100;
-  return { inputs, returning, returningCents, newCents, totalCents: returningCents + newCents };
+  const returningCents = returning * averageCents;
+  const newCents = Math.round(inputs.new_households * averageCents * inputs.new_ratio / 100);
+  return { inputs, averageCents, returning, returningCents, newCents, totalCents: returningCents + newCents };
+}
+
+// "How this is figured": every assumption in plain language, with the value Connect's records
+// gave for it, so a reader can see where each starting number came from.
+function whatIfMethod(a, base) {
+  const h = a.households;
+  const y1 = a.year - 1;
+  const y2 = a.year - 2;
+  const [, m, d] = a.as_of.split('-').map(Number);
+  const item = (title, text, value) => `<li><div><b>${e(title)}</b><p>${text}</p></div>${value ? `<span class="ga-method-value">${value}</span>` : ''}</li>`;
+  const fundText = fundKey(a) === 'all' ? 'Gifts to every fund count.' : e(scopeShort(a).trim());
+  return `<div class="panel panel-spaced ga-method"><h2>How this is figured</h2>
+    <p class="muted-line">Every starting value comes from Connect’s giving records; nothing on this page is saved or changes the budget.</p>
+    <ul>
+      ${item('Who counts', `A household is a Connect household, or one person with no household. Gifts from organizations (such as donor-advised funds) and anonymous gifts, like loose plate cash, are left out. ${fundText}`, '')}
+      ${item('Starting point', `The 12 months ending ${e(MONTH_NAMES[m - 1])} ${d}, ${a.year}: every household that gave at least once, and their average total for those 12 months.`, `${h.t12_households} households · ${money(base.average * 100)} average`)}
+      ${item('Households who keep giving', base.retentionMeasured
+    ? `Households that gave in both ${y2} and ${y1}, divided by households that gave in ${y2} (${h.retained_households} of ${h.two_years_ago_households}). Whole calendar years, so this year’s unfinished months do not skew it.`
+    : `There was no ${y2} giving to measure against, so 90% is assumed.`, `${base.retention}%`)}
+      ${item('New households', `Households that gave in ${y1} but not in ${y2}, used as the expected number of new households next year.`, String(base.new_households))}
+      ${item('New household’s first-year gift', base.newRatioMeasured
+    ? `The average ${y1} total of those new households (${money(h.new_last_year_avg_cents)}) divided by the average ${y1} total of every giving household (${money(h.last_year_avg_cents)}), capped at 150%.`
+    : `There was no ${y1} giving to measure, so 45% of the average gift is assumed.`, pct(base.newRatio))}
+      ${item('No growth built in', 'Returning households are assumed to give the same average as the last 12 months: no raise, no inflation. Use “Average gift change” to try one; it applies to new households’ gifts too.', '0% unless changed')}
+      ${item('The projection', `For calendar ${a.year + 1}: giving households × households who keep giving × average gift, plus new households × average gift × the new household’s share.`, '')}
+    </ul></div>`;
 }
 
 export function renderWhatIfPage({ result, params, keep = {} }) {
@@ -401,18 +441,20 @@ export function renderWhatIfPage({ result, params, keep = {} }) {
   const vsLast = p.totalCents - a.households.t12_cents;
   const fund = fundKey(a);
   const scope = fund === 'all' ? '' : ` for ${scopePhrase(a)}`;
-  const field = (key, label, note, suffix = '') => `<label class="ga-assume"><span><b>${label}</b><small>${note}</small></span>
-      <span class="ga-input">${suffix === '$' ? '<i>$</i>' : ''}<input type="number" name="${key}" value="${p.inputs[key]}" min="0"${key === 'retention' ? ' max="100"' : ''} step="1" inputmode="numeric">${suffix === '%' ? '<i>%</i>' : ''}</span></label>`;
+  const field = (key, label, note, suffix = '', { min = 0, max, step = 1 } = {}) => `<label class="ga-assume"><span><b>${label}</b><small>${note}</small></span>
+      <span class="ga-input">${suffix === '$' ? '<i>$</i>' : ''}<input type="number" name="${key}" value="${p.inputs[key]}" min="${min}"${max !== undefined ? ` max="${max}"` : ''} step="${step}" inputmode="${step === 1 && min >= 0 ? 'numeric' : 'decimal'}">${suffix === '%' ? '<i>%</i>' : ''}</span></label>`;
   return `${fundPicker(a, { page: 'what-if', hidden: keep })}
-    <p class="lede">Change the assumptions to see what ${nextYear} household giving${e(scope)} could look like. Nothing here changes the budget; the starting values come from Connect’s giving records. Organizations and anonymous plate cash are left out.</p>
+    <p class="lede">Change the assumptions to see what ${nextYear} household giving${e(scope)} could look like. Nothing here changes the budget; the starting values come from Connect’s giving records. Organizations and anonymous plate cash are left out. How each one is figured is below.</p>
     <div class="ga-two">
       <form method="GET" action="/" class="panel ga-assumptions">
         <input type="hidden" name="section" value="giving-analytics"><input type="hidden" name="page" value="what-if">${fund === 'general' ? '' : `<input type="hidden" name="fund" value="${e(fund)}">`}${keep.council ? '<input type="hidden" name="council" value="1">' : ''}
         <h2>Assumptions for ${nextYear}</h2>
         ${field('households', 'Giving households', `${base.households} gave in the last 12 months`)}
         ${field('average', 'Average annual gift', `${money(base.average * 100)} per household in the last 12 months`, '$')}
-        ${field('retention', 'Households who keep giving', `${base.retention}% of ${a.year - 2}’s households gave again in ${a.year - 1}`, '%')}
-        ${field('new_households', 'New giving households', `${base.new_households} in ${a.year - 1}; a new household gives about ${pct(base.newRatio)} of the average in its first year`)}
+        ${field('gift_change', 'Average gift change', 'Raise or lower every household’s gift; 0% assumes no growth or inflation', '%', { min: -100, max: 200, step: 0.1 })}
+        ${field('retention', 'Households who keep giving', base.retentionMeasured ? `${base.retention}% of ${a.year - 2}’s households gave again in ${a.year - 1}` : `No ${a.year - 2} giving to measure; 90% assumed`, '%', { max: 100 })}
+        ${field('new_households', 'New giving households', `${base.new_households} in ${a.year - 1}`)}
+        ${field('new_ratio', 'New household’s first-year gift', `As a share of the average gift; ${base.newRatioMeasured ? `${pct(base.newRatio)} in ${a.year - 1}` : '45% assumed'}`, '%', { max: 150 })}
         <div class="form-actions"><button type="submit">Recalculate</button><a class="ga-link-button is-outline" href="${href('what-if', { ...keep, fund })}">Reset to actual</a></div>
       </form>
       <div class="ga-projection">
@@ -421,12 +463,14 @@ export function renderWhatIfPage({ result, params, keep = {} }) {
         <p>${signedMoney(vsLast)} vs. the last 12 months (${money(a.households.t12_cents)})</p>
         <dl>
           <div><dt>Returning households</dt><dd>${p.returning}</dd></div>
+          <div><dt>Average gift used</dt><dd>${money(p.averageCents)}</dd></div>
           <div><dt>Giving from returning households</dt><dd>${money(p.returningCents)}</dd></div>
           <div><dt>Giving from new households</dt><dd>${money(p.newCents)}</dd></div>
           <div><dt>Change vs. last 12 months</dt><dd>${a.households.t12_cents ? `${vsLast >= 0 ? '+' : '−'}${Math.abs(vsLast / a.households.t12_cents * 100).toFixed(1)}%` : '—'}</dd></div>
         </dl>
       </div>
-    </div>`;
+    </div>
+    ${whatIfMethod(a, base)}`;
 }
 
 // ── Giving statements ─────────────────────────────────────────────────────────────────────────
@@ -540,6 +584,10 @@ export const GIVING_ANALYTICS_STYLES = `
     .ga-projection dl div { display:flex; justify-content:space-between; padding:8px 0; }
     .ga-projection dt { color:#DCE3EE; }
     .ga-projection dd { margin:0; font-weight:600; }
+    .ga-method ul { list-style:none; margin:10px 0 0; padding:0; }
+    .ga-method li { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:10px 0; border-bottom:1px solid #EEF0F4; }
+    .ga-method li p { margin:2px 0 0; color:#4B5563; font-size:13.5px; }
+    .ga-method-value { flex:none; font-weight:700; color:var(--navy); white-space:nowrap; text-align:right; }
     .ga-link-button { display:inline-block; padding:9px 16px; border-radius:8px; background:var(--navy); color:#fff; font-size:14px; font-weight:600; text-decoration:none; white-space:nowrap; }
     .ga-link-button.is-outline { background:#fff; color:var(--navy); border:1px solid var(--navy); }
     .ga-assumptions .form-actions { align-items:center; }

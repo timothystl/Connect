@@ -199,6 +199,45 @@ describe('Giving analytics pages (Finance v3)', () => {
     expect(calls.every((c) => c.body === null)).toBe(true);
   });
 
+  it('lets the new-household ratio and an average gift change be set, and explains every assumption', () => {
+    const base = whatIfBaseline(TOTALS.households);
+    // 1,040 ÷ 2,310 = 45%; retention 376 of 400 = 94%.
+    expect(Math.round(base.newRatio * 100)).toBe(45);
+    expect(base).toMatchObject({ retentionMeasured: true, newRatioMeasured: true });
+    const plain = projectWhatIf(base, new URLSearchParams('households=400&average=2400&retention=95&new_households=30'));
+    expect(plain.inputs).toMatchObject({ new_ratio: 45, gift_change: 0 });
+    expect(plain.newCents).toBe(Math.round(30 * 240000 * 0.45));
+    const changed = projectWhatIf(base, new URLSearchParams('households=400&average=2400&retention=95&new_households=30&new_ratio=60&gift_change=2.5'));
+    expect(changed.averageCents).toBe(246000);
+    expect(changed.returningCents).toBe(380 * 246000);
+    expect(changed.newCents).toBe(Math.round(30 * 246000 * 0.6));
+    expect(changed.totalCents).toBe(changed.returningCents + changed.newCents);
+    expect(projectWhatIf(base, new URLSearchParams('gift_change=-500&new_ratio=900')).inputs).toMatchObject({ gift_change: -100, new_ratio: 150 });
+    // With no earlier year to measure, the fixed guesses are used and flagged.
+    const empty = whatIfBaseline({ t12_households: 0, t12_cents: 0 });
+    expect(empty).toMatchObject({ retention: 90, newRatio: 0.45, retentionMeasured: false, newRatioMeasured: false });
+  });
+
+  it('shows how the what-if is figured, with the values Connect’s records gave', async () => {
+    const { env } = makeEnv();
+    const html = await (await get(env, '&page=what-if&new_ratio=60&gift_change=3')).text();
+    expect(html).toContain('How this is figured');
+    expect(html).toContain('A household is a Connect household, or one person with no household.');
+    expect(html).toContain('Gifts to every fund count.');
+    expect(html).toContain('The 12 months ending September 20, 2026');
+    expect(html).toContain('<span class="ga-method-value">398 households · $2,308 average</span>');
+    expect(html).toContain('Households that gave in both 2024 and 2025, divided by households that gave in 2024 (376 of 400).');
+    expect(html).toContain('<span class="ga-method-value">94%</span>');
+    expect(html).toContain('Households that gave in 2025 but not in 2024');
+    expect(html).toContain('($1,040) divided by the average 2025 total of every giving household ($2,310), capped at 150%.');
+    expect(html).toContain('<span class="ga-method-value">45%</span>');
+    expect(html).toContain('no raise, no inflation');
+    expect(html).toContain('For calendar 2027');
+    expect(html).toContain('name="new_ratio" value="60"');
+    expect(html).toContain('name="gift_change" value="3"');
+    expect(html).toContain('<dt>Average gift used</dt><dd>$2,377</dd>');
+  });
+
   it('links statements to Connect, and hides named pages for council', async () => {
     const { env } = makeEnv();
     const html = await (await get(env, '&page=statements')).text();
