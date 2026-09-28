@@ -2,7 +2,9 @@
 import { json, getAuthInfo } from './auth.js';
 import { isoWeekKey, LETTER_TYPES, mergeLetterRecipients, computeReceiptQueue, computeGivingPlateaus, fetchGivingPlateauRows, plateauWeeksElapsed, computeDepositTotals, batchDepositStatus, batchDepositStatusFromCounts } from './api-utils.js';
 import { ensureGivingYearRollups } from './giving-rollups.js';
-import { staxRequest, staxMockupConfigured, buildScheduleRule, cents, amountStr, todayIso, loadEstimatedFeeRate, validFeeRate, FEE_RATE_SETTING_KEY, MAX_FEE_RATE } from './stax-giving-mockup.js';
+import { applyGiftReduction } from './giving-gift-corrections.js';
+import { linkOnlineGift, ignoreOnlineGift, cancelRecurringSchedule, updateRecurringSchedule } from './giving-online.js';
+import { staxRequest, staxMockupConfigured, loadEstimatedFeeRate, validFeeRate, FEE_RATE_SETTING_KEY, MAX_FEE_RATE } from './stax-giving-mockup.js';
 
 // Shared by the desktop `giving/quick-entry` route and the mobile Giving quick-entry screen —
 // one insert path so the two can't drift on the find-or-create-batch logic (the SW17 lesson:
@@ -324,13 +326,16 @@ const entryDelMatch = seg.match(/^giving\/entries\/(\d+)$/);
 if (entryDelMatch && method === 'PUT') {
   const eid = parseInt(entryDelMatch[1]);
   const entry = await db.prepare(
-    `SELECT ge.id, gb.closed FROM giving_entries ge JOIN giving_batches gb ON ge.batch_id=gb.id WHERE ge.id=?`
+    `SELECT ge.id, ge.amount, ge.voided_at, ge.refunded_cents, gb.closed FROM giving_entries ge JOIN giving_batches gb ON ge.batch_id=gb.id WHERE ge.id=?`
   ).bind(eid).first();
   if (!entry) return json({ error: 'Not found' }, 404);
   if (entry.closed) return json({ error: 'Batch is closed.' }, 409);
   let b; try { b = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
   const amtCents = Math.round(parseFloat(b.amount || 0) * 100);
   if (amtCents <= 0) return json({ error: 'Amount must be positive' }, 400);
+  // A voided/refunded gift's amount is the net kept (src/giving-gift-corrections.js); retyping it
+  // here would silently undo the refund.
+  if ((entry.voided_at || entry.refunded_cents > 0) && amtCents !== entry.amount) return json({ error: 'This gift was voided or refunded; its amount can no longer be changed.' }, 409);
   await db.prepare(
     `UPDATE giving_entries SET fund_id=?,amount=?,method=?,check_number=?,notes=?,contribution_date=? WHERE id=?`
   ).bind(parseInt(b.fund_id), amtCents, b.method||'cash', b.check_number||'', b.notes||'', b.date||'', eid).run();
@@ -362,14 +367,14 @@ const entryVoidRefundMatch = seg.match(/^giving\/entries\/(\d+)\/void-or-refund$
 if (entryVoidRefundMatch && method === 'POST') {
   const eid = parseInt(entryVoidRefundMatch[1]);
   const entry = await db.prepare(
-    `SELECT id, amount, processor, external_txn_id, refunded_cents, voided_at FROM giving_entries WHERE id=?`
+    `SELECT id, amount, processor, external_txn_id, refunded_cents, voided_at, original_amount_cents FROM giving_entries WHERE id=?`
   ).bind(eid).first();
   if (!entry) return json({ error: 'Not found' }, 404);
   if (entry.processor !== 'stax' || !entry.external_txn_id) {
     return json({ error: 'Only Stax gifts can be refunded from here — refund this one where it was recorded.' }, 400);
   }
   if (entry.voided_at) return json({ error: 'This gift was already voided.' }, 409);
-  if (entry.refunded_cents >= entry.amount) return json({ error: 'This gift was already refunded.' }, 409);
+  if (entry.amount <= 0) return json({ error: 'This gift was already refunded.' }, 409);
   if (!staxMockupConfigured(env)) return json({ error: 'Stax is not configured in this environment.' }, 502);
   let res;
   try {
@@ -380,14 +385,18 @@ if (entryVoidRefundMatch && method === 'POST') {
   if (!res.ok) {
     return json({ error: res.data?.message || res.data?.error || `Stax returned HTTP ${res.status}.` }, 502);
   }
+  // applyGiftReduction nets `amount` (0 when voided) and keeps the first-recorded amount, so the
+  // void or refund comes out of every total and statement (see src/giving-gift-corrections.js).
+  const auth = await getAuthInfo(req, env).catch(() => null);
+  const by = String(auth?.username || auth?.email || '');
   if (res.data?.is_voided === true) {
-    await db.prepare(`UPDATE giving_entries SET voided_at=datetime('now') WHERE id=?`).bind(eid).run();
+    await applyGiftReduction(db, entry, { voided: true, reason: 'Voided through Stax', email: by, action: 'voided' });
     return json({ ok: true, voided: true });
   }
-  // Refund path — we issued a full void-or-refund (no partial `total`), so the entry's own
-  // amount is what was refunded regardless of exactly how Stax's response shapes total_refunded.
-  await db.prepare(`UPDATE giving_entries SET refunded_cents=? WHERE id=?`).bind(entry.amount, eid).run();
-  return json({ ok: true, voided: false, refunded_cents: entry.amount });
+  // Refund path — we issued a full void-or-refund (no partial `total`), so what is left on the
+  // gift is what was refunded regardless of exactly how Stax's response shapes total_refunded.
+  const out = await applyGiftReduction(db, entry, { voided: false, refundCents: entry.amount, reason: 'Refunded through Stax', email: by, action: 'refunded' });
+  return json({ ok: true, voided: false, refunded_cents: out.refunded_cents });
 }
 
 // ── Quick Gift Entry (auto-creates open batch for the month) ─────
@@ -975,38 +984,17 @@ if (seg === 'giving/stax-mockup/fee-rate' && method === 'PUT') {
 const staxQueueLinkMatch = seg.match(/^giving\/stax-mockup\/queue\/(\d+)\/link$/);
 if (staxQueueLinkMatch && method === 'POST') {
   if (!isFinance) return json({ error: 'Access denied' }, 403);
-  const queueId = parseInt(staxQueueLinkMatch[1]);
   let b; try { b = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
-  const personId = parseInt(b.person_id);
-  if (!Number.isInteger(personId)) return json({ error: 'person_id required' }, 400);
-  const row = await db.prepare(
-    `SELECT id, giving_entry_id, status FROM giving_stax_unmatched WHERE id=?`
-  ).bind(queueId).first();
-  if (!row) return json({ error: 'Not found' }, 404);
-  if (row.status !== 'open') return json({ error: 'This gift has already been reviewed.' }, 409);
-  const person = await db.prepare(`SELECT id FROM people WHERE id=? AND status='active'`).bind(personId).first();
-  if (!person) return json({ error: 'That person could not be found.' }, 404);
   const auth = await getAuthInfo(req, env).catch(() => null);
-  await db.batch([
-    db.prepare(`UPDATE giving_entries SET person_id=? WHERE id=?`).bind(personId, row.giving_entry_id),
-    db.prepare(
-      `UPDATE giving_stax_unmatched SET status='linked', linked_person_id=?, linked_by=?, linked_at=datetime('now') WHERE id=?`
-    ).bind(personId, auth?.username || '', queueId),
-  ]);
-  return json({ ok: true });
+  const r = await linkOnlineGift(db, parseInt(staxQueueLinkMatch[1]), parseInt(b.person_id), auth?.username || '');
+  return r.error ? json({ error: r.error }, r.status) : json({ ok: true });
 }
 const staxQueueIgnoreMatch = seg.match(/^giving\/stax-mockup\/queue\/(\d+)\/ignore$/);
 if (staxQueueIgnoreMatch && method === 'POST') {
   if (!isFinance) return json({ error: 'Access denied' }, 403);
-  const queueId = parseInt(staxQueueIgnoreMatch[1]);
-  const row = await db.prepare(`SELECT id, status FROM giving_stax_unmatched WHERE id=?`).bind(queueId).first();
-  if (!row) return json({ error: 'Not found' }, 404);
-  if (row.status !== 'open') return json({ error: 'This gift has already been reviewed.' }, 409);
   const auth = await getAuthInfo(req, env).catch(() => null);
-  await db.prepare(
-    `UPDATE giving_stax_unmatched SET status='ignored', linked_by=?, linked_at=datetime('now') WHERE id=?`
-  ).bind(auth?.username || '', queueId).run();
-  return json({ ok: true });
+  const r = await ignoreOnlineGift(db, parseInt(staxQueueIgnoreMatch[1]), auth?.username || '');
+  return r.error ? json({ error: r.error }, r.status) : json({ ok: true });
 }
 
 // ── Stax Giving MOCKUP: recurring schedules — list and cancel ──────────────
@@ -1035,19 +1023,9 @@ if (seg === 'giving/stax-mockup/recurring' && method === 'GET') {
 const staxRecurringCancelMatch = seg.match(/^giving\/stax-mockup\/recurring\/(\d+)\/cancel$/);
 if (staxRecurringCancelMatch && method === 'POST') {
   if (!isFinance) return json({ error: 'Access denied' }, 403);
-  const scheduleId = parseInt(staxRecurringCancelMatch[1]);
-  const row = await db.prepare(`SELECT id, status, stax_schedule_id FROM giving_stax_recurring_schedules WHERE id=?`).bind(scheduleId).first();
-  if (!row) return json({ error: 'Not found' }, 404);
-  if (row.status === 'cancelled') return json({ ok: true, already_cancelled: true });
-  let staxCancelled = false;
-  if (row.stax_schedule_id && staxMockupConfigured(env)) {
-    try {
-      const del = await staxRequest(env.STAX_SANDBOX_API_KEY, `/invoice/schedule/${encodeURIComponent(row.stax_schedule_id)}`, { method: 'DELETE' });
-      staxCancelled = del.ok;
-    } catch { /* stays false — reported to staff below, local row still gets cancelled */ }
-  }
-  await db.prepare(`UPDATE giving_stax_recurring_schedules SET status='cancelled' WHERE id=?`).bind(scheduleId).run();
-  return json({ ok: true, stax_cancelled: staxCancelled, had_stax_schedule: !!row.stax_schedule_id });
+  const r = await cancelRecurringSchedule(db, env, parseInt(staxRecurringCancelMatch[1]));
+  if (r.error) return json({ error: r.error === 'That recurring gift no longer exists.' ? 'Not found' : r.error }, r.status);
+  return json(r);
 }
 
 // Edit an active/pending schedule's fund, amount, or interval. The fund is purely local — it was
@@ -1062,41 +1040,9 @@ if (staxRecurringCancelMatch && method === 'POST') {
 const staxRecurringEditMatch = seg.match(/^giving\/stax-mockup\/recurring\/(\d+)$/);
 if (staxRecurringEditMatch && method === 'PUT') {
   if (!isFinance) return json({ error: 'Access denied' }, 403);
-  const scheduleId = parseInt(staxRecurringEditMatch[1]);
-  const row = await db.prepare(
-    `SELECT id, fund_id, amount_cents, interval, stax_schedule_id, status FROM giving_stax_recurring_schedules WHERE id=?`
-  ).bind(scheduleId).first();
-  if (!row) return json({ error: 'Not found' }, 404);
-  if (row.status === 'cancelled') return json({ error: 'Cannot edit a cancelled schedule.' }, 409);
-
   let b; try { b = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
-  const fundId = parseInt(b.fund_id);
-  if (!Number.isInteger(fundId)) return json({ error: 'fund_id required' }, 400);
-  const fund = await db.prepare('SELECT id FROM funds WHERE id=? AND active=1').bind(fundId).first();
-  if (!fund) return json({ error: 'That fund is not available.' }, 400);
-  const VALID_INTERVALS = ['weekly', 'biweekly', 'twice_monthly', 'monthly'];
-  const interval = VALID_INTERVALS.includes(b.interval) ? b.interval : row.interval;
-  const amountCents = cents(b.amount);
-  if (amountCents === null) return json({ error: 'Enter a valid amount.' }, 400);
-
-  if (row.stax_schedule_id) {
-    if (!staxMockupConfigured(env)) return json({ error: 'Stax is not configured in this environment.' }, 502);
-    let res;
-    try {
-      res = await staxRequest(env.STAX_SANDBOX_API_KEY, `/invoice/schedule/${encodeURIComponent(row.stax_schedule_id)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ total: amountStr(amountCents), rule: buildScheduleRule(interval, todayIso()) }),
-      });
-    } catch (e) {
-      return json({ error: 'Could not reach Stax: ' + String(e?.message || e) }, 502);
-    }
-    if (!res.ok) {
-      return json({ error: res.data?.message || res.data?.error || `Stax returned HTTP ${res.status}.` }, 502);
-    }
-  }
-  await db.prepare(
-    `UPDATE giving_stax_recurring_schedules SET fund_id=?, amount_cents=?, interval=? WHERE id=?`
-  ).bind(fundId, amountCents, interval, scheduleId).run();
+  const r = await updateRecurringSchedule(db, env, parseInt(staxRecurringEditMatch[1]), b || {});
+  if (r.error) return json({ error: r.error === 'That recurring gift no longer exists.' ? 'Not found' : r.error }, r.status);
   return json({ ok: true });
 }
 
