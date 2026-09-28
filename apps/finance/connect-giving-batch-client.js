@@ -45,6 +45,22 @@ export function fetchGivingBatchLedger(env, accessJwt) {
   return callConnectContract(env, accessJwt, 'giving-batch-ledger-v1');
 }
 
+// Transactions page: every filter the page carries, plus entry_id (one gift's detail and history)
+// and giver_q (the "move to another giver" search). all=1 returns up to 5,000 rows for the CSV.
+const TRANSACTION_QUERY_KEYS = ['from', 'to', 'funds', 'methods', 'min', 'max', 'q', 'status', 'sort', 'offset', 'batch_id', 'entry_id', 'giver_q', 'all'];
+export function fetchGivingTransactions(env, accessJwt, params) {
+  const query = {};
+  for (const key of TRANSACTION_QUERY_KEYS) {
+    const value = params.get(key);
+    if (value) query[key] = String(value).slice(0, 200);
+  }
+  return callConnectContract(env, accessJwt, 'giving-transactions-v1', { query });
+}
+
+export function fetchOnlineGiving(env, accessJwt) {
+  return callConnectContract(env, accessJwt, 'giving-online-v1');
+}
+
 export function postGivingBatchWrite(env, accessJwt, body) {
   return callConnectContract(env, accessJwt, 'giving-batch-write-v1', { method: 'POST', body });
 }
@@ -58,4 +74,14 @@ export function describeGivingBatchFailure(result) {
     case 'http_error': return result.message ? String(result.message) : `Connect refused the request (${result.status}).`;
     default: return 'The request did not complete.';
   }
+}
+
+// Online giving form settings (fee percentage, which funds the public form offers) stay in
+// Connect; see src/api-giving-online-contracts.js.
+export function fetchGivingOnlineSettings(env, accessJwt) {
+  return callConnectContract(env, accessJwt, 'giving-online-settings-v1');
+}
+
+export function postGivingOnlineSettingsWrite(env, accessJwt, body) {
+  return callConnectContract(env, accessJwt, 'giving-online-settings-write-v1', { method: 'POST', body });
 }

@@ -38,6 +38,7 @@ const WRITE_ROUTE_IDS = new Set([
   'daycare-entry-edit-v1', 'daycare-entry-remove-v1', 'daycare-sync-v1', 'daycare-rooms-sync-v1',
   'gift-batch-write-v1',
   'giving-followup-write-v1',
+  'giving-online-settings-write-v1',
   'connect-planner-save-v1',
 ]);
 const OWN_DB_WRITE_ROUTE_IDS = new Set(['budget-plan-save-v1']);
@@ -115,6 +116,7 @@ describe('Finance staging route manifest', () => {
       '/api/v1/hr/person-save', '/api/v1/hr/credential-save', '/api/v1/hr/review-save', '/api/v1/hr/goal-save',
       '/api/v1/hr/position-save', '/api/v1/hr/policy-save', '/api/v1/hr/signature-save', '/api/v1/hr/benefit-change-save',
       '/api/v1/gift-batch-write',
+      '/api/v1/giving-online-settings-write',
       '/api/v1/giving-followup-write',
       '/api/summary', '/api/v1/payroll-relay-diagnostic',
       '/api/v1/payroll-hours-save', '/api/v1/payroll-period-approve',

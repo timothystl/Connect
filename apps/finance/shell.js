@@ -20,7 +20,11 @@ import { HEALTH_STYLES, renderHealthByEntity, renderHealthSummary, renderHealthV
 import { ensureFinanceOwnedSchema } from './finance-owned-schema.js';
 import { PAYROLL_STYLES, legacyPayrollPage } from './payroll-pages.js';
 import { GIFT_BATCH_STYLES, renderBatchPage, renderBatchReportsPage, renderReconciliationPage } from './gift-batch-pages.js';
-import { describeGivingBatchFailure, fetchGivingBatchLedger, fetchGivingBatchWorkspace, postGivingBatchWrite } from './connect-giving-batch-client.js';
+import { renderOnlineFormSettingsPage } from './online-giving-pages.js';
+import { renderGymIncomePage } from './gym-income-pages.js';
+import { fetchGymIncome, describeGymIncomeFailure } from './gym-income-client.js';
+import { describeGivingBatchFailure, fetchGivingBatchLedger, fetchGivingBatchWorkspace, fetchGivingTransactions, fetchOnlineGiving, postGivingBatchWrite, fetchGivingOnlineSettings, postGivingOnlineSettingsWrite } from './connect-giving-batch-client.js';
+import { GIFT_TRANSACTIONS_STYLES, buildTransactionsCsv, normalizeTransactionParams, renderOnlineGivingPage, renderTransactionsPage, transactionsCsvFilename, transactionsCsvParams } from './gift-transactions-pages.js';
 import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, postGivingFollowupWrite } from './connect-giving-analytics-client.js';
 import { fetchAccessRoles } from './connect-access-client.js';
 import { fetchFinanceClassification } from './finance-classification-client.js';
@@ -892,11 +896,21 @@ function resolveIncomeVsBudget(churchReportLive) {
 
 // Gift Entry batch form posts -> Connect's giving-batch-write-v1. Connect re-verifies the Access
 // identity and decides whether this person may enter gifts; Finance only shapes the form.
-const GIFT_BATCH_OPS = new Set(['create_batch', 'add_gift', 'remove_gift', 'close_batch', 'reopen_batch', 'deposit_batch', 'reconcile_deposit', 'reopen_deposit']);
+const GIFT_BATCH_OPS = new Set([
+  'create_batch', 'add_gift', 'remove_gift', 'close_batch', 'reopen_batch', 'deposit_batch', 'reconcile_deposit', 'reopen_deposit',
+  'correct_gift', 'void_gift', 'restore_gift', 'link_online_gift', 'ignore_online_gift', 'update_recurring', 'cancel_recurring',
+]);
 const GIFT_BATCH_MESSAGES = {
   create_batch: 'Batch started.', add_gift: 'Gift added.', remove_gift: 'Gift removed.', close_batch: 'Batch closed and locked for deposit.',
   reopen_batch: 'Batch reopened.', deposit_batch: 'Batch put on a deposit.', reconcile_deposit: 'Deposit matched to the bank.', reopen_deposit: 'Deposit reopened.',
+  correct_gift: 'Gift corrected. The change is in its history.', void_gift: 'Recorded. The gift’s totals and statement now reflect it.', restore_gift: 'Void undone.',
+  link_online_gift: 'Online gift matched to the giver.', ignore_online_gift: 'Left anonymous.', update_recurring: 'Recurring gift changed.', cancel_recurring: 'Recurring gift cancelled.',
 };
+// A correction sends only what its form carries, blank fields included (clearing a memo is a
+// correction); the other ops send what was filled in.
+const GIFT_CORRECTION_FIELDS = ['fund_id', 'amount', 'method', 'check_number', 'notes', 'gift_date', 'person_id'];
+// Where a Transactions / Online giving form returns to: its own filters, never arbitrary params.
+const GIFT_BACK_KEYS = ['from', 'to', 'funds', 'methods', 'min', 'max', 'q', 'status', 'sort', 'view', 'offset', 'batch_id', 'entry_id'];
 
 async function handleGiftBatchWrite(request, env, url) {
   const back = (page, params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving', page, ...params }).toString()}` } });
@@ -907,8 +921,25 @@ async function handleGiftBatchWrite(request, env, url) {
   if (!GIFT_BATCH_OPS.has(op)) return back('batch', { status: 'error', message: 'Unknown action.' });
   const field = (name) => String(form.get(name) || '').trim();
   const body = { op };
-  for (const name of ['batch_id', 'entry_id', 'deposit_id', 'batch_date', 'description', 'person_id', 'method', 'check_number', 'notes', 'gift_date', 'deposit_date', 'external_ref', 'source', 'bank_amount']) {
+  for (const name of ['batch_id', 'entry_id', 'deposit_id', 'batch_date', 'description', 'person_id', 'method', 'check_number', 'notes', 'gift_date', 'deposit_date', 'external_ref', 'source', 'bank_amount',
+    'reason', 'kind', 'refund_amount', 'queue_id', 'schedule_id', 'fund_id', 'amount', 'interval']) {
     if (field(name)) body[name] = field(name);
+  }
+  if (op === 'correct_gift') {
+    for (const name of GIFT_CORRECTION_FIELDS) if (form.has(name)) body[name] = field(name);
+    if (body.person_id === 'anonymous') body.person_id = '';
+  }
+  const returnTo = field('return');
+  if (['transactions', 'online'].includes(returnTo)) {
+    const returnParams = new URLSearchParams(field('back'));
+    const keep = {};
+    for (const key of GIFT_BACK_KEYS) if (returnParams.get(key)) keep[key] = returnParams.get(key).slice(0, 200);
+    const result = await postGivingBatchWrite(env, request.headers.get('Cf-Access-Jwt-Assertion') || '', body);
+    if (!result.ok) return back(returnTo, { ...keep, status: 'error', message: describeGivingBatchFailure(result).slice(0, 200) });
+    let msg = GIFT_BATCH_MESSAGES[op];
+    if (op === 'correct_gift' && result.result.changed === 0) msg = 'Nothing was different, so nothing changed.';
+    if (op === 'cancel_recurring' && result.result.had_stax_schedule && !result.result.stax_cancelled) msg = 'Cancelled here, but the processor did not confirm. Check the processor dashboard so the giver is not charged again.';
+    return back(returnTo, { ...keep, status: 'ok', msg });
   }
   if (op === 'add_gift') {
     body.splits = [1, 2, 3, 4].map((n) => ({ fund_id: field(`fund_${n}`), amount: field(`amount_${n}`) })).filter((s) => s.fund_id || s.amount)
@@ -921,6 +952,23 @@ async function handleGiftBatchWrite(request, env, url) {
   const keep = page === 'batch' && batchId ? { batch_id: batchId } : {};
   if (!result.ok) return back(page, { ...keep, status: 'error', message: describeGivingBatchFailure(result).slice(0, 200) });
   return back(page, { ...keep, status: 'ok', msg: GIFT_BATCH_MESSAGES[op] });
+}
+
+// Online giving form settings: the fee percentage or the public-form fund list. Connect saves
+// them (giving-online-settings-write-v1) and re-checks Giving edit access for the signed-in person.
+async function handleGivingOnlineSettingsWrite(request, env, url) {
+  const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving', page: 'online-form', ...params }).toString()}` } });
+  if (!isSameOriginPost(request, url)) return back({ status: 'error', message: 'That form did not come from Timothy Finance.' });
+  let form;
+  try { form = await request.formData(); } catch { return back({ status: 'error', message: 'The form could not be read.' }); }
+  const op = String(form.get('op') || '');
+  let body;
+  if (op === 'fee') body = { op, fee_percent: String(form.get('fee_percent') || '').trim().slice(0, 12) };
+  else if (op === 'funds') body = { op, public_fund_ids: form.getAll('fund').map((v) => String(v)).slice(0, 500) };
+  else return back({ status: 'error', message: 'Unknown action.' });
+  const result = await postGivingOnlineSettingsWrite(env, request.headers.get('Cf-Access-Jwt-Assertion') || '', body);
+  if (!result.ok) return back({ status: 'error', message: describeGivingBatchFailure(result).slice(0, 200) });
+  return back({ status: 'ok', msg: op === 'fee' ? `Fee percentage saved: ${result.result.fee_percent}%.` : 'Funds on the form saved.' });
 }
 
 const GIVING_FOLLOWUP_OPS = new Set(['assign', 'done', 'reopen']);
@@ -1160,6 +1208,11 @@ function renderSectionBody(ctx) {
       status: describeHrStatus(ctx.searchParams),
     });
   }
+  if (section.id === 'facilities' && page.id === 'gym-rentals') {
+    return renderGymIncomePage({
+      result: ctx.gymIncome?.ok ? { ok: true, data: ctx.gymIncome.result } : { ok: false, message: describeGymIncomeFailure(ctx.gymIncome) },
+    });
+  }
   if (section.id === 'facilities') {
     if (!ctx.facilities || isSyntheticUnavailable(ctx.facilities)) {
       return renderDataUnavailablePage({ eyebrow: section.label, heading: page.label, reason: 'Facilities records could not be read for this request. Nothing shown here is an empty register.' });
@@ -1172,7 +1225,16 @@ function renderSectionBody(ctx) {
     });
   }
   if (section.id === 'giving') {
-    if (['batch', 'reconciliation', 'reports'].includes(page.id)) {
+    if (page.id === 'online-form') {
+      const settingsResult = ctx.givingBatch?.ok
+        ? { ok: true, data: ctx.givingBatch.result }
+        : { ok: false, message: describeGivingBatchFailure(ctx.givingBatch) };
+      const onlineStatus = ctx.searchParams.get('status') === 'ok' ? { ok: true, message: ctx.searchParams.get('msg') || 'Saved in Connect.' }
+        : ctx.searchParams.get('status') === 'error' ? { ok: false, message: `Not saved: ${ctx.searchParams.get('message') || 'the request did not complete.'}` } : null;
+      const canEditOnline = roleResult.ok && (roleResult.role === 'admin' || roleResult.permissions?.giving === 'edit');
+      return renderOnlineFormSettingsPage({ result: settingsResult, status: onlineStatus, canEdit: canEditOnline });
+    }
+    if (['batch', 'reconciliation', 'reports', 'transactions', 'online'].includes(page.id)) {
       const batchResult = ctx.givingBatch?.ok
         ? { ok: true, data: ctx.givingBatch.result }
         : { ok: false, message: describeGivingBatchFailure(ctx.givingBatch) };
@@ -1180,6 +1242,8 @@ function renderSectionBody(ctx) {
       const batchStatus = ctx.searchParams.get('status') === 'ok' ? { ok: true, message: ctx.searchParams.get('msg') || 'Saved in Connect.' }
         : ctx.searchParams.get('status') === 'error' ? { ok: false, message: `Not saved: ${ctx.searchParams.get('message') || 'the request did not complete.'}` } : null;
       if (page.id === 'reconciliation') return renderReconciliationPage({ result: batchResult, status: batchStatus, today });
+      if (page.id === 'transactions') return renderTransactionsPage({ result: batchResult, params: normalizeTransactionParams(ctx.searchParams), status: batchStatus });
+      if (page.id === 'online') return renderOnlineGivingPage({ result: batchResult, params: ctx.searchParams, status: batchStatus, people: ctx.givingBatch?.people || [] });
       if (page.id === 'reports') return renderBatchReportsPage({ result: batchResult, today });
       return renderBatchPage({ result: batchResult, params: ctx.searchParams, status: batchStatus, today });
     }
@@ -1539,7 +1603,7 @@ function renderShell(ctx) {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Timothy Finance${production ? '' : ' — Staging'}</title>
   <link rel="icon" href="/assets/finance-mark.png"><link rel="apple-touch-icon" href="/assets/finance-icon.png">
-  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}</style>
+  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}</style>
 </head>
 <body${councilPreview ? ' class="council-preview"' : ''}>
   <header class="app-header">
@@ -1770,6 +1834,10 @@ export default {
 
     if (route.id === 'gift-batch-write-v1') {
       return handleGiftBatchWrite(request, env, url);
+    }
+
+    if (route.id === 'giving-online-settings-write-v1') {
+      return handleGivingOnlineSettingsWrite(request, env, url);
     }
 
     if (route.id === 'giving-followup-write-v1') {
@@ -3594,6 +3662,18 @@ export default {
         const balanceSelection = section.id === 'balance' ? parseBalanceSelection(url.searchParams) : null;
         // Multi-year position's "Export CSV" (Connect's finExportBalanceCsv): the same live-first
         // trend the page shows, downloaded as text/csv, behind the same section check as the page.
+        // Transactions' "Download CSV": the same filters as the page, every matching gift (up to
+        // 5,000), read live from Connect with the caller's own identity.
+        if (section.id === 'giving' && resolveFinancePage(section, pageId).id === 'transactions' && url.searchParams.get('format') === 'csv') {
+          const found = await fetchGivingTransactions(env, accessJwt, transactionsCsvParams(url.searchParams));
+          if (!found.ok) {
+            return response(`Gifts could not be read from Connect: ${describeGivingBatchFailure(found)}`, { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+          }
+          return response(buildTransactionsCsv(found.result), { headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': `attachment; filename="${transactionsCsvFilename(found.result.filters)}"`,
+          } });
+        }
         if (section.id === 'balance' && url.searchParams.get('format') === 'csv') {
           const trend = await safeSyntheticRead(() => resolveBalanceSheetTrend(env, env.FINANCE_DB, balanceSelection));
           if (isSyntheticUnavailable(trend)) {
@@ -4107,7 +4187,13 @@ export default {
         const givingPageId = section.id === 'giving' ? resolveFinancePage(section, pageId).id : null;
         let givingBatch = givingPageId === 'batch'
           ? fetchGivingBatchWorkspace(env, accessJwt, { batchId: url.searchParams.get('batch_id'), q: url.searchParams.get('q') })
-          : ['reconciliation', 'reports'].includes(givingPageId) ? fetchGivingBatchLedger(env, accessJwt) : null;
+          : ['reconciliation', 'reports'].includes(givingPageId) ? fetchGivingBatchLedger(env, accessJwt)
+            : givingPageId === 'transactions' ? fetchGivingTransactions(env, accessJwt, normalizeTransactionParams(url.searchParams))
+              : givingPageId === 'online' ? Promise.all([
+                fetchOnlineGiving(env, accessJwt),
+                url.searchParams.get('queue') && url.searchParams.get('q') ? fetchGivingBatchWorkspace(env, accessJwt, { q: url.searchParams.get('q') }) : null,
+              ]).then(([online, lookup]) => ({ ...online, people: lookup?.ok ? lookup.result.people || [] : [] }))
+                : givingPageId === 'online-form' ? fetchGivingOnlineSettings(env, accessJwt) : null;
         // Giving pages read Connect live too; the named pages (statements, nudges) use their own
         // contract, never requested for council preview or a totals-only (council) Giving role.
         const analyticsPageId = section.id === 'giving-analytics' ? resolveFinancePage(section, pageId).id
@@ -4122,7 +4208,11 @@ export default {
         ]) : [null, null];
         let givingAnalytics = after(givingAnalyticsLoads, (loads) => loads[0]);
         let givingAnalyticsPeople = after(givingAnalyticsLoads, (loads) => loads[1]);
-        let facilities = section.id === 'facilities'
+        const facilitiesPageId = section.id === 'facilities' ? resolveFinancePage(section, pageId).id : null;
+        // Gym rental income is read live from Website Admin with the caller's own Access identity.
+        let gymIncome = facilitiesPageId === 'gym-rentals'
+          ? fetchGymIncome(env, accessJwt, { year: url.searchParams.get('year') }) : null;
+        let facilities = facilitiesPageId && facilitiesPageId !== 'gym-rentals'
           ? safeSyntheticRead(async () => {
             await ensureFacilitiesSchema(env.FINANCE_DB);
             return readFacilities(env.FINANCE_DB);
@@ -4132,7 +4222,7 @@ export default {
           : null;
         // Every load above started without waiting on the others; one slow Connect answer now
         // costs its own timeout once, not once per section read in turn.
-        [summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, payrollBundle, financeHealth] = await Promise.all([summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, payrollBundle, financeHealth]);
+        [summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, gymIncome, payrollBundle, financeHealth] = await Promise.all([summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, gymIncome, payrollBundle, financeHealth]);
         const balancePriorYear = await balancePriorYearLoad;
         const [balancePropertyValue, balanceMortgageHistory, propertyMortgageHistory] = await Promise.all([balancePropertyValueLoad, balanceMortgageHistoryLoad, propertyMortgageHistoryLoad]);
         const printMode = url.searchParams.get('print') === '1';
@@ -4140,7 +4230,7 @@ export default {
         const plannerPage = section.id === 'compensation' && effectivePageId === 'planner';
         const shellResponse = response((printMode ? renderPrintPage : renderShell)({
           printFragment: printMode && url.searchParams.get('fragment') === '1',
-          healthView: url.searchParams.get('view'), healthAppeal: url.searchParams.get('appeal'), healthFlow: url.searchParams.get('flow'), financeHealth, facilities, hr, givingBatch, givingAnalytics, givingAnalyticsPeople, accessRoles, budgetBuilder, boardLayout, planningBasis, planningScenarios, planningRunway, propertyBooks, searchParams: url.searchParams,
+          healthView: url.searchParams.get('view'), healthAppeal: url.searchParams.get('appeal'), healthFlow: url.searchParams.get('flow'), financeHealth, facilities, hr, givingBatch, givingAnalytics, givingAnalyticsPeople, gymIncome, accessRoles, budgetBuilder, boardLayout, planningBasis, planningScenarios, planningRunway, propertyBooks, searchParams: url.searchParams,
           metadata, summary, giving, givingSource, section, pageId, councilPreview, roleResult, churchReport, churchReportLive, churchTrendLive,
           balanceSheet, balanceTrends, balancePriorYear, balancePropertyValue, balanceMortgageHistory, balanceSelection, daycareReport, daycareReportLive, daycareEntries, daycareEditId, propertyReport, propertyReportLive, propertyReserves,
           propertyReservesLive, propertyLedgers, propertyLedgersLive, propertyValuation, propertyPolicy, propertyDebt, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, accountsReport,
