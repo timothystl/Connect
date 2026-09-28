@@ -110,6 +110,16 @@ describe('applyPermissionUI — Finance cutover links', () => {
     expect(ctx.location.href).toBe('https://finance-staging.timothystl.org/');
   });
 
+  it('sends Tuition Aid to the planner in Finance on production and staging', () => {
+    ctx.location.hostname = 'connect.timothystl.org';
+    ctx.openTuitionAid();
+    expect(ctx.location.href).toBe('https://finance.timothystl.org/?section=tuition');
+    ctx.location.hostname = 'connect-staging.timothystl.org';
+    ctx.openTuitionAid();
+    expect(ctx.location.href).toBe('https://finance-staging.timothystl.org/?section=tuition');
+    expect(HTML_HEAD).toContain('data-tab="tuitionaid" onclick="openTuitionAid()"');
+  });
+
   it('retains only Budget and Compensation inside Connect', () => {
     expect(ctx.FIN_TOPNAV_ITEMS.map((item) => item.id)).toEqual(['planning', 'compensation']);
     expect(HTML_HEAD).toContain('class="s-item require-financeapp"');
