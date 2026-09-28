@@ -31,3 +31,17 @@ export function fetchGivingBoard(env, accessJwt, { period } = {}) {
 export function postGivingBoardEmail(env, accessJwt, body) {
   return callConnectContract(env, accessJwt, 'giving-board-email-v1', { method: 'POST', body });
 }
+
+// Giving › Reports (giving-reports-v1): one of Connect's analysis reports by name, with that
+// report's own parameters. Connect decides access per report (totals for any Giving access; the
+// named reports and bands need Giving view).
+export function fetchGivingReport(env, accessJwt, report, query = {}) {
+  const clean = {};
+  for (const [key, value] of Object.entries(query)) if (value != null && value !== '') clean[key] = String(value).slice(0, 20);
+  return callConnectContract(env, accessJwt, 'giving-reports-v1', { query: { report, ...clean } });
+}
+
+// Impact statements (admin only, as in Connect).
+export function postGivingImpactWrite(env, accessJwt, statements) {
+  return callConnectContract(env, accessJwt, 'giving-impact-write-v1', { method: 'POST', body: { statements } });
+}
