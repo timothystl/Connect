@@ -1,124 +1,47 @@
 import { describe, it, expect } from 'vitest';
-import vm from 'node:vm';
-import { CHMS_APP_CORE_JS, CHMS_APP_EXT_JS } from '../src/html-chms.js';
-import { createTuitionModel } from '../apps/finance/tuition-planner/model.js';
+import fs from 'node:fs';
+import { CONFIG_FIELDS, createTuitionModel, displayFamPct } from '../apps/finance/tuition-planner/model.js';
+import { bundle } from './fixtures/tuition-planner-fixture.js';
 
 // Finance's Tuition Aid planner (apps/finance/tuition-planner/model.js) is a port of Connect's
-// planner math. These run both on the same records, year by year, and require the same answers:
-// grades, awards, the budget pool, Apply Aid Policy, Auto-Balance and the pin promotion.
-
-function legacy(bundle) {
-  const el = (id) => ({
-    id, innerHTML: '', textContent: '', value: '', style: {}, dataset: {}, disabled: false, checked: false,
-    files: [], classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
-    appendChild() {}, addEventListener() {}, querySelector() { return null; },
-    querySelectorAll() { return []; }, setAttribute() {}, focus() {}, closest() { return { querySelectorAll: () => [] }; },
-  });
-  const store = {};
-  const ctx = {
-    document: {
-      getElementById(id) { return store[id] || (store[id] = el(id)); },
-      querySelector() { return null; }, querySelectorAll() { return []; },
-      createElement: () => el('x'), addEventListener() {}, body: el('body'), activeElement: null,
-    },
-    console, setTimeout: () => 0, clearTimeout() {}, Math, JSON, Date, parseFloat, parseInt, isFinite,
-    Number, String, Object, Array, Promise, encodeURIComponent, decodeURIComponent,
-    localStorage: { getItem() { return null; }, setItem() {} },
-    FormData: class { append() {} }, navigator: {}, location: { href: '', hash: '' },
-    addEventListener() {}, removeEventListener() {}, scrollTo() {}, requestAnimationFrame() {},
-    matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }),
-    URL: { createObjectURL: () => '', revokeObjectURL() {} }, confirm: () => true,
-    fetch: () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }),
-  };
-  ctx.window = ctx; ctx.globalThis = ctx;
-  vm.createContext(ctx);
-  vm.runInContext(CHMS_APP_CORE_JS, ctx, { filename: 'app-core.js' });
-  vm.runInContext(CHMS_APP_EXT_JS, ctx, { filename: 'app-ext.js' });
-  ctx.tapApplyBundle(JSON.parse(JSON.stringify(bundle)));
-  return ctx;
-}
-
-const student = (id, over) => ({
-  id, person_id: null, household_id: null, family: `Family${id}`, child: `Child${id}`, is_pipeline: 0, base_grade: '3',
-  birth_year: null, outside_aid_cents: 0, fam_pct: 40, fam_pct_orig: 40, touched: 0, lhs_award_cents: 120000,
-  lhs_award_orig_cents: 120000, attends_lhs: 1, timothy_award_exact_cents: null, family_owed_exact_cents: null,
-  timothy_award_override_cents: null, family_owed_override_cents: null, note: '', active: 1, sort_order: id, ...over,
-});
-
-// Fictional records covering every path: seeded exact figures, a typed award, outside aid larger
-// than the share, grade 8 leaving and staying, LHS over the maximum, pipeline by birth year and by
-// entered grade, future-year pins (percent, dollars, outside aid, LHS), a pin for the current year
-// awaiting promotion, and a year with its tuition on file.
-function bundle(config = {}) {
-  return {
-    config: { base_school_year: '2026', tuition_base_cents: '850000', tuition_growth_pct: '6', k8_budget_cents: '7500000',
-      lhs_standard_rate_cents: '120000', lhs_max_award_cents: '250000', timothy_min_award_cents: '200000',
-      family_share_cap_pct: '50', default_pipeline_fam_pct: '50', ...config },
-    history: [{ school_year: '2025-26', tuition_cents: 810000, family_pct: 31 }],
-    yearRates: [{ school_year: '2027-28', tuition_cents: 905000 }],
-    students: [
-      student(1, { base_grade: 'K', fam_pct: 30, fam_pct_orig: 30, timothy_award_exact_cents: 595000, family_owed_exact_cents: 255000 }),
-      student(2, { base_grade: '2', outside_aid_cents: 400000, fam_pct: 35, fam_pct_orig: 35 }),
-      student(3, { base_grade: '5', fam_pct: 60, fam_pct_orig: 55, touched: 1, timothy_award_override_cents: 300000, family_owed_override_cents: 550000 }),
-      student(4, { base_grade: '8', fam_pct: 45, fam_pct_orig: 45 }),
-      student(5, { base_grade: '8', fam_pct: 20, fam_pct_orig: 20, attends_lhs: 0 }),
-      student(6, { base_grade: '10', lhs_award_cents: 300000 }),
-      student(7, { base_grade: '12', lhs_award_cents: 150000 }),
-      student(8, { base_grade: 'PK 4', fam_pct: 50, fam_pct_orig: 50 }),
-      student(9, { base_grade: '7', outside_aid_cents: 100000, fam_pct: 10, fam_pct_orig: 10 }),
-      student(10, { is_pipeline: 1, base_grade: '', birth_year: 2022, fam_pct: 50, fam_pct_orig: 50 }),
-      student(11, { is_pipeline: 1, base_grade: 'PK 4', birth_year: 2021, fam_pct: 45, fam_pct_orig: 45 }),
-      student(12, { is_pipeline: 1, base_grade: '', birth_year: 2025, fam_pct: 50, fam_pct_orig: 50 }),
-      student(13, { base_grade: '1', fam_pct: 25, fam_pct_orig: 25 }),
-    ],
-    studentYears: [
-      { student_id: 2, school_year: '2027-28', grade: '', outside_aid_cents: 350000, fam_pct: 42, timothy_award_cents: null, family_owed_cents: null, lhs_award_cents: null, note: '', family: 'Family2', child: 'Child2' },
-      { student_id: 9, school_year: '2028-29', grade: '', outside_aid_cents: null, fam_pct: null, timothy_award_cents: 410000, family_owed_cents: 500000, lhs_award_cents: null, note: '', family: 'Family9', child: 'Child9' },
-      { student_id: 4, school_year: '2027-28', grade: '', outside_aid_cents: null, fam_pct: null, timothy_award_cents: null, family_owed_cents: null, lhs_award_cents: 180000, note: '', family: 'Family4', child: 'Child4' },
-      { student_id: 10, school_year: '2028-29', grade: '', outside_aid_cents: 50000, fam_pct: 30, timothy_award_cents: null, family_owed_cents: null, lhs_award_cents: null, note: '', family: 'Family10', child: 'Child10' },
-      { student_id: 13, school_year: '2026-27', grade: '', outside_aid_cents: 20000, fam_pct: 33, timothy_award_cents: null, family_owed_cents: null, lhs_award_cents: null, note: '', family: 'Family13', child: 'Child13' },
-      { student_id: 1, school_year: '2024-25', grade: 'PK 4', outside_aid_cents: 0, fam_pct: null, timothy_award_cents: 300000, family_owed_cents: 400000, lhs_award_cents: null, note: '', family: 'Family1', child: 'Child1' },
-    ],
-  };
-}
+// former planner (src/frontend/js-tuition-aid.js, removed once Finance's planner shipped). Its
+// answers on the fixture records were saved, before that removal, in
+// fixtures/tuition-planner-legacy-answers.json: grades, awards, the budget pool, the pipeline, Apply
+// Aid Policy, Auto-Balance and the pin promotion, for years -2..5 and three budget setups. The model
+// must keep giving exactly those answers.
+const LEGACY = JSON.parse(fs.readFileSync(new URL('./fixtures/tuition-planner-legacy-answers.json', import.meta.url), 'utf8'));
 
 const round = (v) => (v == null ? v : Math.round(v * 1000) / 1000);
 const split = (sp) => ({ t: round(sp.timothyAward), f: round(sp.familyOwed) });
+const plain = (v) => JSON.parse(JSON.stringify(v));
 
-for (const [name, config] of [['a standalone K-8 budget', {}], ['a Total Timothy Aid pool', { timothy_total_budget_cents: '9000000' }], ['a tight pool', { timothy_total_budget_cents: '3000000' }]]) {
-  describe(`Tuition planner model matches Connect's planner, with ${name}`, () => {
+for (const [key, name, config] of [['standalone', 'a standalone K-8 budget', {}], ['pool', 'a Total Timothy Aid pool', { timothy_total_budget_cents: '9000000' }], ['tight', 'a tight pool', { timothy_total_budget_cents: '3000000' }]]) {
+  const L = LEGACY[key];
+  describe(`Tuition planner model matches Connect's former planner, with ${name}`, () => {
     it('promotes the current year’s pins the same way', () => {
-      const L = legacy(bundle(config));
       const M = createTuitionModel(bundle(config));
-      const promoted = M.promoteCurrentYearPins();
-      expect(promoted.map((p) => p.id)).toEqual([13]);
+      expect(M.promoteCurrentYearPins().map((p) => p.id)).toEqual([13]);
       const s13 = M.byId(13);
-      const l13 = L.tapById(13);
-      expect({ o: s13.outsideAid, p: s13.famPct, t: s13.touched }).toEqual({ o: l13.outsideAid, p: l13.famPct, t: l13.touched });
+      expect({ outside: s13.outsideAid, famPct: s13.famPct, touched: s13.touched }).toEqual(L.promoted13);
     });
 
     it('gives the same grades, awards and shares for every student, this year and five ahead', () => {
-      const L = legacy(bundle(config));
       const M = createTuitionModel(bundle(config));
       M.promoteCurrentYearPins();
       for (let y = -2; y <= 5; y += 1) {
-        expect(M.tuitionForYear(y)).toBe(L.tapTuitionForYear(y));
+        const want = L.years[y];
+        expect(M.tuitionForYear(y)).toBe(want.tuition);
         for (const s of M.roster) {
-          const ls = L.tapById(s.id);
-          expect(M.gradeAt(s, y), `grade ${s.id} y${y}`).toEqual(L.tapGradeAt(ls, y));
-          expect(split(M.splitFor(s, y)), `split ${s.id} y${y}`).toEqual(split(L.tapSplitFor(ls, y)));
-          expect(M.famPctFor(s, y)).toEqual(L.tapFamPctFor(ls, y));
-          expect(M.outsideAidFor(s, y)).toEqual(L.tapOutsideAidFor(ls, y));
-          expect(M.lhsAwardFor(s, y)).toEqual(L.tapLhsAwardFor(ls, y));
+          expect(plain({ grade: M.gradeAt(s, y), split: split(M.splitFor(s, y)), famPct: M.famPctFor(s, y), outside: M.outsideAidFor(s, y), lhs: M.lhsAwardFor(s, y) }), `student ${s.id} y${y}`)
+            .toEqual(want.students[s.id]);
         }
         if (y >= 0) {
-          expect(M.projectedNeedByYear(y)).toEqual(L.tapProjectedNeedByYear(y));
-          const lp = L.tapPipelinePreviewForYear(y);
+          expect(M.projectedNeedByYear(y)).toEqual(want.need);
           const mp = M.pipelinePreviewForYear(y);
-          expect(mp.k8.map((x) => [x.s.id, split(x.sp)])).toEqual(lp.k8.map((x) => [x.s.id, split(x.sp)]));
-          expect(mp.lhs.map((x) => [x.s.id, x.lhsVal])).toEqual(lp.lhs.map((x) => [x.s.id, x.lhsVal]));
+          expect(mp.k8.map((x) => [x.s.id, split(x.sp)])).toEqual(want.pipelineK8);
+          expect(mp.lhs.map((x) => [x.s.id, x.lhsVal])).toEqual(want.pipelineLhs);
           const lhsTotal = M.enrolledActiveForYear(y).filter((x) => x.bucket === 'LHS').reduce((n, x) => n + M.lhsAwardFor(x.s, y), 0);
-          expect(M.k8BudgetFor(lhsTotal)).toBe(L.tapK8BudgetFor(lhsTotal));
+          expect(M.k8BudgetFor(lhsTotal)).toBe(want.k8Budget);
         }
       }
     });
@@ -126,13 +49,13 @@ for (const [name, config] of [['a standalone K-8 budget', {}], ['a Total Timothy
     for (const [action, legacyFn, modelFn] of [['Apply Aid Policy', 'tapApplyPolicy', 'applyPolicyUpdates'], ['Auto-Balance', 'tapAutoBalance', 'autoBalanceUpdates']]) {
       it(`${action} sets the same family shares in every year`, () => {
         for (let y = 0; y <= 5; y += 1) {
-          const L = legacy(bundle(config));
           const M = createTuitionModel(bundle(config));
           M.promoteCurrentYearPins();
-          const updates = M[modelFn](y);
-          L._tapYearIdx = y;
-          vm.runInContext(`_tapYearIdx = ${y}; ${legacyFn}();`, L);
-          for (const u of updates) expect(u.famPct, `${action} ${u.id} y${y}`).toBe(L.tapFamPctFor(L.tapById(u.id), y));
+          const byId = Object.fromEntries(M[modelFn](y).map((u) => [u.id, u.famPct]));
+          for (const s of M.roster) {
+            const got = s.id in byId ? byId[s.id] : M.famPctFor(s, y);
+            expect(got, `${action} ${s.id} y${y}`).toBe(L.actions[legacyFn][y][s.id]);
+          }
         }
       });
     }
@@ -160,5 +83,54 @@ describe('Tuition planner model: pages', () => {
     expect(M.plannerRows(0).lhs.find((r) => r.s.id === 6).lhsVal).toBe(2500); // capped at the maximum
     expect(M.pathway().grads.map((x) => x.s.id)).toEqual([4, 5]);
     expect(M.pathway().soonPipeline.map((s) => s.id)).toEqual([12]);
+  });
+});
+
+// Carried over from Connect's former planner tests (family-share display, year-pin promotion,
+// settings defaults), now against Finance's model.
+describe('Tuition planner model: behavior kept from Connect’s planner', () => {
+  const one = (over, config = {}, studentYears = []) => createTuitionModel({ config: { base_school_year: '2026', ...config }, students: [{
+    id: 3, family: 'Sample', child: 'Ada', is_pipeline: 0, base_grade: '3', outside_aid_cents: 0, fam_pct: 50, fam_pct_orig: 50,
+    touched: 0, lhs_award_cents: 0, lhs_award_orig_cents: 0, attends_lhs: 1, ...over }], studentYears });
+
+  it('shows the effective 0% family share once outside aid covers the assigned share, keeping the stored figure', () => {
+    const M = one({ outside_aid_cents: 690000, fam_pct: 81, fam_pct_orig: 81, timothy_award_exact_cents: 160000, family_owed_exact_cents: 0 });
+    const s = M.byId(3);
+    const sp = M.splitFor(s, 0);
+    expect(sp).toEqual({ timothyAward: 1600, familyOwed: 0 });
+    expect(displayFamPct(M.famPctFor(s, 0), sp, M.tuitionForYear(0))).toBe(0);
+    expect(s.famPct).toBe(81);
+  });
+
+  it('keeps showing the assigned share while the family still owes something', () => {
+    const M = one({ outside_aid_cents: 600000, fam_pct: 76, fam_pct_orig: 76, timothy_award_exact_cents: 200000, family_owed_exact_cents: 50000 });
+    const s = M.byId(3);
+    expect(displayFamPct(M.famPctFor(s, 0), M.splitFor(s, 0), M.tuitionForYear(0))).toBe(76);
+  });
+
+  it('promotes a pin saved for the year that is now current, including a typed award, and only once', () => {
+    const pin = { student_id: 3, school_year: '2026-27', grade: '', outside_aid_cents: 100000, fam_pct: 30, timothy_award_cents: 450000, family_owed_cents: 300000, lhs_award_cents: 90000, note: '' };
+    const M = one({}, {}, [pin]);
+    expect(M.promoteCurrentYearPins()).toEqual([{ id: 3, fields: { outside_aid_cents: 100000, lhs_award_cents: 90000, fam_pct: 30, touched: 1, timothy_award_override_cents: 450000, family_owed_override_cents: 300000 } }]);
+    expect(M.splitFor(M.byId(3), 0)).toEqual({ timothyAward: 4500, familyOwed: 3000 });
+    expect(M.promoteCurrentYearPins()).toEqual([]);
+  });
+
+  it('never promotes over an edited or overridden record, a pipeline child, or a pin for another year', () => {
+    const pin = (id, year = '2026-27') => ({ student_id: id, school_year: year, grade: '', outside_aid_cents: 1, fam_pct: 1, timothy_award_cents: null, family_owed_cents: null, lhs_award_cents: null, note: '' });
+    expect(one({ touched: 1 }, {}, [pin(3)]).promoteCurrentYearPins()).toEqual([]);
+    expect(one({ timothy_award_override_cents: 1000 }, {}, [pin(3)]).promoteCurrentYearPins()).toEqual([]);
+    expect(one({ is_pipeline: 1, birth_year: 2021 }, {}, [pin(3)]).promoteCurrentYearPins()).toEqual([]);
+    expect(one({}, {}, [pin(3, '2027-28')]).promoteCurrentYearPins()).toEqual([]);
+  });
+
+  it('falls back to the documented settings when none are stored', () => {
+    const M = createTuitionModel({ config: {}, students: [] });
+    expect(Object.fromEntries(CONFIG_FIELDS.map((f) => [f.key, M.cfgNum(f.key, f.def)]))).toEqual({
+      tuition_base_cents: 850000, tuition_growth_pct: 6, lhs_standard_rate_cents: 120000, lhs_max_award_cents: 250000,
+      timothy_min_award_cents: 200000, family_share_cap_pct: 50, default_pipeline_fam_pct: 50, base_school_year: 2026,
+    });
+    expect(M.tuitionForYear(0)).toBe(8500);
+    expect(M.k8BudgetFor(0)).toBe(75000);
   });
 });

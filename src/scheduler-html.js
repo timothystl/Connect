@@ -4615,7 +4615,7 @@ function ppBuildBulletinHtml(d) {
 // full text can instead ride along as a one-page-ish PDF the reader opens or
 // prints. Built here in the browser and base64'd, exactly like the .ics
 // attachment already is — no new Worker route, no library (this app carries no
-// third-party JS anywhere; see the hand-rolled xlsx reader in js-tuition-aid.js
+// third-party JS anywhere; see the hand-rolled xlsx reader in apps/finance/tuition-planner/xlsx-import.js
 // for the same choice on a different problem).
 //
 // Helvetica is one of the 14 fonts every PDF reader ships, so nothing is
@@ -4975,7 +4975,7 @@ function ppSetStatus(msg, kind) {
 // image on the clipboard). No third-party library — draws the page's HTML
 // into an SVG <foreignObject>, then that SVG into a <canvas>, matching this
 // app's existing no-external-JS-dependency convention (see the xlsx reader
-// in js-tuition-aid.js for the same approach to a different problem). The
+// in apps/finance/tuition-planner/xlsx-import.js for the same approach to a different problem). The
 // exported markup must be well-formed XML for this to parse (self-closed
 // void tags, no bare HTML named entities — only real Unicode characters or
 // the 5 predefined XML entities), which is why ppBuildSingleHtml/MonthHtml/

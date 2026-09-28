@@ -1,5 +1,5 @@
 // Excel (.xlsx) history import for the Tuition Aid planner. Carried over unchanged from Connect's
-// planner (src/frontend/js-tuition-aid.js, "Import per-student history"): a dependency-free reader
+// former planner (src/frontend/js-tuition-aid.js, since removed; "Import per-student history"): a dependency-free reader
 // for the ZIP container and its XML, and the three layouts the school's workbooks use. Only the
 // exports at the bottom are new.
 /* eslint-disable no-var */

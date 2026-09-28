@@ -12,7 +12,6 @@ import { JS_GIVING } from './frontend/js-giving.js';
 import { JS_REPORTS } from './frontend/js-reports.js';
 import { JS_EXPORT_IMPORT } from './frontend/js-export-import.js';
 import { JS_ATTENDANCE } from './frontend/js-attendance.js';
-import { JS_TUITION_AID } from './frontend/js-tuition-aid.js';
 import { JS_FINANCE } from './frontend/js-finance.js';
 import { JS_VOLUNTEERS } from './frontend/js-volunteers.js';
 
@@ -257,12 +256,12 @@ self.addEventListener('fetch', function(event) {
 const APP_MEMBER_JS_RAW = JS_CORE + JS_PEOPLE + JS_HOUSEHOLDS;
 const APP_STAFF_JS_RAW = JS_SETTINGS + JS_DASHBOARD + JS_REGISTER;
 // ── app-ext.js: loaded lazily for every role ──────────────────────────────────────────────
-// Giving, Reports, Export/Import, Attendance, Tuition Aid and Volunteers. No role lands on any of
+// Giving, Reports, Export/Import, Attendance and Volunteers. No role lands on any of
 // these tabs, so this is not in the shell's script tags at all; js-core's ensureExtLoaded()
 // fetches it on the first open of one of them (or of Finance, which reuses its helpers). See
 // that function for every entry point. Home's attendance card only needs attSundayMap() and
 // attSaveSunday(), which live in js-dashboard.js (app-staff.js) for that reason.
-const APP_EXT_JS_RAW = JS_GIVING + JS_REPORTS + JS_EXPORT_IMPORT + JS_ATTENDANCE + JS_TUITION_AID + JS_VOLUNTEERS;
+const APP_EXT_JS_RAW = JS_GIVING + JS_REPORTS + JS_EXPORT_IMPORT + JS_ATTENDANCE + JS_VOLUNTEERS;
 const stripScriptTags = (s) => s.replace(/^<script>\n/, '').replace(/<\/script>\n$/, '');
 export const CHMS_APP_MEMBER_JS = stripScriptTags(APP_MEMBER_JS_RAW);
 export const CHMS_APP_STAFF_JS = stripScriptTags(APP_STAFF_JS_RAW);

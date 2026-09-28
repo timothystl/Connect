@@ -158,7 +158,7 @@ function dollarsToCents(v) {
 // file headers) and decompresses DEFLATE payloads with the standard Web Streams
 // DecompressionStream — both available in the Workers runtime, no third-party library (this
 // app hand-rolls all its parsing, same reasoning as Tuition Aid's client-side XLSX reader,
-// which this ports from — see js-tuition-aid.js). Runs server-side (not in the browser) since
+// which this ports from — now apps/finance/tuition-planner/xlsx-import.js). Runs server-side (not in the browser) since
 // the endpoint receives the raw uploaded file directly; kept as plain functions over
 // ArrayBuffer/Uint8Array with zero DOM dependency, so it is directly unit-testable in Node too.
 function finXmlUnescape(s) {

@@ -110,13 +110,16 @@ describe('applyPermissionUI — Finance cutover links', () => {
     expect(ctx.location.href).toBe('https://finance-staging.timothystl.org/');
   });
 
-  it('sends Tuition Aid to the planner in Finance on production and staging', () => {
+  it('sends Tuition Aid to the planner in Finance, since Connect has no Tuition Aid tab', () => {
     ctx.location.hostname = 'connect.timothystl.org';
     ctx.openTuitionAid();
-    expect(ctx.location.href).toBe('https://finance.timothystl.org/?section=tuition');
+    expect(ctx.location.href).toBe('https://finance.timothystl.org/?section=tuition&page=planner');
     ctx.location.hostname = 'connect-staging.timothystl.org';
     ctx.openTuitionAid();
-    expect(ctx.location.href).toBe('https://finance-staging.timothystl.org/?section=tuition');
+    expect(ctx.location.href).toBe('https://finance-staging.timothystl.org/?section=tuition&page=planner');
+    ctx.location.hostname = 'localhost';
+    ctx.openTuitionAid();
+    expect(ctx.location.href).toBe('https://finance-staging.timothystl.org/?section=tuition&page=planner');
     expect(HTML_HEAD).toContain('data-tab="tuitionaid" onclick="openTuitionAid()"');
   });
 

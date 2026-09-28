@@ -1,8 +1,8 @@
 // The Tuition Aid planner's figures, as Finance code. Every function here is a line-for-line port
-// of Connect's planner (src/frontend/js-tuition-aid.js: tapGradeAt, tapSplitFor, tapApplyPolicy,
-// ...) over one state object instead of page globals, so the award math, grade progression and
-// budget pool behave exactly as they did in Connect. test/finance-tuition-planner-model.test.js
-// runs both side by side on the same records.
+// of Connect's former planner (src/frontend/js-tuition-aid.js, since removed: tapGradeAt,
+// tapSplitFor, tapApplyPolicy, ...) over one state object instead of page globals, so the award
+// math, grade progression and budget pool behave exactly as they did in Connect.
+// test/finance-tuition-planner-model.test.js holds this to that planner's saved answers.
 //
 // Money in the model is dollars (the saved records are cents), as in Connect's planner.
 
