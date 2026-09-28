@@ -184,18 +184,13 @@ describe('Balance sheet view — year picker and the P&L tie-out', () => {
   });
 });
 
-// Balance Sheet & Financial Position moved out of Church Report's own mode toggle into its own
-// top-level Finance tab, 2026-09-04 — a real user request ("give me a tab for Balance Sheet &
-// Financial Position"), plus three new capabilities the request specifically asked for: a CSV
-// export, a bank-accounts-over-time trend, and a This Year vs Last Year comparison (the latter
-// also answers a separate, related ask: "i need a report that can compare last years to this
-// year").
-describe('Balance Sheet — its own top-level tab', () => {
-  it('is its own FIN_TOPNAV_ITEMS entry, not a Church Report mode', () => {
+// Balance Sheet remains separate from Church Report, but after the standalone Finance cutover it
+// must not reappear in Connect's retained Budget/Compensation-only navigation.
+describe('Balance Sheet — standalone Finance navigation', () => {
+  it('is not exposed in Connect\'s retained FIN_TOPNAV_ITEMS', () => {
     const { ctx } = makeCtx();
     const item = ctx.FIN_TOPNAV_ITEMS.find(i => i.id === 'balance');
-    expect(item).toBeTruthy();
-    expect(item.label).toBe('Balance Sheet');
+    expect(item).toBeUndefined();
   });
 
   it('Church Report\'s own mode pills no longer offer "Balance sheet"', () => {
