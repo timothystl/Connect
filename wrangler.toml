@@ -16,10 +16,6 @@ FINANCE_STORAGE_MODE = "finance"
 # while the move is prepared) or "finance" (copied once into timothy-finance-db, checked row for
 # row, then used from there). Andrew moved Tuition Aid to Finance on 2026-09-28.
 TUITION_STORAGE_MODE = "finance"
-# Stax giving mockup: production never records sandbox test gifts (Andrew, 2026-09-28: "sandbox
-# should be sequestered during testing"). With this set, the public mockup routes refuse and
-# sandbox webhooks are acknowledged but ignored; test on staging, which has its own database.
-STAX_SANDBOX_REFUSED = "1"
 EMAIL_FROM     = "Connect <noreply@notify.timothystl.org>"
 REPLY_TO_EMAIL = "dinger@timothystl.org"
 

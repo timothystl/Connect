@@ -444,8 +444,6 @@ async function recordStaxReversal(db, { kind, eventTxnId, parentTxnId, amountCen
 export async function handleStaxGivingWebhook(req, env, url) {
   if (req.method === 'GET' || req.method === 'HEAD') return json({ ok: true }, 200);
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
-  // Acknowledged so Stax stops redelivering, but nothing is recorded (see staxSandboxRefused).
-  if (staxSandboxRefused(env)) return json({ ok: true, ignored: 'sandbox' }, 200);
 
   const secret = env.STAX_GIVING_WEBHOOK_SECRET;
   const apiKey = env.STAX_SANDBOX_API_KEY;
@@ -656,8 +654,6 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
       headers: { ...cors, 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400' },
     });
   }
-  // Every route, reads included, so the form says so up front instead of failing at checkout.
-  if (staxSandboxRefused(env)) return j({ error: STAX_SANDBOX_REFUSED_MESSAGE, sandbox_refused: true }, 410);
 
   if (path === 'funds' && method === 'GET') {
     const rows = (await db.prepare(
