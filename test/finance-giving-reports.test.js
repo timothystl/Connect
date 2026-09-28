@@ -137,25 +137,39 @@ describe('Finance › Giving reports', () => {
   it('shows plateaus with each step, impact statements, and bands with the uplift', async () => {
     const e = env();
     const plateaus = await page(e, 'plateaus', '&year=2026&fund_id=4&low_frequency_max=2');
-    expect(e.calls.map((c) => c.query.report)).toEqual(['plateaus', 'impact', 'funds']);
-    expect(e.calls[0].query).toMatchObject({ fund_id: '4', low_frequency_max: '2', scope: 'household' });
+    expect(e.calls.filter((c) => c.path.endsWith('giving-reports-v1')).map((c) => c.query.report)).toEqual(['plateaus', 'impact', 'funds']);
+    // The follow-up queue is read with it, from Giving's named contract.
+    expect(e.calls.map((c) => c.path.split('/').pop())).toContain('giving-analytics-people-v1');
+    expect(plateaus).toContain('Follow-up queue');
+    expect(plateaus).toContain('Next steps: the plateau ladder');
+    expect(e.calls.find((c) => c.query.report === 'plateaus').query).toMatchObject({ fund_id: '4', low_frequency_max: '2', scope: 'household' });
     expect(plateaus).toContain('Sample Household');
     expect(plateaus).toContain('a month of Sunday school supplies');
     expect(plateaus).toContain('action="/api/v1/giving-impact"');
     expect(plateaus).toContain('Check or cash only');
     const e2 = env();
-    const bands = await page(e2, 'bands', '&year=2026&freq=weekly&uplift=0');
+    const bands = await page(e2, 'bands', '&view=weekly&year=2026&uplift=0');
     expect(e2.calls[0].query).toMatchObject({ report: 'bands', freq: 'weekly', uplift_cents: '0' });
+    expect(bands).toContain('<span class="is-on" aria-current="true">Weekly</span>');
+    expect(bands).toContain('<input type="hidden" name="view" value="weekly">');
+    // An older link that only says ?freq= still opens that view.
+    const e3 = env();
+    expect(await page(e3, 'bands', '&freq=monthly')).toContain('<span class="is-on" aria-current="true">Monthly</span>');
+    expect(e3.calls[0].query).toMatchObject({ report: 'bands', freq: 'monthly', uplift_cents: '4000' });
     expect(bands).toContain('$500+/wk');
     expect(bands).toContain('+$1,040');
   });
 
   it('keeps named reports from council, asking Connect only for totals', async () => {
     const council = env('council', { giving: 'anon', compensation: 'edit' });
-    for (const p of ['insights', 'giver-trends', 'plateaus', 'bands']) {
+    for (const p of ['insights', 'giver-trends', 'plateaus', 'bands&view=weekly', 'bands&view=monthly']) {
       expect(await page(council, p)).toContain('names givers');
     }
     expect(council.calls).toEqual([]);
+    // The Annual bands are totals only, so council reads them (from giving-analytics-v1).
+    const annual = await page(council, 'bands');
+    expect(annual).not.toContain('names givers');
+    expect(council.calls.map((c) => c.path.split('/').pop())).toEqual(['giving-analytics-v1']);
     expect(await page(council, 'distribution')).toContain('Giving distribution');
     const preview = env('admin', {});
     expect(await page(preview, 'insights', '&council=1')).toContain('names givers');

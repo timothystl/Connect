@@ -45,7 +45,7 @@ import { readQuickbooksSnapshot } from './quickbooks-snapshot-service.js';
 import { fetchDaycareChurchBudgetPreview, fetchFinanceBoardPacket, fetchFinanceImportStatus } from './finance-data-imports-client.js';
 import { ACCESS_STYLES, renderAccessPage } from './access-pages.js';
 import {
-  GIVING_ANALYTICS_STYLES, renderConcentrationPage, renderHouseholdBandsPage, renderNudgesPage, renderPledgesPage, renderStatementsPage, renderTrendsPage,
+  GIVING_ANALYTICS_STYLES, renderConcentrationPage, renderPledgesPage, renderStatementsPage, renderTrendsPage,
   renderWhatIfPage, renderYearOverYearPage,
 } from './giving-analytics-pages.js';
 import { describeFormStatus, handleFinanceFormWrite, isSameOriginPost } from './form-post.js';
@@ -963,13 +963,28 @@ async function handleGivingOnlineSettingsWrite(request, env, url) {
   return back({ status: 'ok', msg: op === 'fee' ? `Fee percentage saved: ${result.result.fee_percent}%.` : 'Funds on the form saved.' });
 }
 
+// Pages that moved into Giving reports (Sept 28 2026), with the query parameters worth keeping.
+const MOVED_GIVING_PAGES = {
+  'giving-analytics:nudges': { page: 'plateaus', keep: ['kind', 'status', 'msg', 'message', 'council'] },
+  'giving-analytics:household-bands': { page: 'bands', keep: ['fund', 'council'], add: { view: 'annual' } },
+};
+
+function movedGivingPage(sectionId, pageId, searchParams) {
+  const moved = MOVED_GIVING_PAGES[`${sectionId}:${pageId}`];
+  if (!moved) return null;
+  const q = new URLSearchParams({ section: 'giving-reports', page: moved.page, ...(moved.add || {}) });
+  for (const key of moved.keep) if (searchParams.get(key)) q.set(key, searchParams.get(key).slice(0, 200));
+  return `/?${q.toString()}`;
+}
+
 const GIVING_FOLLOWUP_OPS = new Set(['assign', 'done', 'reopen']);
 const GIVING_FOLLOWUP_MESSAGES = { assign: 'Nudge assigned.', done: 'Marked done.', reopen: 'Nudge reopened.' };
 
-// Giving nudges: assign one to a staff member or mark it done. Connect records the follow-up
-// (giving-followup-write-v1) and re-checks Giving edit access for the signed-in person.
+// Giving nudges (Giving reports › Nudges and next steps): assign one to a staff member or mark
+// it done. Connect records the follow-up (giving-followup-write-v1) and re-checks Giving edit
+// access for the signed-in person.
 async function handleGivingFollowupWrite(request, env, url) {
-  const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving-analytics', page: 'nudges', ...params }).toString()}` } });
+  const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving-reports', page: 'plateaus', ...params }).toString()}` } });
   if (!isSameOriginPost(request, url)) return back({ status: 'error', message: 'That form did not come from Timothy Finance.' });
   let form;
   try { form = await request.formData(); } catch { return back({ status: 'error', message: 'The form could not be read.' }); }
@@ -1304,11 +1319,9 @@ function renderSectionBody(ctx) {
         canEmail: canEditNudges, print: ctx.searchParams.get('print') === '1', council: councilPreview,
       });
       case 'year-over-year': return renderYearOverYearPage({ result: totals, keep });
-      case 'household-bands': return renderHouseholdBandsPage({ result: totals, keep });
       case 'pledges': return renderPledgesPage({ result: totals, keep });
       case 'what-if': return renderWhatIfPage({ result: totals, params: ctx.searchParams, keep });
       case 'statements': return renderStatementsPage({ result: asResult(ctx.givingAnalyticsPeople), councilPreview: namedHidden });
-      case 'nudges': return renderNudgesPage({ result: asResult(ctx.givingAnalyticsPeople), totals, params: ctx.searchParams, canEdit: canEditNudges, councilPreview: namedHidden, status });
       default: return renderTrendsPage({ result: totals, keep });
     }
   }
@@ -1317,9 +1330,16 @@ function renderSectionBody(ctx) {
     const results = (ctx.givingReports || []).map((r) => (r?.ok ? { ok: true, data: r.result } : { ok: false, message: describeGivingBatchFailure(r), data: null }));
     const status = ctx.searchParams.get('status') === 'ok' ? { ok: true, message: ctx.searchParams.get('msg') || 'Saved in Connect.' }
       : ctx.searchParams.get('status') === 'error' ? { ok: false, message: `Not saved: ${ctx.searchParams.get('message') || 'the request did not complete.'}` } : null;
+    // Nudges and next steps and the Annual Giving bands also read Giving's own contracts (loaded
+    // with the other Giving pages below); the follow-up forms need Giving edit, as before.
+    const asResult = (r) => (r?.ok ? { ok: true, data: r.result } : { ok: false, message: describeGivingBatchFailure(r) });
+    const canEditNudges = !councilPreview && roleResult.ok && (roleResult.role === 'admin' || roleResult.permissions?.giving === 'edit');
     return renderGivingReportPage(page.id, {
       results: results.length ? results : [{ ok: false, message: 'not requested' }],
       params: givingReportParams(ctx.searchParams, isoDay(new Date())), keep: councilPreview ? { council: '1' } : {}, namedHidden, status,
+      searchParams: ctx.searchParams,
+      nudges: { result: asResult(ctx.givingAnalyticsPeople), totals: asResult(ctx.givingAnalytics), canEdit: canEditNudges },
+      annual: asResult(ctx.givingAnalytics),
     });
   }
   if (section.id === 'charts' && page.id === 'concentration') {
@@ -3665,6 +3685,10 @@ export default {
         // already goes through in renderSectionBody below. Needed here, before that render happens,
         // to gate the Compensation Plan roster editor's own live fetch on the right page.
         const effectivePageId = resolveFinancePage(section, pageId).id;
+        // Giving › Giving nudges and Household bands were folded into Giving reports' Nudges and
+        // next steps and Giving bands pages; old links and bookmarks land there.
+        const movedTo = movedGivingPage(section.id, pageId, url.searchParams);
+        if (movedTo) return response(null, { status: 303, headers: { Location: movedTo } });
         // The Planner is an interactive page; its printable form is the Council report.
         if (section.id === 'compensation' && effectivePageId === 'planner' && url.searchParams.get('print') === '1') {
           return response(null, { status: 303, headers: { Location: '/?section=compensation&page=council&print=1' } });
@@ -4235,14 +4259,20 @@ export default {
                 : givingPageId === 'online-form' ? fetchGivingOnlineSettings(env, accessJwt) : null;
         // Giving pages read Connect live too; the named pages (statements, nudges) use their own
         // contract, never requested for council preview or a totals-only (council) Giving role.
+        // Giving reports' Nudges and next steps reads the nudge queue (and this year's first-time
+        // givers) like the old Giving nudges page did, and its Annual Giving bands read the totals.
+        const reportsNamedHiddenEarly = councilPreview || (roleResult.ok && roleResult.role !== 'admin' && roleResult.permissions?.giving === 'anon');
+        const reportsPage = section.id === 'giving-reports' ? resolveFinancePage(section, pageId).id : null;
         const analyticsPageId = section.id === 'giving-analytics' ? resolveFinancePage(section, pageId).id
-          : section.id === 'charts' && resolveFinancePage(section, pageId).id === 'concentration' ? 'concentration' : null;
+          : section.id === 'charts' && resolveFinancePage(section, pageId).id === 'concentration' ? 'concentration'
+            : reportsPage === 'plateaus' && !reportsNamedHiddenEarly ? 'nudges'
+              : reportsPage === 'bands' && givingReportParams(url.searchParams, isoDay(new Date())).bandsView === 'annual' ? 'household-bands' : null;
         let accessRoles = section.id === 'accounts' && resolveFinancePage(section, pageId).id === 'access'
           ? fetchAccessRoles(env, accessJwt) : null;
         const givingAnalyticsLoads = analyticsPageId ? Promise.all([
           analyticsPageId === 'statements' ? null
             : analyticsPageId === 'council' ? fetchGivingBoard(env, accessJwt, { period: councilParams(url.searchParams, isoDay(new Date())).period })
-              : fetchGivingAnalytics(env, accessJwt, { fund: url.searchParams.get('fund') || 'general' }),
+              : fetchGivingAnalytics(env, accessJwt, { fund: (analyticsPageId === 'household-bands' ? givingReportParams(url.searchParams, isoDay(new Date())).scopeFund : url.searchParams.get('fund')) || 'general' }),
           ['statements', 'nudges'].includes(analyticsPageId) && !councilPreview
             && !(roleResult.ok && roleResult.role !== 'admin' && roleResult.permissions?.giving === 'anon')
             ? fetchGivingAnalyticsPeople(env, accessJwt) : null,
@@ -4252,7 +4282,7 @@ export default {
         // Giving › Reports: each page's own Connect reports, read together; Connect decides access
         // per report, and the named ones are not asked for in council preview.
         const reportsPageId = section.id === 'giving-reports' ? resolveFinancePage(section, pageId).id : null;
-        const reportsNamedHidden = councilPreview || (roleResult.ok && roleResult.role !== 'admin' && roleResult.permissions?.giving === 'anon');
+        const reportsNamedHidden = reportsNamedHiddenEarly;
         const givingReportsLoad = reportsPageId && !(reportsNamedHidden && ['insights', 'giver-trends', 'plateaus', 'bands'].includes(reportsPageId))
           ? Promise.all(givingReportRequests(reportsPageId, givingReportParams(url.searchParams, isoDay(new Date())))
             .map(([report, query]) => fetchGivingReport(env, accessJwt, report, query))) : null;

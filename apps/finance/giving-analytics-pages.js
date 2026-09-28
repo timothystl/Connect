@@ -1,5 +1,6 @@
-// Giving, v3 design: Trends, Year over year, Household bands, Pledges, Giving what-if, Giving
-// statements and Giving nudges. Every figure comes live from Connect (giving-analytics-v1 for
+// Giving, v3 design: Trends, Year over year, Pledges, Giving what-if and Giving statements, plus
+// the household bands and the nudge queue that Giving reports shows on its combined Giving bands
+// and Nudges and next steps pages. Every figure comes live from Connect (giving-analytics-v1 for
 // totals, giving-analytics-people-v1 for the named pages); Finance keeps no copy. The totals pages
 // name nobody, so council may read them. Statements and nudges name households, so Connect only
 // returns them for Giving view access, and council preview here shows the same refusal.
@@ -123,10 +124,6 @@ function kpis(items) {
 
 function unavailable(what, message) {
   return `<p class="status status-error">${e(what)} could not be read from Connect: ${e(message)} Nothing here is a real $0.</p>`;
-}
-
-function statusBanner(status) {
-  return status ? `<p class="status${status.ok ? '' : ' status-error'}">${e(status.message)}</p>` : '';
 }
 
 function asOfLine(data) {
@@ -272,8 +269,9 @@ export function renderYearOverYearPage({ result, keep = {} }) {
 }
 
 // ── Household bands ───────────────────────────────────────────────────────────────────────────
+// The Annual view of Giving reports › Giving bands; `at` is where the fund picker points.
 
-export function renderHouseholdBandsPage({ result, keep = {} }) {
+export function renderHouseholdBandsPage({ result, keep = {}, at = { section: 'giving-reports', page: 'bands', hidden: { view: 'annual' } } }) {
   if (!result.ok) return unavailable('Household bands', result.message);
   const a = result.data;
   const h = a.households;
@@ -283,7 +281,7 @@ export function renderHouseholdBandsPage({ result, keep = {} }) {
   const topTwo = [...h.bands].reverse().slice(0, 2);
   const topShare = total ? topTwo.reduce((s, b) => s + b.cents, 0) / total : 0;
   const topHouseholds = topTwo.reduce((s, b) => s + b.households, 0);
-  return `${fundPicker(a, { page: 'household-bands', hidden: keep })}
+  return `${fundPicker(a, { section: at.section, page: at.page, hidden: { ...at.hidden, ...keep } })}
     <p class="lede">Households grouped by what they gave in the last 12 months. ${e(scopeShort(a))}No names are shown on this page. Gifts from organizations and anonymous plate cash are not part of any household.</p>
     ${kpis([
       ['Giving households', String(h.t12_households), 'Gave at least once in the last 12 months'],
@@ -356,7 +354,7 @@ export function renderPledgesPage({ result, keep = {} }) {
       <p class="muted-line">The marker shows how much of the year has gone by.</p>
       <div class="table-scroll"><table class="pm-table ga-num"><thead><tr><th>Status</th><th>Pledgers</th><th>What it means</th></tr></thead>
         <tbody>${rows.map(([label, n, note, tone]) => `<tr><td class="${n ? `tone-${tone}` : ''}">${label}</td><td>${n}</td><td class="ga-note">${e(note)}</td></tr>`).join('')}</tbody></table></div>
-      <p class="muted-line">Individual pledges, and who is behind, are on the <a href="${href('nudges', { kind: 'pledge_behind' })}">Giving nudges</a> page for people with Giving view access.</p></div>`;
+      <p class="muted-line">Individual pledges, and who is behind, are on the <a href="${href('plateaus', { kind: 'pledge_behind' }, 'giving-reports')}">Nudges and next steps</a> page for people with Giving view access.</p></div>`;
 }
 
 // ── Giving what-if ────────────────────────────────────────────────────────────────────────────
@@ -476,7 +474,7 @@ export function renderWhatIfPage({ result, params, keep = {} }) {
 // ── Giving statements ─────────────────────────────────────────────────────────────────────────
 
 function namedRefusal(what) {
-  return `<div class="panel"><h2>${e(what)} name each household</h2><p class="muted-line">They are available to people with Giving view access. Council access to Giving is totals only, so the Trends, Year over year, Household bands, Pledges and What-if pages are the council’s view of giving.</p></div>`;
+  return `<div class="panel"><h2>${e(what)} name each household</h2><p class="muted-line">They are available to people with Giving view access. Council access to Giving is totals only, so the Trends, Year over year, Pledges and What-if pages, and the annual Giving bands, are the council’s view of giving.</p></div>`;
 }
 
 export function renderStatementsPage({ result, councilPreview }) {
@@ -504,9 +502,12 @@ const NUDGE_HINTS = {
   stepped_up: 'The last six months are at least half again the six before',
 };
 
-export function renderNudgesPage({ result, totals, params, canEdit, councilPreview, status }) {
-  if (councilPreview) return namedRefusal('Giving nudges');
-  if (!result.ok) return `${statusBanner(status)}${unavailable('Giving nudges', result.message)}`;
+// The follow-up queue: one tab per kind of nudge, each household with assign and mark-done forms
+// for Giving edit (Connect re-checks that on every write). Giving reports › Nudges and next steps
+// shows it above the plateau ladder; `kindHref(kind)` keeps that page's own choices in each tab.
+// The caller refuses first for totals-only access, since every row names a household.
+export function renderNudgeQueue({ result, totals, params, canEdit, kindHref }) {
+  if (!result.ok) return unavailable('Giving nudges', result.message);
   const { nudges, staff } = result.data;
   const kinds = nudges.kinds;
   const requested = params?.get('kind');
@@ -524,14 +525,12 @@ export function renderNudgesPage({ result, totals, params, canEdit, councilPrevi
     const thank = current.key === 'first_time' ? `<a class="ga-link-button" href="${CONNECT_GIVING}?pane=receipts#giving">Thank in Connect</a>` : '';
     return `<li><div><b>${e(n.name)}</b><small>${e(n.detail)}</small></div><div class="ga-amount">${money(n.cents)}</div><div class="right ga-actions">${thank}${actions}</div></li>`;
   }).join('');
-  return `${statusBanner(status)}
-    <p class="lede">Households worth a personal touch, found from giving patterns. Nothing is sent automatically; each nudge is a prompt for a pastor or staff member.</p>
-    ${kpis([
+  return `${kpis([
       ['Open nudges', String(openTotal), `Across ${kinds.filter((k) => k.open_count).length} kind${kinds.filter((k) => k.open_count).length === 1 ? '' : 's'}`],
       ['Done this month', String(nudges.done_this_month), 'Thank-yous, calls and notes', nudges.done_this_month ? 'good' : ''],
       [`First-time givers, ${result.data.year}`, firstTime === null ? '—' : String(firstTime), 'Every one thanked within two weeks is the goal'],
     ])}
-    <div class="ga-tabs" role="navigation" aria-label="Kinds of nudge">${kinds.map((k) => `<a href="${href('nudges', { kind: k.key })}"${k.key === current.key ? ' class="is-on" aria-current="page"' : ''}><b>${e(k.label)}</b><small>${k.open_count} open</small></a>`).join('')}</div>
+    <div class="ga-tabs" role="navigation" aria-label="Kinds of nudge">${kinds.map((k) => `<a href="${kindHref(k.key)}"${k.key === current.key ? ' class="is-on" aria-current="page"' : ''}><b>${e(k.label)}</b><small>${k.open_count} open</small></a>`).join('')}</div>
     <div class="panel panel-spaced"><div class="panel-head"><div><h2>${e(current.label)}</h2><span class="muted">${e(NUDGE_HINTS[current.key] || '')}</span></div><span class="muted">${current.items.length < current.open_count ? `${current.items.length} of ${current.open_count} open` : `${current.open_count} open`}</span></div>
       ${items ? `<ul class="row-list ga-nudges">${items}</ul>` : '<div class="empty-note">Nothing open here.</div>'}
       ${current.key === 'first_time' ? '<p class="muted-line">A thank-you sent from Connect’s receipt queue marks the gift done here too.</p>' : ''}</div>`;
