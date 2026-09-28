@@ -5,7 +5,7 @@
 // planner's calls go to /api/v1/tuition-aid-workspace, which relays the explicitly allowed
 // operations (contracts/tuition-aid-workspace.js) to Connect's tuition-aid-workspace-v1 with the
 // caller's Access identity. Connect's ACCESS_GATE still decides view/edit for each call. The
-// tuition records stay in Connect's database until they are moved to Finance's.
+// tuition records live in Finance's database (src/tuition-storage.js, TUITION_STORAGE_MODE).
 import { HTML_TABS_2 } from '../../src/frontend/html-tabs.js';
 import { fetchVerifiedRole } from './connect-role-client.js';
 import { isSameOriginPost } from './form-post.js';

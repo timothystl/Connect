@@ -15,7 +15,7 @@ FINANCE_STORAGE_MODE = "finance"
 # Where the Tuition Aid records live (src/tuition-storage.js): "connect", "copying" (changes paused
 # while the move is prepared) or "finance" (copied once into timothy-finance-db, checked row for
 # row, then used from there). Andrew moved Tuition Aid to Finance on 2026-09-28.
-TUITION_STORAGE_MODE = "copying"
+TUITION_STORAGE_MODE = "finance"
 # "1" once QuickBooks is owned by Finance: Connect refuses its QuickBooks routes and reads the
 # connection/report cache from Finance's database. See docs/QUICKBOOKS_FINANCE_CUTOVER.md.
 QBO_MANAGED_BY_FINANCE = "1"
