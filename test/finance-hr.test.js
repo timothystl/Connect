@@ -152,6 +152,14 @@ describe('HR routes and pages', () => {
     expect(res.headers.get('Location')).toContain('reason=access_denied');
   });
 
+  it('lists a volunteer with no "Reports to" apart from the chart instead of under the Council', async () => {
+    const { db, sqlite } = makeDb({ seed: true });
+    sqlite.exec("INSERT INTO finance_hr_people (full_name, person_group, position, reports_to_id) VALUES ('Synthetic Floater', 'Key volunteer', 'Sunday School', NULL)");
+    const org = await (await get('&page=org-chart', admin, db)).text();
+    expect(org).toMatch(/No “Reports to” set.*Synthetic Floater/s);
+    expect(org.split('No “Reports to” set')[0]).not.toContain('Synthetic Floater');
+  });
+
   it('creates its own tables on first use, then saves and shows a new person', async () => {
     const { db, sqlite } = makeDb({ migrate: false });
     const empty = await (await get('', admin, db)).text();
@@ -182,6 +190,9 @@ describe('HR routes and pages', () => {
     expect(org).toContain('<div class="org-node mdo"><b>Synthetic MDO Director</b>');
     expect(org).toContain('<summary><b>VBS</b><small>2 volunteers</small></summary>');
     expect(org).toContain('MDO staff');
+    // A real tree: the educator's reports sit on one level beneath them, not in a stacked column.
+    expect(org).toMatch(/<b>Synthetic Educator<\/b>.*?<\/div><ul class="org-kids"><li><div class="org-node vol"><b>Synthetic Superintendent<\/b>/s);
+    expect(org).not.toContain('No “Reports to” set');
     const trainings = await (await get('&page=trainings', admin, db)).text();
     expect(trainings).toContain('<a href="https://ministrysafe.com" target="_blank" rel="noopener">MinistrySafe</a>');
     expect(trainings).not.toContain('Safe Gatherings');

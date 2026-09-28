@@ -12,7 +12,10 @@
 // { ok: false, reason }. Only a genuinely verified identity resolves to { ok: true, role }.
 
 const REQUEST_TIMEOUT_MS = 9000;
-export const PAGE_ROLE_TIMEOUT_MS = 1500;
+// A page view waits long enough for a Connect isolate that is starting cold (its first request
+// after a release runs schema setup and fetches the Access keys, several seconds). At 1.5s the
+// check timed out on those requests and, with no saved role yet, the page was refused outright.
+export const PAGE_ROLE_TIMEOUT_MS = 6000;
 
 export async function fetchVerifiedRole(env, accessJwt, { timeoutMs = REQUEST_TIMEOUT_MS, retry = true } = {}) {
   const binding = env.CONNECT_SERVICE;

@@ -1565,6 +1565,9 @@ function renderSectionBody(ctx) {
       dataStatus, accountsReport, quickbooksOwn: ctx.quickbooksOwn, quickbooksBackups: ctx.quickbooksBackups,
       quickbooksTransactions: ctx.quickbooksTransactions, importHistory: ctx.importHistory,
       canManageQuickbooks: roleResult.ok && roleResult.role === 'admin', searchParams: ctx.searchParams,
+      boardLayout: ctx.boardLayout || null, canManageBoardCategories: roleResult.ok && roleResult.role === 'admin',
+      mappingEntryMessage: ctx.searchParams?.get('status') === 'error'
+        ? describeBoardCategoryEntryError(ctx.searchParams.get('reason'), ctx.searchParams.get('message')) : null,
     });
   }
   if (section.id === 'packet') {
@@ -2361,7 +2364,10 @@ export default {
       } catch {
         return response(null, { status: 303, headers: { Location: '/?section=accounts&status=error&reason=invalid_json' } });
       }
-      const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'accounts', page: 'chart', ...params }).toString()}#layout` } });
+      // The layout editor also sits on QuickBooks › Account mapping, which asks to come back there.
+      const back = form.get('return_to') === 'account-mapping'
+        ? (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'quickbooks', page: 'account-mapping', ...params }).toString()}#layout` } })
+        : (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'accounts', page: 'chart', ...params }).toString()}#layout` } });
       const kind = String(form.get('form_kind') || '');
       // The Budget layout editor (accounts-pages.js): heading renames, or the changed rows of the
       // account table -- see buildBoardLayoutWrites for how a row's changes become the merge bodies.
@@ -3948,7 +3954,8 @@ export default {
         let budgetBuilder = planningPageId === 'builder' ? fetchBudgetBuilder(env, defaultLiveBudgetFiscalYear()) : null;
         // The Chart of Accounts board layout (categories, headings, renames, purpose tags) lays out
         // the Budget builder and is what the Chart of Accounts editor edits.
-        let boardLayoutResult = (planningPageId === 'builder' || section.id === 'accounts') ? fetchBoardLayout(env) : null;
+        let boardLayoutResult = (planningPageId === 'builder' || section.id === 'accounts'
+          || (section.id === 'quickbooks' && resolveFinancePage(section, pageId).id === 'account-mapping')) ? fetchBoardLayout(env) : null;
         let boardLayout = after(boardLayoutResult, (result) => (result && result.ok ? normalizeBoardLayout(result.layout) : null));
         const planningLoads = planningV3 ? Promise.all([
           fetchPlanningBasis(env, defaultLiveBudgetFiscalYear()),

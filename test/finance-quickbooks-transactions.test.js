@@ -204,4 +204,52 @@ describe('Finance QuickBooks transaction reporting', () => {
     expect(drill).toMatchObject({ ok: true, expenseLinesError: 'QuickBooks could not load Profit and Loss Detail (HTTP 500).' });
     expect(drill.transactions).toHaveLength(6);
   });
+
+  it('opens a payee reached from a bill payment with every transaction for that payee', () => {
+    const payments = { ...liveReport, Rows: { Row: liveReport.Rows.Row.filter((row) => row.ColData[1].value === 'Bill Payment (Check)') } };
+    const result = { ok: true, startDate: '2026-09-01', endDate: '2026-09-28', syncedAt: '2026-09-28T01:31:00Z', transactions: parseTransactionList(payments) };
+    const page = renderQuickbooksPage('vendor-spend', { quickbooksTransactions: result, searchParams: new URLSearchParams('vendor=Extension+Fund') });
+    expect(page).toContain('<h3>Extension Fund</h3>');
+    expect(page).toContain('txnId=21065');
+    expect(page).toContain('Payments and other');
+    expect(page).toContain('start_date=2026-01-01');
+    // Spend still leaves the bill payment out.
+    expect(page).toMatch(/Spend<\/[^>]+>\s*<[^>]+>\$0\.00/);
+  });
+
+  it('reads memo, payment method and who entered it, and shows them under the memo', () => {
+    const extra = {
+      Columns: { Column: [...liveReport.Columns.Column, ...[['Payment Method', 'pmt_mthd'], ['Created By', 'create_by']]
+        .map(([ColTitle, key]) => ({ ColTitle, ColType: 'String', MetaData: [{ Name: 'ColKey', Value: key }] }))] },
+      Rows: { Row: [{ type: 'Data', ColData: [
+        { value: '2026-09-18' }, { value: 'Check', id: '21002' }, { value: '3090' }, { value: 'Ace Plumbing', id: '77' }, { value: 'Boiler repair, east wing' },
+        { value: 'Checking' }, { value: 'Repairs' }, { value: '-450.00' }, { value: 'Check' }, { value: 'Office Manager' },
+      ] }] },
+    };
+    const [row] = parseTransactionList(extra);
+    expect(row).toMatchObject({ memo: 'Boiler repair, east wing', nameId: '77', paymentMethod: 'Check', createdBy: 'Office Manager' });
+    const result = { ok: true, startDate: '2026-09-01', endDate: '2026-09-28', syncedAt: '2026-09-28T01:31:00Z', transactions: [row] };
+    const page = renderQuickbooksPage('transactions', { quickbooksTransactions: result, searchParams: new URLSearchParams('') });
+    expect(page).toContain('Memo / description');
+    expect(page).toContain('Boiler repair, east wing');
+    expect(page).toContain('Paid by Check · Entered by Office Manager');
+    expect(page).toContain('vendor_id=77');
+    expect(searchTransactions([row], 'office manager')).toHaveLength(1);
+  });
+
+  it('asks QuickBooks for the memo and extra columns, and falls back to its default columns if refused', async () => {
+    const now = Date.parse('2026-09-28T01:00:00Z');
+    const db = { prepare: () => ({ first: async () => ({ realm_id: '123', access_token: 'token', environment: 'production', access_token_expires_at: '2026-09-28T02:00:00Z' }) }) };
+    const urls = [];
+    const fetchImpl = async (url) => {
+      urls.push(new URL(url));
+      return new URL(url).searchParams.has('columns') ? new Response('{}', { status: 400 }) : new Response(JSON.stringify(liveReport), { status: 200 });
+    };
+    const result = await loadQuickbooksTransactions({ FINANCE_DB: db }, new URLSearchParams('start_date=2026-09-01&end_date=2026-09-28'), { now, fetchImpl });
+    expect(urls[0].searchParams.get('columns')).toContain('memo');
+    expect(urls[0].searchParams.get('columns')).toContain('pmt_mthd');
+    expect(urls).toHaveLength(2);
+    expect(result.ok).toBe(true);
+    expect(result.transactions).toHaveLength(6);
+  });
 });

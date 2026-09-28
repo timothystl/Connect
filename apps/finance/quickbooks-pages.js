@@ -1,9 +1,10 @@
 import { buildDataStatusView } from './data-status-service.js';
 import { buildAccountsReportView } from './accounts-report-service.js';
+import { renderLayoutEditor } from './accounts-pages.js';
 import { escapeHtml, renderKpiCards, renderSectionHeading, renderTable } from './render-helpers.js';
 import {
-  expenseAccountOf, findTransactionExceptions, searchTransactions, sortRows, spendingCents, spendingRowsFor,
-  summarizeExpenseAccounts, summarizeExpenseLines, summarizeVendorSpend, TRANSACTION_SORTS,
+  expenseAccountOf, findTransactionExceptions, isSpending, searchTransactions, sortRows, spendingCents,
+  summarizeExpenseAccounts, summarizeExpenseLines, summarizeVendorSpend, TRANSACTION_SORTS, transactionsForName,
 } from './quickbooks-transactions-service.js';
 
 function flattenAccountHierarchy(nodes) {
@@ -87,7 +88,7 @@ function transactionLink(row) {
 
 // Every view state lives in the query string (these pages run no script), so search, sort,
 // filters, and drill-downs are ordinary links and survive a reload or a shared URL.
-const VIEW_PARAMS = ['start_date', 'end_date', 'q', 'type', 'sort', 'dir', 'account', 'vendor'];
+const VIEW_PARAMS = ['start_date', 'end_date', 'q', 'type', 'sort', 'dir', 'account', 'vendor', 'vendor_id'];
 
 function readView(searchParams) {
   const get = (name) => (searchParams && searchParams.get(name)) || '';
@@ -117,7 +118,7 @@ function table(headHtml, rowsHtml, emptyMessage) {
 }
 
 function renderFilterForm(pageId, result, view, { types = [], searchLabel = 'Search', searchPlaceholder = '' } = {}) {
-  const hidden = ['sort', 'dir', 'account', 'vendor']
+  const hidden = ['sort', 'dir', 'account', 'vendor', 'vendor_id']
     .filter((name) => view[name])
     .map((name) => `<input type="hidden" name="${name}" value="${escapeHtml(view[name])}">`).join('');
   const typeSelect = types.length ? `<div class="field"><label for="qb-type">Transaction type</label><select id="qb-type" name="type"><option value="">All types</option>${types.map((type) => `<option${type === view.type ? ' selected' : ''}>${escapeHtml(type)}</option>`).join('')}</select></div>` : '';
@@ -136,16 +137,28 @@ function amountCell(row) {
   return `<td class="num">${row.amountCents == null ? escapeHtml(row.amount || '—') : money(row.amountCents)}</td>`;
 }
 
+// The smaller QuickBooks details under the memo, only those the report carried for this row.
+function transactionDetails(row) {
+  const parts = [
+    row.paymentMethod && `Paid by ${row.paymentMethod}`,
+    row.dueDate && `Due ${row.dueDate}`,
+    row.cleared && /^(c|r|cleared|reconciled)$/i.test(row.cleared) && (/^r/i.test(row.cleared) ? 'Reconciled' : 'Cleared'),
+    row.className && `Class: ${row.className}`,
+    row.location && `Location: ${row.location}`,
+    row.createdBy && `Entered by ${row.createdBy}`,
+  ].filter(Boolean);
+  return parts.length ? `<br><small class="muted">${escapeHtml(parts.join(' · '))}</small>` : '';
+}
+
 function renderTransactionTable(pageId, result, view, rows, { includeReason = false, emptyMessage = 'No transactions match.' } = {}) {
   const sorted = sortRows(rows, TRANSACTION_SORTS, view.sort || 'date', view.dir || (!view.sort || view.sort === 'date' || view.sort === 'amount' ? 'desc' : 'asc'));
   const h = (label, key, options) => sortHeader(label, key, pageId, result, view, { defaultKey: 'date', ...options });
-  const head = [h('Date', 'date'), h('Type', 'type'), h('Number', 'number'), h('Name', 'name'), h('Account', 'account'), h('Category / split', 'category'), h('Amount', 'amount', { numeric: true }),
+  const head = [h('Date', 'date'), h('Type', 'type'), h('Number', 'number'), h('Name', 'name'), h('Memo / description', 'memo'), h('Account', 'account'), h('Category / split', 'category'), h('Amount', 'amount', { numeric: true }),
     includeReason ? '<th>Reason</th>' : '', '<th></th>'].join('');
   const body = sorted.map((row) => {
     const vendorLink = row.name
-      ? `<a href="${escapeHtml(pageHref('vendor-spend', result, view, { vendor: row.name, account: '', q: '', type: '', sort: '', dir: '' }))}">${escapeHtml(row.name)}</a>` : '—';
-    const memo = row.memo ? `<br><small class="muted">${escapeHtml(row.memo)}</small>` : '';
-    return `<tr><td>${escapeHtml(row.date || '—')}</td><td>${escapeHtml(row.type || '—')}</td><td>${escapeHtml(row.docNum || '—')}</td><td>${vendorLink}${memo}</td><td>${escapeHtml(row.account || '—')}</td><td>${escapeHtml(row.split === '-Split-' ? 'Multiple (split)' : row.split || '—')}</td>${amountCell(row)}${includeReason ? `<td>${escapeHtml(row.reasons.join('; '))}</td>` : ''}<td>${transactionLink(row)}</td></tr>`;
+      ? `<a href="${escapeHtml(pageHref('vendor-spend', result, view, { vendor: row.name, vendor_id: row.nameId || '', account: '', q: '', type: '', sort: '', dir: '' }))}">${escapeHtml(row.name)}</a>` : '—';
+    return `<tr><td>${escapeHtml(row.date || '—')}</td><td>${escapeHtml(row.type || '—')}</td><td>${escapeHtml(row.docNum || '—')}</td><td>${vendorLink}</td><td>${row.memo ? escapeHtml(row.memo) : '<span class="muted">—</span>'}${transactionDetails(row)}</td><td>${escapeHtml(row.account || '—')}</td><td>${escapeHtml(row.split === '-Split-' ? 'Multiple (split)' : row.split || '—')}</td>${amountCell(row)}${includeReason ? `<td>${escapeHtml(row.reasons.join('; '))}</td>` : ''}<td>${transactionLink(row)}</td></tr>`;
   }).join('');
   return table(head, body, emptyMessage);
 }
@@ -203,21 +216,30 @@ function renderTransactionPage(pageId, result, searchParams) {
     ? `<p class="status status-error">${escapeHtml(result.expenseLinesError)} Showing whole transactions instead.</p>` : '';
   if (drill && drill.value) {
     // One account or vendor: the spending rows behind its total, searchable and sortable.
+    // A vendor lists every transaction with that payee -- bill payments included, so a payee
+    // reached from a bill payment is never empty -- while Spend still counts only spending rows.
     const detail = byLine
       ? result.expenseLines.filter((line) => line.account === drill.value)
-      : spendingRowsFor(all, { [drill.param]: drill.value });
+      : drill.param === 'vendor'
+        ? transactionsForName(all, { name: drill.value, nameId: view.vendor_id })
+        : all.filter((row) => isSpending(row) && expenseAccountOf(row) === drill.value);
     const shown = searchTransactions(detail, view.q);
-    const total = shown.reduce((sum, row) => sum + (byLine ? row.amountCents : spendingCents(row)), 0);
-    const back = pageHref(pageId, result, view, { [drill.param]: '', q: '', sort: '', dir: '' });
+    const total = shown.reduce((sum, row) => sum + (byLine ? row.amountCents : isSpending(row) ? spendingCents(row) : 0), 0);
+    const payments = drill.param === 'vendor' ? shown.filter((row) => !isSpending(row)) : [];
+    const paidCents = payments.reduce((sum, row) => sum + Math.abs(row.amountCents || 0), 0);
+    const back = pageHref(pageId, result, view, { [drill.param]: '', vendor_id: '', q: '', sort: '', dir: '' });
+    const yearStart = `${String(result.endDate).slice(0, 4)}-01-01`;
+    const widen = drill.param === 'vendor' && result.startDate > yearStart
+      ? ` <a href="${escapeHtml(pageHref(pageId, { ...result, startDate: yearStart }, view, {}))}">Show this year to date</a>` : '';
     const other = drill.param === 'account'
       ? [...new Set(shown.map((row) => row.name).filter(Boolean))].length
       : [...new Set(shown.map(expenseAccountOf).filter(Boolean))].length;
     body = `<p><a href="${escapeHtml(back)}">← All ${drill.noun === 'account' ? 'accounts' : 'vendors'}</a></p>
       <h3>${escapeHtml(drill.value)}</h3>${lineWarning}
       ${renderFilterForm(pageId, result, view, { searchPlaceholder: 'Name, memo, number, amount…' })}
-      ${kpis(shown.length, [{ label: 'Spend', value: money(total) }, { label: drill.param === 'account' ? 'Vendors' : 'Accounts', value: String(other) }])}
-      ${renderTransactionTable(pageId, result, view, shown, { emptyMessage: `No spending for this ${drill.noun} matches.` })}
-      <p class="muted">${escapeHtml(drill.param === 'account' ? lineNote : SPENDING_NOTE)}</p>`;
+      ${kpis(shown.length, [{ label: 'Spend', value: money(total) }, ...(payments.length ? [{ label: 'Payments and other', value: money(paidCents), hint: `${payments.length} not counted as spend` }] : []), { label: drill.param === 'account' ? 'Vendors' : 'Accounts', value: String(other) }])}
+      ${renderTransactionTable(pageId, result, view, shown, { emptyMessage: drill.param === 'vendor' ? `No transactions with ${drill.value} in this date range.` : `No spending for this ${drill.noun} matches.` })}
+      <p class="muted">${escapeHtml(drill.param === 'account' ? lineNote : `${SPENDING_NOTE} They are listed here so every transaction with this payee is visible.`)}${widen}</p>`;
   } else if (drill) {
     const summary = drill.param === 'vendor' ? summarizeVendorSpend(all)
       : byLine ? summarizeExpenseLines(result.expenseLines) : summarizeExpenseAccounts(all);
@@ -254,7 +276,10 @@ function renderImportHistory(result) {
   </section>`;
 }
 
-export function renderQuickbooksPage(pageId, { dataStatus, accountsReport, quickbooksOwn = null, quickbooksBackups = null, quickbooksTransactions = null, importHistory = null, canManageQuickbooks = false, searchParams = null }) {
+export function renderQuickbooksPage(pageId, {
+  dataStatus, accountsReport, quickbooksOwn = null, quickbooksBackups = null, quickbooksTransactions = null, importHistory = null,
+  canManageQuickbooks = false, searchParams = null, boardLayout = null, canManageBoardCategories = false, mappingEntryMessage = null,
+}) {
   if (['transactions', 'expense-drilldown', 'vendor-spend', 'exceptions'].includes(pageId)) {
     return renderTransactionPage(pageId, quickbooksTransactions, searchParams);
   }
@@ -262,11 +287,20 @@ export function renderQuickbooksPage(pageId, { dataStatus, accountsReport, quick
   if (pageId === 'account-mapping') {
     const isLive = accountsReport.source === 'live';
     const report = buildAccountsReportView(accountsReport.rows);
+    // Admins edit the mapping right here: the same Budget layout editor as Chart of Accounts,
+    // saving to Connect's board-category and purpose-tag stores and returning to this page.
+    const editable = canManageBoardCategories && boardLayout && isLive;
+    const entryStatus = searchParams?.get('status') || null;
+    const editor = editable
+      ? renderLayoutEditor(accountsReport.rows, boardLayout, entryStatus, mappingEntryMessage, { returnTo: 'account-mapping' })
+      : `<p class="muted">${canManageBoardCategories
+        ? 'The saved board layout could not be read from Connect, so the mapping cannot be edited right now. Reload to try again.'
+        : 'Only a Connect admin can change the mapping.'}</p>`;
     return `<section class="report" aria-label="QuickBooks account mapping">
       ${renderSectionHeading({ eyebrow: 'QuickBooks', heading: 'Account mapping', badge: isLive ? 'Live from Connect' : 'Finance category mapping (synthetic)' })}
-      <p>This is Finance’s own ledger-path-to-board-category mapping, not a live link to QuickBooks account IDs -- the <code>account_qbo_id</code> column Finance’s schema reserves for that is not populated by any import today.</p>
-      ${renderTable({ head: ['Ledger path', 'Board category', 'Purpose'], rows: renderMappingRows(report.hierarchy) })}
-    </section>`;
+      <p>How each QuickBooks account is grouped on the budget and board reports. Changing a board category, display name or purpose tag only changes that grouping; QuickBooks account names and numbers are untouched.</p>
+      ${editable ? '' : renderTable({ head: ['Ledger path', 'Board category', 'Purpose'], rows: renderMappingRows(report.hierarchy) })}
+    </section>${editor}`;
   }
   // 'sync-status' (default) -- same underlying contract/status as Data & Imports. Finance's own
   // connection card (once enabled) must not depend on that status feed, so a status that cannot be

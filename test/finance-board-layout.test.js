@@ -150,6 +150,21 @@ describe('Budget builder and Chart of Accounts board layout', () => {
     expect(calls.find((c) => c.path.endsWith('/finance-board-categories-write-v1')).body).toEqual({ expense: { 'Expenses:60 Payroll:60100 Salary - Pastor': 'benefits' } });
     expect(calls.find((c) => c.path.endsWith('/finance-purpose-tags-write-v1')).body).toEqual({ categories: { 'Expenses:60 Payroll:60100 Salary - Pastor': 'youth' } });
   });
+
+  it('shows the same editor on QuickBooks › Account mapping and returns there after a save', async () => {
+    const { env } = makeEnv();
+    const page = await (await get(env, 'section=quickbooks&page=account-mapping')).text();
+    expect(page).toContain('id="layout"');
+    expect(page).toContain('name="return_to" value="account-mapping"');
+    const res = await worker.fetch(new Request('https://finance.test/api/v1/connect-board-categories-write', {
+      method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'jwt', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        form_kind: 'accounts', return_to: 'account-mapping',
+        path_0: 'Expenses:60 Payroll:60100 Salary - Pastor', side_0: 'expense', orig_cat_0: '', cat_0: 'benefits', name_0: '', orig_name_0: '', tag_0: '', orig_tag_0: '',
+      }).toString(),
+    }), env);
+    expect(res.headers.get('location')).toBe('/?section=quickbooks&page=account-mapping&status=ok#layout');
+  });
 });
 
 describe('connect.finance-board-layout.v1', () => {

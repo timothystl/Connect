@@ -418,6 +418,18 @@ async function _fetchRouted(req, env, url, path, method) {
       });
     }
 
+    // Finance asks for the signed-in person's role on every page view. It reads only app_users and
+    // chms_config, which exist before any schema setup, so it is answered ahead of initDb: on a
+    // cold isolate after a release, schema setup took long enough that Finance gave up waiting.
+    if (path === '/api/contracts/staff-role-v1') {
+      try {
+        return await handleContractsServiceApi(req, env, path);
+      } catch (e) {
+        console.error('Contracts API error [' + method + ' ' + path + ']:', e?.message, e?.stack);
+        return json({ error: 'Internal server error' }, 500);
+      }
+    }
+
     try {
       await initDb(env.DB);
     } catch (e) {

@@ -162,37 +162,35 @@ function orgNode(person, extra = '') {
   return `<div class="org-node${GROUP_CLASS[person.person_group] || ''}${extra}"><b>${e(person.full_name)}</b><small>${e(person.position || '')}</small></div>`;
 }
 
-function flatten(node) {
-  return node.reports.flatMap((child) => [child.person, ...flatten(child)]);
+const TEAM_FOLD_MIN = 2; // this many leaf volunteers on one ministry team under one leader fold into one card
+const STACK_OVER = 4;    // more leaf reports than this stack in one column beneath their leader
+const GROUP_ORDER = { 'Church staff': 0, 'MDO staff': 1, 'Key volunteer': 2 };
+
+function orgTeam(team, members) {
+  return `<details class="org-team"><summary><b>${e(team)}</b><small>${members.length} volunteer${members.length === 1 ? '' : 's'}</small></summary><ul>${members.map((m) => `<li>${e(m.full_name)}${m.position ? ` <small>${e(m.position)}</small>` : ''}</li>`).join('')}</ul></details>`;
 }
 
-// Staff are drawn one by one; key volunteers with a ministry team fold into one line per team
-// (open it to see who serves), so a column stays readable when a leader oversees many volunteers.
-function orgMembers(people) {
+// One person and everyone under them, as a real tree: direct reports sit side by side on one level
+// beneath their leader, each with their own reports beneath them. Key volunteers on one ministry
+// team fold into a single card (open it to see who serves), and a leader with many leaf reports
+// stacks them in one column so the chart stays readable.
+function orgBranch(node, extra = '') {
+  const kids = [...node.reports].sort((a, b) => (GROUP_ORDER[a.person.person_group] ?? 9) - (GROUP_ORDER[b.person.person_group] ?? 9));
+  const items = [];
   const teams = new Map();
-  const out = [];
-  for (const p of people) {
-    const team = p.person_group === 'Key volunteer' ? String(p.ministry_team || '').trim() : '';
-    if (!team) { out.push(orgNode(p)); continue; }
-    if (!teams.has(team)) { teams.set(team, []); out.push({ team }); }
-    teams.get(team).push(p);
+  for (const child of kids) {
+    const team = child.person.person_group === 'Key volunteer' && !child.reports.length ? String(child.person.ministry_team || '').trim() : '';
+    if (!team) { items.push(orgBranch(child)); continue; }
+    if (!teams.has(team)) { teams.set(team, []); items.push({ team }); }
+    teams.get(team).push(child.person);
   }
-  return out.map((item) => (typeof item === 'string' ? item : (() => {
+  const lis = items.flatMap((item) => {
+    if (typeof item === 'string') return [item];
     const members = teams.get(item.team);
-    return `<details class="org-team"><summary><b>${e(item.team)}</b><small>${members.length} volunteer${members.length === 1 ? '' : 's'}</small></summary><ul>${members.map((m) => `<li>${e(m.full_name)}${m.position ? ` <small>${e(m.position)}</small>` : ''}</li>`).join('')}</ul></details>`;
-  })())).join('');
-}
-
-function orgColumns(root) {
-  const of = (group) => root.reports.filter((child) => child.person.person_group === group);
-  const cols = of('Church staff').map((child) => `<div class="org-col">${orgNode(child.person)}${orgMembers(flatten(child))}</div>`);
-  // MDO sits outside the church staff org, so it gets its own labeled column.
-  cols.push(...of('MDO staff').map((child) => `<div class="org-col"><div class="org-col-head">MDO</div>${orgNode(child.person)}${orgMembers(flatten(child))}</div>`));
-  const volunteers = of('Key volunteer');
-  if (volunteers.length) {
-    cols.push(`<div class="org-col"><div class="org-col-head">Volunteers</div>${orgMembers(volunteers.flatMap((child) => [child.person, ...flatten(child)]))}</div>`);
-  }
-  return cols.join('');
+    return members.length >= TEAM_FOLD_MIN ? [`<li>${orgTeam(item.team, members)}</li>`] : members.map((p) => `<li>${orgNode(p)}</li>`);
+  });
+  const stack = lis.length > STACK_OVER && kids.every((c) => !c.reports.length);
+  return `<li>${orgNode(node.person, extra)}${lis.length ? `<ul class="org-kids${stack ? ' stack' : ''}">${lis.join('')}</ul>` : ''}</li>`;
 }
 
 function positionForm(position = {}) {
@@ -209,9 +207,13 @@ function positionForm(position = {}) {
 
 function renderOrg(view, params, canEdit) {
   const tree = buildOrgTree(view.people);
+  // Staff with no one above them report to the Council, beside the Lead Pastor. Anyone else with
+  // no "Reports to" is listed apart, so they are not drawn as if they reported to the Council.
+  const placed = tree.filter((root) => root.person.person_group === 'Church staff' || root.reports.length);
+  const unplaced = tree.filter((root) => !placed.includes(root));
   const chart = tree.length
-    ? `<div class="org"><div class="org-top">Church Council</div>${tree.map((root) => `<div class="org-root">${orgNode(root.person, root.person.person_group === 'Church staff' ? ' lead' : '')}</div>
-      ${root.reports.length ? `<div class="org-columns">${orgColumns(root)}</div>` : ''}`).join('')}
+    ? `<div class="org"><div class="org-scroll"><ul class="org-tree"><li><div class="org-top">Church Council</div>${placed.length ? `<ul class="org-kids">${placed.map((root) => orgBranch(root, root.person.person_group === 'Church staff' ? ' lead' : '')).join('')}</ul>` : ''}</li></ul></div>
+      ${unplaced.length ? `<div class="org-unplaced"><p class="muted">No “Reports to” set${canEdit ? ' — choose one in the Directory to place them on the chart' : ''}:</p><div class="org-unplaced-row">${unplaced.map((root) => orgNode(root.person)).join('')}</div></div>` : ''}
       <div class="org-legend"><span class="sw"></span>Church staff <span class="sw mdo"></span>MDO staff <span class="sw vol"></span>Key volunteer</div></div>`
     : emptyNote('Add staff with who they report to, and the chart draws itself.');
   const stale = view.positions.filter((p) => p.stale).map((p) => p.title);
@@ -392,16 +394,32 @@ export const HR_STYLES = `
     .check { display:flex; align-items:center; gap:6px; color:var(--ink); font-size:13.5px; font-weight:400; }
     .check input { padding:0; }
     .org { display:flex; flex-direction:column; align-items:center; gap:14px; }
-    .org-top { padding:8px 16px; border:1px solid var(--line); border-radius:6px; background:#F7F8FA; font-size:14px; }
-    .org-root .org-node.lead { background:var(--navy); border-color:var(--navy); }
-    .org-root .org-node.lead b, .org-root .org-node.lead small { color:#fff; }
-    .org-columns { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:14px; width:100%; padding-top:14px; border-top:1px solid var(--line); }
-    .org-col { display:flex; flex-direction:column; gap:8px; }
-    .org-col > .org-node:first-child, .org-col > .org-col-head + .org-node:not(.vol):not(.mdo) { border-color:var(--navy); }
+    .org-scroll { width:100%; overflow-x:auto; padding-bottom:4px; }
+    .org-tree, .org-kids { list-style:none; margin:0; padding:0; }
+    .org-tree { width:max-content; min-width:100%; display:flex; justify-content:center; }
+    .org-tree li { display:flex; flex-direction:column; align-items:center; }
+    .org-kids { display:flex; justify-content:center; position:relative; padding-top:16px; }
+    .org-kids::before { content:''; position:absolute; top:0; left:50%; height:16px; border-left:1px solid var(--line); }
+    .org-kids > li { position:relative; padding:16px 6px 0; }
+    .org-kids > li::before, .org-kids > li::after { content:''; position:absolute; top:0; right:50%; width:50%; height:16px; border-top:1px solid var(--line); }
+    .org-kids > li::after { right:auto; left:50%; border-left:1px solid var(--line); }
+    .org-kids > li:only-child { padding-top:0; }
+    .org-kids > li:only-child::before, .org-kids > li:only-child::after { display:none; }
+    .org-kids > li:first-child::before, .org-kids > li:last-child::after { border:0 none; }
+    .org-kids > li:last-child::before { border-right:1px solid var(--line); }
+    .org-kids.stack { flex-direction:column; align-items:center; gap:6px; }
+    .org-kids.stack > li { padding:0; }
+    .org-kids.stack > li::before, .org-kids.stack > li::after { display:none; }
+    .org-node, .org-top, .org-team { width:156px; box-sizing:border-box; }
+    .org-node, .org-top { text-align:center; }
+    .org-top { padding:8px 12px; border:1px solid var(--line); border-radius:6px; background:#F7F8FA; font-size:14px; }
     .org-node { padding:8px 12px; border:1px solid var(--line); border-radius:6px; background:#fff; }
+    .org-node.lead { background:var(--navy); border-color:var(--navy); }
+    .org-node.lead b, .org-node.lead small { color:#fff; }
     .org-node.vol { background:#FBF6EC; border-color:#EBD9B4; }
-    .org-node.mdo, .org-col > .org-node.mdo:first-child, .org-col > .org-col-head + .org-node.mdo { background:#EEF6F1; border-color:#9CC7AF; border-style:dashed; }
-    .org-col-head { font-size:11.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); padding:2px 2px 0; }
+    .org-node.mdo { background:#EEF6F1; border-color:#9CC7AF; border-style:dashed; }
+    .org-unplaced { width:100%; border-top:1px dashed var(--line); padding-top:10px; }
+    .org-unplaced-row { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
     .org-team { border:1px solid #EBD9B4; border-radius:6px; background:#FBF6EC; }
     .org-team summary { cursor:pointer; padding:8px 12px; list-style-position:inside; }
     .org-team summary b { font-size:13.5px; font-weight:600; color:var(--navy); margin-right:6px; }
