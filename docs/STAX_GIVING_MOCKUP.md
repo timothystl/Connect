@@ -41,16 +41,19 @@ Local development has no Finance host, so there the original Connect pages still
 `/recurring` still goes to Connect's Giving → Recurring pane). The `/admin/api/giving/stax-mockup/*`
 data routes below are unchanged.
 
-### Removing the sandbox test gifts
+### Sandbox gifts stay out of production
 
-Every gift the mockup records is a sandbox test (Connect has no live Stax key), but it lands in
-the real `giving_entries` ledger with `source='stax_mockup'`, so it appears in Finance's Online
-giving tabs and totals. `.github/workflows/purge-stax-sandbox-gifts.yml` removes them: run it with
-`mode=PREVIEW` to see counts only, then `mode=DELETE`, which records a D1 Time Travel bookmark and
-a 30-day JSON artifact of every removed row before deleting the sandbox gifts, their review-queue
-rows and correction history, the emptied "Stax Giving (mockup)" batches and their deposit links,
-and the sandbox recurring schedules and customer links. Any new test through the mockup form adds
-gifts again; re-run it afterward.
+Production Connect sets `STAX_SANDBOX_REFUSED = "1"` (`wrangler.toml`; Andrew, 2026-09-28:
+"sandbox should be sequestered during testing"). With it, every `/api/mockup/stax-giving/*`
+route answers 410 with a message that testing runs on staging, and a sandbox webhook is
+acknowledged (200, `ignored: "sandbox"`) without recording anything. Staging does not set it, so
+Stax testing runs against Connect staging and its own database, and shows in Finance staging.
+To test from the website form, point it at the staging Connect API, and point the Stax sandbox
+webhook at staging's `/api/mockup/stax-giving/webhook`.
+
+The eight test gifts (and 13 test schedules) recorded in production before this were removed on
+2026-09-28 by `.github/workflows/purge-stax-sandbox-gifts.yml` (`mode=PREVIEW` counts only;
+`mode=DELETE` records a Time Travel bookmark and a 30-day JSON artifact of every removed row first).
 
 ## Where the public form actually lives
 
