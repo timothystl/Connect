@@ -65,6 +65,7 @@ export const PRINT_STYLES = `
 // (`?section=&page=&print=1&fragment=1`), so a viewer only ever gets what that page allows them.
 export const BOARD_PACKET_ITEMS = Object.freeze([
   { key: 'health', label: 'Financial Health', section: 'health', pages: ['overview'] },
+  { key: 'giving', label: 'Giving Report to the Council (this month, General Fund, with the other categories)', section: 'giving-analytics', pages: ['council'] },
   { key: 'church', label: 'Church Report (overview, detail, multi-year trend, budget vs actual)', section: 'church', pages: ['overview', 'income-expense', 'trend', 'budget-actual'] },
   { key: 'balance', label: 'Balance Sheet (position with account detail, and multi-year)', section: 'balance', pages: ['position', 'multi-year'] },
   { key: 'daycare', label: 'Daycare Report (overview and budget comparison)', section: 'daycare', pages: ['overview', 'budget-comparison'] },

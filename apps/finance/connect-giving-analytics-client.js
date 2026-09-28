@@ -20,3 +20,14 @@ export function fetchGivingAnalyticsPeople(env, accessJwt, { asOf } = {}) {
 export function postGivingFollowupWrite(env, accessJwt, body) {
   return callConnectContract(env, accessJwt, 'giving-followup-write-v1', { method: 'POST', body });
 }
+
+// The Giving Report to the Council (giving-board-v1): every figure for one period, for each fund
+// category and for all giving. period is YYYY-MM, YYYY-Qn or YYYY; blank means this month.
+export function fetchGivingBoard(env, accessJwt, { period } = {}) {
+  return callConnectContract(env, accessJwt, 'giving-board-v1', period ? { query: { period: String(period).slice(0, 10) } } : {});
+}
+
+// Email packet: Connect sends the rendered report from the church's address (Giving edit only).
+export function postGivingBoardEmail(env, accessJwt, body) {
+  return callConnectContract(env, accessJwt, 'giving-board-email-v1', { method: 'POST', body });
+}

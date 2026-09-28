@@ -69,7 +69,7 @@ const paths = (calls) => calls.map((c) => c.path.split('/').pop());
 describe('Giving analytics pages (Finance v3)', () => {
   it('shows Trends from Connect’s totals, naming nobody', async () => {
     const { env, calls } = makeEnv();
-    const html = await (await get(env, '')).text();
+    const html = await (await get(env, '&page=trends')).text();
     expect(html).toContain('<h1 class="page-title">Trends</h1>');
     expect(html).toContain('$612,300');
     expect(html).toContain('+4.1% vs. 2025 to date');

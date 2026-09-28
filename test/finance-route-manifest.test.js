@@ -39,6 +39,7 @@ const WRITE_ROUTE_IDS = new Set([
   'gift-batch-write-v1',
   'giving-followup-write-v1',
   'giving-online-settings-write-v1',
+  'giving-board-email-v1',
   'connect-planner-save-v1',
 ]);
 const OWN_DB_WRITE_ROUTE_IDS = new Set(['budget-plan-save-v1']);
@@ -118,6 +119,7 @@ describe('Finance staging route manifest', () => {
       '/api/v1/gift-batch-write',
       '/api/v1/giving-online-settings-write',
       '/api/v1/giving-followup-write',
+      '/api/v1/giving-board-email',
       '/api/summary', '/api/v1/payroll-relay-diagnostic',
       '/api/v1/payroll-hours-save', '/api/v1/payroll-period-approve',
       '/api/v1/payroll-staff-save', '/api/v1/payroll-staff-deactivate', '/api/v1/payroll-csv',
