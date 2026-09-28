@@ -647,6 +647,9 @@ export const FUND_CATEGORIES = [
   { key: 'restricted', label: 'Restricted & designated', hh_label: 'Giving households' },
   // MDO tuition and fees, if any reach Connect: kept apart so "all revenue except MDO" can mean it.
   { key: 'mdo',        label: 'MDO income',              hh_label: 'Paying households' },
+  // Money received for another organization and paid on to it (e.g. Concordia Children's
+  // Services). Not church income: left out of donor giving, revenue and the money-source mix.
+  { key: 'passthrough', label: 'Pass-through (not church income)', hh_label: 'Giving households' },
 ];
 const FUND_CATEGORY_KEYS = new Set(FUND_CATEGORIES.map(c => c.key));
 

@@ -2528,6 +2528,7 @@ var _GIV_FUND_CAT_OPTS = [
   { key: 'passive',    label: 'Passive income' },
   { key: 'restricted', label: 'Restricted & designated' },
   { key: 'mdo',        label: 'MDO income' },
+  { key: 'passthrough', label: 'Pass-through (not church income)' },
 ];
 function givRenderFundCategories() {
   var root = document.getElementById('giv-fundcat-root');

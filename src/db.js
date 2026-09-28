@@ -536,6 +536,20 @@ export async function backfillFundCategories(db) {
   } catch {}
 }
 
+// One-time: Concordia Children's Services is money received for another organization and paid on
+// to it (Andrew, 2026-09-28), so it moves to the pass-through category. Marker-gated like the
+// backfill above, so a later change in Settings → Fund categories is never undone.
+export async function backfillPassThroughFunds(db) {
+  try {
+    const marker = await db.prepare("SELECT value FROM chms_config WHERE key='fund_passthrough_backfilled'").first();
+    if (marker) return;
+    await db.batch([
+      db.prepare("UPDATE funds SET category='passthrough' WHERE LOWER(name) LIKE '%concordia children%'"),
+      db.prepare("INSERT INTO chms_config (key,value) VALUES ('fund_passthrough_backfilled','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value"),
+    ]);
+  } catch {}
+}
+
 export async function seedChmsDefaults(db) {
   try {
     const existing = await db.prepare('SELECT COUNT(*) as n FROM funds').first();
@@ -2382,6 +2396,7 @@ async function _doInitDb(db) {
   await migrateChristmasMarketRoles(db);
   await seedChmsDefaults(db);
   await backfillFundCategories(db);
+  await backfillPassThroughFunds(db);
 
   // Transportation folded into Acceptance (Care Ministry) as a sub-category — re-tag any
   // roles already seeded/added under the old 'transportation' ministry. This MUST run
