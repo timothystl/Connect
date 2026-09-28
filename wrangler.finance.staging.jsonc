@@ -33,7 +33,7 @@
     },
     {
       "binding": "PAYROLL_SERVICE",
-      "service": "tlc-newsletter-admin"
+      "service": "timothy-website-admin"
     }
   ],
   "vars": {
