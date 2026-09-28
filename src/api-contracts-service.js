@@ -16,6 +16,7 @@ import { verifyAccessJwt } from './access-jwt.js';
 import { getRolePermissions, permissionsForRole } from './api-utils.js';
 import { recordQuickGivingEntry } from './api-giving.js';
 import { handleGivingBatchContracts } from './api-giving-batch-contracts.js';
+import { handleGivingOnlineContracts } from './api-giving-online-contracts.js';
 import { handleGivingAnalyticsContracts } from './api-giving-analytics-contracts.js';
 import { respondWithFinancePlanningBasisV1 } from './api-planning-contracts.js';
 import { respondWithFinanceAccessRolesV1 } from './api-access-contracts.js';
@@ -56,6 +57,12 @@ export async function handleContractsServiceApi(req, env, path) {
   if (path.startsWith('/api/contracts/giving-batch-') || path === '/api/contracts/giving-transactions-v1' || path === '/api/contracts/giving-online-v1') {
     const batchResponse = await handleGivingBatchContracts(req, env, path);
     if (batchResponse) return batchResponse;
+  }
+
+  // Online giving form settings (fee percentage, public funds) -- see api-giving-online-contracts.js.
+  if (path.startsWith('/api/contracts/giving-online-')) {
+    const onlineResponse = await handleGivingOnlineContracts(req, env, path);
+    if (onlineResponse) return onlineResponse;
   }
 
   // Giving analytics (Finance v3): aggregate for any Giving access including council's anonymous

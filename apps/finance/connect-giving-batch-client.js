@@ -75,3 +75,13 @@ export function describeGivingBatchFailure(result) {
     default: return 'The request did not complete.';
   }
 }
+
+// Online giving form settings (fee percentage, which funds the public form offers) stay in
+// Connect; see src/api-giving-online-contracts.js.
+export function fetchGivingOnlineSettings(env, accessJwt) {
+  return callConnectContract(env, accessJwt, 'giving-online-settings-v1');
+}
+
+export function postGivingOnlineSettingsWrite(env, accessJwt, body) {
+  return callConnectContract(env, accessJwt, 'giving-online-settings-write-v1', { method: 'POST', body });
+}

@@ -20,7 +20,10 @@ import { HEALTH_STYLES, renderHealthByEntity, renderHealthSummary, renderHealthV
 import { ensureFinanceOwnedSchema } from './finance-owned-schema.js';
 import { PAYROLL_STYLES, legacyPayrollPage } from './payroll-pages.js';
 import { GIFT_BATCH_STYLES, renderBatchPage, renderBatchReportsPage, renderReconciliationPage } from './gift-batch-pages.js';
-import { describeGivingBatchFailure, fetchGivingBatchLedger, fetchGivingBatchWorkspace, fetchGivingTransactions, fetchOnlineGiving, postGivingBatchWrite } from './connect-giving-batch-client.js';
+import { renderOnlineFormSettingsPage } from './online-giving-pages.js';
+import { renderGymIncomePage } from './gym-income-pages.js';
+import { fetchGymIncome, describeGymIncomeFailure } from './gym-income-client.js';
+import { describeGivingBatchFailure, fetchGivingBatchLedger, fetchGivingBatchWorkspace, fetchGivingTransactions, fetchOnlineGiving, postGivingBatchWrite, fetchGivingOnlineSettings, postGivingOnlineSettingsWrite } from './connect-giving-batch-client.js';
 import { GIFT_TRANSACTIONS_STYLES, buildTransactionsCsv, normalizeTransactionParams, renderOnlineGivingPage, renderTransactionsPage, transactionsCsvFilename, transactionsCsvParams } from './gift-transactions-pages.js';
 import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, postGivingFollowupWrite } from './connect-giving-analytics-client.js';
 import { fetchAccessRoles } from './connect-access-client.js';
@@ -951,6 +954,23 @@ async function handleGiftBatchWrite(request, env, url) {
   return back(page, { ...keep, status: 'ok', msg: GIFT_BATCH_MESSAGES[op] });
 }
 
+// Online giving form settings: the fee percentage or the public-form fund list. Connect saves
+// them (giving-online-settings-write-v1) and re-checks Giving edit access for the signed-in person.
+async function handleGivingOnlineSettingsWrite(request, env, url) {
+  const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving', page: 'online-form', ...params }).toString()}` } });
+  if (!isSameOriginPost(request, url)) return back({ status: 'error', message: 'That form did not come from Timothy Finance.' });
+  let form;
+  try { form = await request.formData(); } catch { return back({ status: 'error', message: 'The form could not be read.' }); }
+  const op = String(form.get('op') || '');
+  let body;
+  if (op === 'fee') body = { op, fee_percent: String(form.get('fee_percent') || '').trim().slice(0, 12) };
+  else if (op === 'funds') body = { op, public_fund_ids: form.getAll('fund').map((v) => String(v)).slice(0, 500) };
+  else return back({ status: 'error', message: 'Unknown action.' });
+  const result = await postGivingOnlineSettingsWrite(env, request.headers.get('Cf-Access-Jwt-Assertion') || '', body);
+  if (!result.ok) return back({ status: 'error', message: describeGivingBatchFailure(result).slice(0, 200) });
+  return back({ status: 'ok', msg: op === 'fee' ? `Fee percentage saved: ${result.result.fee_percent}%.` : 'Funds on the form saved.' });
+}
+
 const GIVING_FOLLOWUP_OPS = new Set(['assign', 'done', 'reopen']);
 const GIVING_FOLLOWUP_MESSAGES = { assign: 'Nudge assigned.', done: 'Marked done.', reopen: 'Nudge reopened.' };
 
@@ -1188,6 +1208,11 @@ function renderSectionBody(ctx) {
       status: describeHrStatus(ctx.searchParams),
     });
   }
+  if (section.id === 'facilities' && page.id === 'gym-rentals') {
+    return renderGymIncomePage({
+      result: ctx.gymIncome?.ok ? { ok: true, data: ctx.gymIncome.result } : { ok: false, message: describeGymIncomeFailure(ctx.gymIncome) },
+    });
+  }
   if (section.id === 'facilities') {
     if (!ctx.facilities || isSyntheticUnavailable(ctx.facilities)) {
       return renderDataUnavailablePage({ eyebrow: section.label, heading: page.label, reason: 'Facilities records could not be read for this request. Nothing shown here is an empty register.' });
@@ -1200,6 +1225,15 @@ function renderSectionBody(ctx) {
     });
   }
   if (section.id === 'giving') {
+    if (page.id === 'online-form') {
+      const settingsResult = ctx.givingBatch?.ok
+        ? { ok: true, data: ctx.givingBatch.result }
+        : { ok: false, message: describeGivingBatchFailure(ctx.givingBatch) };
+      const onlineStatus = ctx.searchParams.get('status') === 'ok' ? { ok: true, message: ctx.searchParams.get('msg') || 'Saved in Connect.' }
+        : ctx.searchParams.get('status') === 'error' ? { ok: false, message: `Not saved: ${ctx.searchParams.get('message') || 'the request did not complete.'}` } : null;
+      const canEditOnline = roleResult.ok && (roleResult.role === 'admin' || roleResult.permissions?.giving === 'edit');
+      return renderOnlineFormSettingsPage({ result: settingsResult, status: onlineStatus, canEdit: canEditOnline });
+    }
     if (['batch', 'reconciliation', 'reports', 'transactions', 'online'].includes(page.id)) {
       const batchResult = ctx.givingBatch?.ok
         ? { ok: true, data: ctx.givingBatch.result }
@@ -1800,6 +1834,10 @@ export default {
 
     if (route.id === 'gift-batch-write-v1') {
       return handleGiftBatchWrite(request, env, url);
+    }
+
+    if (route.id === 'giving-online-settings-write-v1') {
+      return handleGivingOnlineSettingsWrite(request, env, url);
     }
 
     if (route.id === 'giving-followup-write-v1') {
@@ -4154,7 +4192,8 @@ export default {
               : givingPageId === 'online' ? Promise.all([
                 fetchOnlineGiving(env, accessJwt),
                 url.searchParams.get('queue') && url.searchParams.get('q') ? fetchGivingBatchWorkspace(env, accessJwt, { q: url.searchParams.get('q') }) : null,
-              ]).then(([online, lookup]) => ({ ...online, people: lookup?.ok ? lookup.result.people || [] : [] })) : null;
+              ]).then(([online, lookup]) => ({ ...online, people: lookup?.ok ? lookup.result.people || [] : [] }))
+                : givingPageId === 'online-form' ? fetchGivingOnlineSettings(env, accessJwt) : null;
         // Giving pages read Connect live too; the named pages (statements, nudges) use their own
         // contract, never requested for council preview or a totals-only (council) Giving role.
         const analyticsPageId = section.id === 'giving-analytics' ? resolveFinancePage(section, pageId).id
@@ -4169,7 +4208,11 @@ export default {
         ]) : [null, null];
         let givingAnalytics = after(givingAnalyticsLoads, (loads) => loads[0]);
         let givingAnalyticsPeople = after(givingAnalyticsLoads, (loads) => loads[1]);
-        let facilities = section.id === 'facilities'
+        const facilitiesPageId = section.id === 'facilities' ? resolveFinancePage(section, pageId).id : null;
+        // Gym rental income is read live from Website Admin with the caller's own Access identity.
+        let gymIncome = facilitiesPageId === 'gym-rentals'
+          ? fetchGymIncome(env, accessJwt, { year: url.searchParams.get('year') }) : null;
+        let facilities = facilitiesPageId && facilitiesPageId !== 'gym-rentals'
           ? safeSyntheticRead(async () => {
             await ensureFacilitiesSchema(env.FINANCE_DB);
             return readFacilities(env.FINANCE_DB);
@@ -4179,7 +4222,7 @@ export default {
           : null;
         // Every load above started without waiting on the others; one slow Connect answer now
         // costs its own timeout once, not once per section read in turn.
-        [summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, payrollBundle, financeHealth] = await Promise.all([summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, payrollBundle, financeHealth]);
+        [summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, gymIncome, payrollBundle, financeHealth] = await Promise.all([summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, facilities, gymIncome, payrollBundle, financeHealth]);
         const balancePriorYear = await balancePriorYearLoad;
         const [balancePropertyValue, balanceMortgageHistory, propertyMortgageHistory] = await Promise.all([balancePropertyValueLoad, balanceMortgageHistoryLoad, propertyMortgageHistoryLoad]);
         const printMode = url.searchParams.get('print') === '1';
@@ -4187,7 +4230,7 @@ export default {
         const plannerPage = section.id === 'compensation' && effectivePageId === 'planner';
         const shellResponse = response((printMode ? renderPrintPage : renderShell)({
           printFragment: printMode && url.searchParams.get('fragment') === '1',
-          healthView: url.searchParams.get('view'), healthAppeal: url.searchParams.get('appeal'), healthFlow: url.searchParams.get('flow'), financeHealth, facilities, hr, givingBatch, givingAnalytics, givingAnalyticsPeople, accessRoles, budgetBuilder, boardLayout, planningBasis, planningScenarios, planningRunway, propertyBooks, searchParams: url.searchParams,
+          healthView: url.searchParams.get('view'), healthAppeal: url.searchParams.get('appeal'), healthFlow: url.searchParams.get('flow'), financeHealth, facilities, hr, givingBatch, givingAnalytics, givingAnalyticsPeople, gymIncome, accessRoles, budgetBuilder, boardLayout, planningBasis, planningScenarios, planningRunway, propertyBooks, searchParams: url.searchParams,
           metadata, summary, giving, givingSource, section, pageId, councilPreview, roleResult, churchReport, churchReportLive, churchTrendLive,
           balanceSheet, balanceTrends, balancePriorYear, balancePropertyValue, balanceMortgageHistory, balanceSelection, daycareReport, daycareReportLive, daycareEntries, daycareEditId, propertyReport, propertyReportLive, propertyReserves,
           propertyReservesLive, propertyLedgers, propertyLedgersLive, propertyValuation, propertyPolicy, propertyDebt, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, accountsReport,
