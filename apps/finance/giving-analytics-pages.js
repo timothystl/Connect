@@ -463,8 +463,8 @@ export function renderPledgesPage({ result, keep = {} }) {
   const p = a.pledges;
   const picker = fundPicker(a, { page: 'pledges', hidden: keep });
   if (!p.pledgers) {
-    return `${picker}<p class="lede">Pledges are recorded on each person’s Giving record in Connect, one annual amount per year.</p>
-      <div class="panel"><h2>No ${a.year} pledges yet</h2><p class="muted-line">When pledges for ${a.year} are entered in Connect, progress against them appears here.</p></div>`;
+    return `${picker}<p class="lede">Pledges are one annual amount per person per year.</p>
+      <div class="panel"><h2>No ${a.year} pledges yet</h2><p class="muted-line">When pledges for ${a.year} are entered on the <a href="/?section=giving-analytics&amp;page=pledge-list&amp;year=${a.year}">Pledge list</a>, progress against them appears here.</p></div>`;
   }
   const share = p.pledged_cents ? p.received_cents / p.pledged_cents : 0;
   const onTrack = share >= a.year_elapsed * 0.9;
@@ -475,7 +475,7 @@ export function renderPledgesPage({ result, keep = {} }) {
     ['Not started', p.not_started, `No gift yet in ${a.year}`, 'warn'],
   ];
   const receivedFrom = fundKey(a) === 'all' ? `${a.year} gifts to any fund` : `${a.year} gifts to ${scopePhrase(a)} only`;
-  return `${picker}<p class="lede">Pledges are recorded on each person’s Giving record in Connect as one annual amount, not by fund. Received counts each pledger’s ${e(receivedFrom)}, up to their pledge.</p>
+  return `${picker}<p class="lede">Pledges are one annual amount per person, not by fund; add or change them on the <a href="/?section=giving-analytics&amp;page=pledge-list&amp;year=${a.year}">Pledge list</a>. Received counts each pledger’s ${e(receivedFrom)}, up to their pledge.</p>
     ${kpis([
       [`${a.year} pledges`, money(p.pledged_cents), `${p.pledgers} pledger${p.pledgers === 1 ? '' : 's'}`],
       ['Received toward pledges', money(p.received_cents), `${pct(share)} · ${pct(a.year_elapsed)} of the year gone`, onTrack ? 'good' : 'warn'],
@@ -486,7 +486,7 @@ export function renderPledgesPage({ result, keep = {} }) {
       <p class="muted-line">The marker shows how much of the year has gone by.</p>
       <div class="table-scroll"><table class="pm-table ga-num"><thead><tr><th>Status</th><th>Pledgers</th><th>What it means</th></tr></thead>
         <tbody>${rows.map(([label, n, note, tone]) => `<tr><td class="${n ? `tone-${tone}` : ''}">${label}</td><td>${n}</td><td class="ga-note">${e(note)}</td></tr>`).join('')}</tbody></table></div>
-      <p class="muted-line">Individual pledges, and who is behind, are on the <a href="${href('plateaus', { kind: 'pledge_behind' }, 'giving-reports')}">Nudges and next steps</a> page for people with Giving view access.</p></div>`;
+      <p class="muted-line">Individual pledges are on the <a href="/?section=giving-analytics&amp;page=pledge-list&amp;year=${a.year}">Pledge list</a>, and who is behind on the <a href="${href('plateaus', { kind: 'pledge_behind' }, 'giving-reports')}">Nudges and next steps</a> page, for people with Giving view access.</p></div>`;
 }
 
 // ── Giving what-if ────────────────────────────────────────────────────────────────────────────
@@ -614,13 +614,13 @@ export function renderStatementsPage({ result, councilPreview }) {
   if (!result.ok) return unavailable('Giving statements', result.message);
   const { statements, year } = result.data;
   const rows = statements.runs.map((r) => `<tr><td>${e(shortDate(r.last_sent))}, ${e(String(r.last_sent).slice(0, 4))}</td><td>${e(LETTER_LABELS[r.letter_type] || r.letter_type)} · ${r.year}</td><td>${r.email + r.print}</td><td>Email ${r.email} · print ${r.print}</td></tr>`).join('');
-  return `<p class="lede">Statements list each household’s gifts by fund for the period, with the IRS acknowledgement language. They are prepared and sent from Connect’s Giving tab, which keeps track of who has received one.</p>
+  return `<p class="lede">Statements list each household’s gifts by fund for the period, with the IRS acknowledgement language. They are prepared, emailed and printed here in Finance under Donor letters, which keeps track of who has received one.</p>
     ${kpis([
       [`Households giving in ${year}`, String(statements.giving_households_ytd), 'Each will receive a year-end statement'],
       ['Last statement run', statements.runs[0] ? e(shortDate(statements.runs[0].last_sent)) : '—', statements.runs[0] ? e(`${LETTER_LABELS[statements.runs[0].letter_type] || ''} · ${statements.runs[0].year}`) : 'None recorded yet'],
     ])}
     <div class="panel panel-spaced ga-cta"><div><h2>Prepare statements</h2><p class="muted-line">Choose the year, email the households with an address, and print the rest. Emailing a statement sends a real message.</p></div>
-      <a class="ga-link-button" href="${CONNECT_GIVING}?pane=letters#giving">Open statements in Connect</a></div>
+      <a class="ga-link-button" href="/?section=giving-letters&amp;page=letters&amp;type=year_end&amp;year=${e(String(year))}">Open donor letters</a></div>
     <div class="panel panel-spaced list-panel"><h2>Recent runs</h2>${rows ? `<div class="table-scroll"><table class="pm-table"><thead><tr><th>Last sent</th><th>Statement</th><th>Households</th><th>Delivery</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty-note">No statements have been recorded as sent yet.</div>'}</div>`;
 }
 
@@ -654,7 +654,7 @@ export function renderNudgeQueue({ result, totals, params, canEdit, kindHref }) 
       ? `<form method="POST" action="/api/v1/giving-followup-write" class="inline-form">${hidden(n)}<input type="hidden" name="op" value="assign"><select name="assigned_to" aria-label="Who will follow up">${staffOptions(n.assigned_to)}</select><button type="submit" class="button-outline">Assign</button></form>
          <form method="POST" action="/api/v1/giving-followup-write" class="inline-form">${hidden(n)}<input type="hidden" name="op" value="done"><button type="submit" class="button-outline">Mark done</button></form>`
       : (assigned ? `<span class="muted">With ${e(assigned)}</span>` : '');
-    const thank = current.key === 'first_time' ? `<a class="ga-link-button" href="${CONNECT_GIVING}?pane=receipts#giving">Thank in Connect</a>` : '';
+    const thank = current.key === 'first_time' ? `<a class="ga-link-button" href="/?section=giving-letters&amp;page=receipts">Send thank-you letters</a>` : '';
     return `<li><div><b>${e(n.name)}</b><small>${e(n.detail)}</small></div><div class="ga-amount">${money(n.cents)}</div><div class="right ga-actions">${thank}${actions}</div></li>`;
   }).join('');
   return `${kpis([

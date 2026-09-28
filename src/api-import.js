@@ -1388,7 +1388,7 @@ if (seg === 'giving/send-statement' && method === 'POST') {
   } else if (person_id && year && letter_type) {
     await db.prepare(
       `INSERT INTO giving_letter_sends(person_id, year, letter_type, sent_at) VALUES(?,?,?,datetime('now'))
-       ON CONFLICT(person_id, year, letter_type) DO UPDATE SET sent_at=excluded.sent_at`
+       ON CONFLICT(person_id, year, letter_type) WHERE recipient_key IS NULL DO UPDATE SET sent_at=excluded.sent_at`
     ).bind(person_id, year, letter_type).run().catch(() => {});
   }
   return json({ ok: true, id: result.id });

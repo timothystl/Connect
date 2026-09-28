@@ -41,12 +41,13 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     id: 'giving-analytics', label: 'Giving', group: 'Giving', permission: 'finance',
     // Household bands and Giving nudges moved into Giving reports (Giving bands; Nudges and next
     // steps) on Sept 28 2026; shell.js redirects their old links.
-    capabilities: ['council giving report', 'trends', 'year over year', 'pledges', 'what-if modeling', 'statements'],
+    capabilities: ['council giving report', 'trends', 'year over year', 'pledges', 'pledge list and pledge entry', 'what-if modeling', 'statements'],
     pages: [
       { id: 'council', label: 'Council report', status: 'live' },
       { id: 'trends', label: 'Trends', status: 'live' },
       { id: 'year-over-year', label: 'Year over year', status: 'live' },
       { id: 'pledges', label: 'Pledges', status: 'live' },
+      { id: 'pledge-list', label: 'Pledge list', status: 'live' },
       { id: 'what-if', label: 'Giving what-if', status: 'live' },
       { id: 'statements', label: 'Giving statements', status: 'live' },
     ],
@@ -64,6 +65,19 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
       { id: 'giver-trends', label: 'Each giver, year over year', status: 'live' },
       { id: 'plateaus', label: 'Nudges and next steps', status: 'live' },
       { id: 'bands', label: 'Giving bands', status: 'live' },
+    ],
+  },
+  {
+    // Donor letters sent from Finance (Andrew, Sept 28 2026): statements and letters, thank-you
+    // receipts, nudge letters and one statement at a time. Records and delivery through Connect.
+    id: 'giving-letters', label: 'Donor letters', group: 'Giving', permission: 'finance',
+    capabilities: ['year-end, mid-year and quarterly statements', 'thank-you, appeal and memorial letters', 'email or print with sent tracking', 'thank-you receipts queue', 'nudge letters', 'one statement with CSV', 'church details, EIN, logo and templates'],
+    pages: [
+      { id: 'letters', label: 'Statements and letters', status: 'live' },
+      { id: 'receipts', label: 'Thank-you receipts', status: 'live' },
+      { id: 'nudge-letters', label: 'Nudge letters', status: 'live' },
+      { id: 'statement', label: 'One statement', status: 'live' },
+      { id: 'settings', label: 'Letter settings', status: 'live' },
     ],
   },
   {

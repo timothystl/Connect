@@ -302,7 +302,7 @@ describe('Giving analytics pages (Finance v3)', () => {
     const html = await (await get(env, '&page=statements')).text();
     expect(html).toContain('Year-end statement · 2025');
     expect(html).toContain('Email 309 · print 103');
-    expect(html).toContain('href="https://connect.timothystl.org/?pane=letters#giving"');
+    expect(html).toContain('href="/?section=giving-letters&amp;page=letters&amp;type=year_end&amp;year=');
     const council = makeEnv({ role: 'council', giving: 'anon' });
     const hidden = await (await reports(council.env, '&page=plateaus')).text();
     expect(hidden).toContain('Nudges and next steps names givers');
@@ -333,7 +333,7 @@ describe('Giving analytics pages (Finance v3)', () => {
     expect(res.headers.get('Location')).toBe('/?section=giving-reports&page=plateaus&kind=stopped&status=ok&msg=Nudge+assigned.');
     expect(calls.find((c) => c.path.endsWith('/giving-followup-write-v1')).body).toEqual({ op: 'assign', kind: 'stopped', subject_key: 'p:3', episode: '2026-05-03', assigned_to: 'pastor' });
     const first = await (await reports(env, '&page=plateaus')).text();
-    expect(first).toContain('href="https://connect.timothystl.org/?pane=receipts#giving"');
+    expect(first).toContain('href="/?section=giving-letters&amp;page=receipts"');
     const viewOnly = makeEnv({ giving: 'view' });
     expect(await (await reports(viewOnly.env, '&page=plateaus&kind=stopped')).text()).not.toContain('value="done"');
   });

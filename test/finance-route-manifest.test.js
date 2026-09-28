@@ -41,10 +41,13 @@ const WRITE_ROUTE_IDS = new Set([
   'giving-online-settings-write-v1',
   'giving-board-email-v1',
   'giving-impact-write-v1',
+  'giving-letters-write-v1',
+  'giving-letters-settings-v1',
+  'giving-pledges-write-v1',
   'connect-planner-save-v1',
 ]);
 const OWN_DB_WRITE_ROUTE_IDS = new Set(['budget-plan-save-v1']);
-const LIVE_READ_ROUTE_IDS = new Set(['accounting-workspace-page', 'board-packet-export-v1', 'budget-planner-csv-v1', 'payroll-relay-diagnostic-v1', 'payroll-csv-v1', 'connect-planner-read-v1']);
+const LIVE_READ_ROUTE_IDS = new Set(['accounting-workspace-page', 'board-packet-export-v1', 'budget-planner-csv-v1', 'payroll-relay-diagnostic-v1', 'payroll-csv-v1', 'connect-planner-read-v1', 'giving-letters-print', 'giving-statement-csv']);
 const LIVE_POST_READ_ROUTE_IDS = new Set([
   'church-budget-xlsx-preview-v1', 'church-balances-xlsx-preview-v1',
   'church-monthly-xlsx-preview-v1', 'church-activity-xlsx-preview-v1',
@@ -120,6 +123,7 @@ describe('Finance staging route manifest', () => {
       '/api/v1/gift-batch-write',
       '/api/v1/giving-online-settings-write',
       '/api/v1/giving-followup-write',
+      '/api/v1/giving-letters', '/api/v1/giving-letters-settings', '/api/v1/giving-pledges-write', '/giving-letters/print', '/api/v1/giving-statement.csv',
       '/api/v1/giving-impact', '/api/v1/giving-board-email',
       '/api/summary', '/api/v1/payroll-relay-diagnostic',
       '/api/v1/payroll-hours-save', '/api/v1/payroll-period-approve',
