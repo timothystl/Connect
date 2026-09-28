@@ -210,6 +210,15 @@ describe('mobile attendance — a saved count is the one the dashboard shows', (
     expect(MOBILE_ADMIN_HTML).toMatch(/dataset\.svcInput\) state\.svcDraft\[e\.target\.dataset\.svcInput\] = e\.target\.value/);
     expect(MOBILE_ADMIN_HTML).toMatch(/e\.key !== 'Enter'[\s\S]*?saveSvc\(e\.target\.dataset\.svcInput\)/);
   });
+
+  it('never shows a stale count after a save on the other screen (no refresh needed)', () => {
+    // Opening Attendance re-fetches; a dashboard save drops the cached history.
+    expect(MOBILE_ADMIN_HTML).toMatch(/if \(screen === 'attendance'\) state\.attHistory = null;/);
+    expect(MOBILE_ADMIN_HTML).toMatch(/if \(svc\) svc\.count = count;\s*state\.attHistory = null;/);
+    // Edits/deletes/adds on the Attendance screen make the dashboard re-fetch.
+    expect((MOBILE_ADMIN_HTML.match(/state\.dashStale = true;/g) || []).length).toBe(3);
+    expect(MOBILE_ADMIN_HTML).toMatch(/if \(!d \|\| state\.dashStale\)/);
+  });
 });
 
 describe('handleMobileApi — attendance history + entry CRUD', () => {

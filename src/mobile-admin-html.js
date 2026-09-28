@@ -270,6 +270,7 @@ const state = {
   personId: null,
   personDetail: null,
   attHistory: null,
+  dashStale: false,
   attCanEdit: false,
   attEditingId: null,
   attFormOpen: false,
@@ -315,6 +316,9 @@ function statusColors(mt) {
 function setTopbarTitle(t) { document.getElementById('topbar-title-text').textContent = t; }
 
 function go(screen) {
+  // Attendance can be entered elsewhere (desktop, another phone), so opening that screen
+  // always re-fetches instead of showing the copy loaded earlier in this session.
+  if (screen === 'attendance') state.attHistory = null;
   state.navStack = [];
   state.screen = screen;
   state.sidebarOpen = false;
@@ -359,7 +363,9 @@ async function loadDashboard() {
 function renderHome() {
   setTopbarTitle('Dashboard');
   const d = state.dash;
-  if (!d) { loadDashboard(); return; }
+  // A count changed on the Attendance screen isn't in the cached dashboard; re-fetch
+  // rather than show the old number until a full page refresh.
+  if (!d || state.dashStale) { state.dashStale = false; loadDashboard(); return; }
   // A member's role has no attendance/follow-ups access at all (a hard ceiling, not a
   // toggle — see MEMBER_ALLOWED_ITEMS in api-utils.js), so those cards are omitted
   // entirely rather than shown disabled or with a "no access" message — a member's
@@ -437,6 +443,7 @@ async function saveSvc(time) {
     await api('/admin/api/mobile/attendance', { method: 'POST', body: JSON.stringify({ date: state.dash.sunday_date, time, count }) });
     const svc = state.dash.services.find(s => s.time === time);
     if (svc) svc.count = count;
+    state.attHistory = null; // Attendance screen re-fetches, so it shows this count too
     delete state.svcDraft[time];
     state.svcExpanded[time] = false;
     renderHome();
@@ -656,6 +663,7 @@ async function attSaveEdit(id) {
     await api('/admin/api/mobile/attendance/entry/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ count }) });
     const row = state.attHistory.find(s => s.id === id);
     if (row) row.attendance = count;
+    state.dashStale = true;
     state.attEditingId = null;
     renderAttendance();
   } catch (e) {
@@ -668,6 +676,7 @@ async function attDelete(id) {
   try {
     await api('/admin/api/mobile/attendance/entry/' + encodeURIComponent(id), { method: 'DELETE' });
     state.attHistory = state.attHistory.filter(s => s.id !== id);
+    state.dashStale = true;
     renderAttendance();
   } catch (e) {
     alert('Delete failed: ' + e.message);
@@ -688,6 +697,7 @@ async function attFormSave() {
   try {
     await api('/admin/api/mobile/attendance/entry', { method: 'POST', body: JSON.stringify(body) });
     state.attFormOpen = false;
+    state.dashStale = true;
     await loadAttendance();
   } catch (e) {
     alert('Save failed: ' + e.message);
