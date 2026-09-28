@@ -295,7 +295,7 @@ describe('Finance shell wiring', () => {
   });
 });
 
-describe('Connect once Finance owns QuickBooks (QBO_MANAGED_BY_FINANCE="1")', () => {
+describe('Connect after the QuickBooks move to Finance', () => {
   const connectDb = new Proxy({}, { get() { throw new Error('Connect must not touch its database here'); } });
   const call = (seg, method, env) => {
     const url = new URL(`https://connect.test/admin/api/${seg}`);
@@ -305,23 +305,27 @@ describe('Connect once Finance owns QuickBooks (QBO_MANAGED_BY_FINANCE="1")', ()
   it.each([['finance/qb/connect', 'GET'], ['finance/qb/callback', 'GET'], ['finance/qb/disconnect', 'POST'], ['finance/qb/sync', 'POST'],
     ['finance/qb/sync-years', 'POST'], ['finance/qb/budgets', 'GET'], ['finance/qb/budgets', 'PATCH'], ['finance/qb/transactions', 'GET']])(
     'refuses %s %s and points to Finance', async (seg, method) => {
-      const res = await call(seg, method, { QBO_MANAGED_BY_FINANCE: '1' });
+      const res = await call(seg, method, {});
       expect(res.status).toBe(409);
       expect((await res.json()).error).toMatch(/managed in Finance/);
     });
 
-  it('routes the QuickBooks connection and cache to Finance’s database only when switched', () => {
+  it('routes the QuickBooks connection and cache to Finance’s database in finance mode', () => {
     const tag = (name) => ({ prepare: (sql) => ({ bind: () => ({ first: async () => ({ db: name, sql }) }) }) });
     const DB = tag('connect'); const FINANCE_DB = tag('finance');
-    const before = financeStorageDb({ DB, FINANCE_DB, FINANCE_STORAGE_MODE: 'finance' });
-    const after = financeStorageDb({ DB, FINANCE_DB, FINANCE_STORAGE_MODE: 'finance', QBO_MANAGED_BY_FINANCE: '1' });
-    expect(before.prepare('SELECT * FROM finance_qb_connection WHERE id=1')).not.toBe(after.prepare('SELECT * FROM finance_qb_connection WHERE id=1'));
+    const db = financeStorageDb({ DB, FINANCE_DB, FINANCE_STORAGE_MODE: 'finance' });
     return Promise.all([
-      before.prepare('SELECT * FROM finance_qb_connection WHERE id=1').bind().first().then((r) => expect(r.db).toBe('connect')),
-      after.prepare('SELECT * FROM finance_qb_connection WHERE id=1').bind().first().then((r) => expect(r.db).toBe('finance')),
-      after.prepare("SELECT value FROM finance_qb_snapshot WHERE key='accounts'").bind().first().then((r) => expect(r.db).toBe('finance')),
-      after.prepare('SELECT username FROM app_users WHERE id=?').bind().first().then((r) => expect(r.db).toBe('connect')),
+      db.prepare('SELECT * FROM finance_qb_connection WHERE id=1').bind().first().then((r) => expect(r.db).toBe('finance')),
+      db.prepare("SELECT value FROM finance_qb_snapshot WHERE key='accounts'").bind().first().then((r) => expect(r.db).toBe('finance')),
+      db.prepare('SELECT username FROM app_users WHERE id=?').bind().first().then((r) => expect(r.db).toBe('connect')),
     ]);
+  });
+
+  it('has no QuickBooks credentials or token refresh left in Connect', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync(new URL('../src/api-finance.js', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/refreshTokens|QB_CLIENT_ID|qb_oauth_state|ensureFreshAccessToken/);
+    expect(fs.existsSync(new URL('../src/quickbooks.js', import.meta.url))).toBe(false);
   });
 });
 

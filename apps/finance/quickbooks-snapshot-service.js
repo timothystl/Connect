@@ -1,7 +1,7 @@
 // ── Raw QuickBooks output, read from Finance's own report cache ─────────────────────────────
 // Connect's legacy Data & Imports tab shows the cached Budget vs. Actual report and account
-// balances (finance/overview in src/api-finance.js). Since QuickBooks moved to Finance
-// (QBO_MANAGED_BY_FINANCE), that cache -- finance_qb_snapshot -- lives only in Finance's database:
+// balances (finance/overview in src/api-finance.js). Since QuickBooks moved to Finance,
+// that cache -- finance_qb_snapshot -- lives only in Finance's database:
 // Finance's own sync writes 'budget_vs_actual' and 'accounts' (quickbooks-oauth-routes.js), and
 // Connect's daycare-app sync writes 'daycare_accounts' there through its storage router. So this
 // reads FINANCE_DB directly. It is a plain SELECT of the cache: it never reads a token, never calls

@@ -2,7 +2,7 @@
 
 Decision (Andrew, September 25, 2026): Finance owns the QuickBooks connection.
 
-Status: steps 1–6 are complete. Both switches were set to `"1"` and released on September 25, 2026, and Andrew then connected and synced QuickBooks from Finance. Remaining: the step 7 comparison and the later cleanup.
+Status: complete. Both switches were released on September 25, 2026; Andrew connected and synced QuickBooks from Finance and confirmed on September 28 that Church Report totals match QuickBooks. Connect's QuickBooks code was then removed (see Later cleanup).
 
 ## Design
 
@@ -65,6 +65,13 @@ Never run both connections at once.
 
 ## Later cleanup
 
-After Finance has run stably:
-- remove Connect's QuickBooks routes, its `QB_*` secrets, the `qb_oauth_state:*` use of KV, and the legacy UI buttons;
-- drop Connect's copies of the `finance_qb_*` tables.
+Done September 28, 2026, after the step 7 check:
+- Connect's QuickBooks routes, OAuth client (`src/quickbooks.js`), token refresh, `qb_oauth_state:*` use of KV and legacy buttons are removed. Any old `finance/qb/*` link answers 409 and points to Finance; the legacy Data & Imports tab links there too.
+- `QBO_MANAGED_BY_FINANCE` is gone: in `finance` storage mode Connect always reads `finance_qb_connection` and `finance_qb_snapshot` from Finance's database.
+
+Still to do by hand:
+- Delete Connect's Worker secrets `QB_CLIENT_ID`, `QB_CLIENT_SECRET` (and `QB_ENVIRONMENT` if set) from `timothy-connect`.
+- Remove Connect's old redirect URI from the Intuit app, if not already done.
+- Connect's own copies of `finance_qb_connection` and `finance_qb_snapshot` in `timothy-connect-db` are no longer read. They hold a revoked token and an old report cache. Dropping them is left for a deliberate decision, since it deletes data.
+
+The rollback section above no longer applies as written: going back would mean restoring the removed Connect code.

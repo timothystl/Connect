@@ -5,12 +5,6 @@ var _finStatus = {};
 var _finDaycare = [];
 var _finOverview = {};
 var _finDaycareAgg = null; // last computed finAggregateDaycareByYear() result, cached for CSV export
-// QuickBooks Transactions (Data & Imports tab) — a live, per-transaction read, never cached
-// client-side across a real reload; see finRenderQboTxnsCard below.
-var _finQboTxns = [];
-var _finQboTxnsLoaded = false;
-var _finQboTxnsSort = { key: 'date', dir: 'desc' };
-var _finQboTxnsFilter = '';
 
 // ⚠ This used to load EVERY finance screen on every entry to the tab — and because switching
 // sub-nav sections goes through showTab('finance', …), which calls this, that meant every section
@@ -21,7 +15,6 @@ var _finQboTxnsFilter = '';
 // failing. Only the visible section loads now; see finEnsureSection below.
 var _finBootstrapped = false;
 function loadFinance(force) {
-  finCheckOauthReturn();
   var loadingEl = document.getElementById('fin-loading');
   var rootEl = document.getElementById('fin-root');
   if (_finBootstrapped && !force) { finEnsureSection(_finActiveNavId); return; }
@@ -136,10 +129,6 @@ function finInvalidateFinanceCaches() {
   _finChurchThisYearData = null;
   _finChurchMultiYearData = null;
   _finSectionLoaded = {};
-  // A disconnect/reconnect can point at a different QuickBooks company entirely — never leave
-  // the previous company's transaction rows on screen after that.
-  _finQboTxns = [];
-  _finQboTxnsLoaded = false;
 }
 // Property and daycare figures appear on the Health page too. Re-render it when they change, but
 // never FETCH it from here — Health may be a tab the reader has not opened, and pulling its
@@ -444,7 +433,6 @@ function finRenderDataImports() {
 
   // Now that the containers exist, let the pre-existing renderers fill them.
   finRenderConnection();
-  finRenderQboTxnsTable();
   finRenderBudget(_finOverview);
   finRenderAccounts(_finOverview);
   finRenderDaycare();
@@ -2153,18 +2141,6 @@ function finInitGivingReports() {
   if (insightsEl && !insightsEl.value) insightsEl.value = curY;
 }
 
-// QuickBooks redirects back to '/?qb_connected=1#finance' (or qb_error=...) after the OAuth
-// consent screen — read the plain query string (not the hash) so the SPA's hash-based tab
-// router is never handed anything but a clean '#finance'.
-function finCheckOauthReturn() {
-  var params = new URLSearchParams(location.search);
-  var connected = params.get('qb_connected');
-  var error = params.get('qb_error');
-  if (!connected && !error) return;
-  history.replaceState(null, '', location.pathname + location.hash);
-  if (connected) finToast('QuickBooks connected. Click "Sync Now" to pull your data.');
-  else finToast('QuickBooks connection failed: ' + error);
-}
 function finToast(msg) {
   var el = document.getElementById('fin-toast');
   if (!el) return;
@@ -2176,188 +2152,21 @@ function finToast(msg) {
 // ── QuickBooks connection card ───────────────────────────────────────
 function finRenderConnection() {
   var el = document.getElementById('fin-connection');
-  if (!_finStatus.configured) {
-    el.innerHTML = '<p style="color:var(--warm-gray);font-size:.85rem;">QuickBooks is not configured yet. An admin needs to add <code>QB_CLIENT_ID</code> and <code>QB_CLIENT_SECRET</code> (see SECRETS.md) from an Intuit Developer app before connecting.</p>';
-    return;
-  }
-  var isAdminUI = (_userRole === 'admin');
-  if (!_finStatus.connected) {
-    el.innerHTML = '<p style="font-size:.85rem;color:var(--warm-gray);margin:0 0 10px;">Not connected.</p>'
-      + (isAdminUI
-        ? '<a class="btn-primary" style="display:inline-block;text-decoration:none;" href="/admin/api/finance/qb/connect">Connect QuickBooks</a>'
-        : '<p style="font-size:.78rem;color:var(--warm-gray);">Ask an admin to connect QuickBooks.</p>');
-    return;
-  }
+  if (!el) return;
   var lastSync = _finStatus.lastSyncedAt ? finFmtTs(_finStatus.lastSyncedAt) : 'never';
-  el.innerHTML =
-    '<p style="font-size:.9rem;margin:0 0 4px;"><b>' + esc(_finStatus.companyName || 'Connected') + '</b></p>'
-    + '<p style="font-size:.78rem;color:var(--warm-gray);margin:0 0 10px;">Last synced: ' + esc(lastSync) + '</p>'
-    + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'
-    + '<button class="btn-primary" onclick="finSync(this)">Sync Now</button>'
-    + '<button class="btn-secondary" onclick="finOpenSyncYears()">Sync Selected Years (Actuals Only)…</button>'
-    + (isAdminUI ? '<button class="btn-secondary" onclick="finDisconnect()">Disconnect</button>' : '')
-    + (isAdminUI ? '<button class="btn-secondary" onclick="finLoadBudgetPicker(this)">Choose Budget…</button>' : '')
-    + '</div>'
-    + '<div id="fin-budget-picker" style="margin-top:10px;"></div>'
-    + '<div id="fin-sync-years-picker" style="margin-top:10px;display:none;"></div>'
-    + '<div id="fin-sync-msg" style="font-size:.78rem;margin-top:8px;"></div>';
-}
-// A company can have more than one Budget object in QuickBooks (e.g. a leftover test budget
-// alongside the real one) — the sync otherwise guesses (best year-match, else the first found).
-// This lets an admin see every budget QuickBooks actually has and pin the right one explicitly.
-function finLoadBudgetPicker(btn) {
-  var el = document.getElementById('fin-budget-picker');
-  el.innerHTML = '<p style="font-size:.8rem;color:var(--warm-gray);">Loading budgets…</p>';
-  api('/admin/api/finance/qb/budgets').then(function(d) {
-    if (!d || d.error) { el.innerHTML = '<p style="font-size:.8rem;color:var(--danger);">' + esc((d && d.error) || 'Could not load budgets.') + '</p>'; return; }
-    if (!d.budgets || !d.budgets.length) { el.innerHTML = '<p style="font-size:.8rem;color:var(--warm-gray);">No Budget objects found in QuickBooks. Create one under Settings &gt; Budgeting.</p>'; return; }
-    var opts = d.budgets.map(function(b) {
-      var label = b.name + ' (' + (b.startDate || '?') + ' – ' + (b.endDate || '?') + ')' + (b.active ? '' : ' [inactive]');
-      var sel = (String(d.selectedBudgetId || '') === String(b.id)) ? ' selected' : '';
-      return '<option value="' + esc(b.id) + '"' + sel + '>' + esc(label) + '</option>';
-    }).join('');
-    el.innerHTML = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
-      + '<select id="fin-budget-select" style="max-width:340px;"><option value="">Auto (best year match)</option>' + opts + '</select>'
-      + '<button class="btn-primary" onclick="finSaveBudgetChoice()">Save &amp; Re-sync</button>'
-      + '</div>';
-  });
-}
-function finSaveBudgetChoice() {
-  var sel = document.getElementById('fin-budget-select');
-  var id = sel ? sel.value : '';
-  api('/admin/api/finance/qb/budgets', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ budget_id: id || null }) }).then(function(d) {
-    if (d && d.error) { finToast('Could not save: ' + d.error); return; }
-    finToast('Budget selection saved. Syncing…');
-    finSync();
-  }).catch(function(err) { if (err.message !== 'Unauthorized') finToast('Error: ' + err.message); });
+  el.innerHTML = '<p style="font-size:.85rem;margin:0 0 6px;">QuickBooks is managed in Finance'
+    + (_finStatus.connected ? ' &middot; <b>' + esc(_finStatus.companyName || 'Connected') + '</b>, last synced ' + esc(lastSync) : '') + '.</p>'
+    + '<a class="btn-primary" style="display:inline-block;text-decoration:none;" href="https://finance.timothystl.org/?section=quickbooks" target="_blank" rel="noopener">Open QuickBooks in Finance</a>';
 }
 function finFmtTs(iso) {
   try { return new Date(iso).toLocaleString('en-US', {dateStyle: 'medium', timeStyle: 'short'}); }
   catch (e) { return iso; }
 }
-function finSync(btn) {
-  if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
-  api('/admin/api/finance/qb/sync', { method: 'POST' }).then(function(d) {
-    if (btn) { btn.disabled = false; btn.textContent = 'Sync Now'; }
-    if (d && d.error) { finToast('Sync failed: ' + d.error); return; }
-    if (d && d.warnings && d.warnings.length) finToast('Synced with warnings: ' + d.warnings.join(' '));
-    else finToast('Synced successfully.');
-    loadFinance(true);
-  }).catch(function(err) {
-    if (btn) { btn.disabled = false; btn.textContent = 'Sync Now'; }
-    finToast('Sync failed: ' + (err && err.message || 'Unknown error'));
-  });
-}
-function finDisconnect() {
-  if (!confirm('Disconnect QuickBooks? You can reconnect later, but cached report data will be cleared.')) return;
-  api('/admin/api/finance/qb/disconnect', { method: 'POST' }).then(function() { loadFinance(true); }).catch(function(err) { if (err.message !== 'Unauthorized') finToast('Error: ' + err.message); });
-}
 
-// ── QuickBooks Transactions ──────────────────────────────────────────────────────────────────
-// Andrew's own ask: QuickBooks' own UI "is not intuitive to deal with and find things, the
-// columns hide names of things too". This is a plain, sortable/filterable read of exactly what
-// he asked for per transaction — what it is, what account/line it posted to, the amount, and the
-// date — plus a straight link back into QuickBooks to edit any one of them. Always a fresh live
-// pull for whatever date range is picked (never the Sync button's cached snapshot), since the
-// whole point is looking at a different period on demand.
-function finQboDefaultTxnRange() {
-  var now = new Date();
-  var start = new Date(now.getFullYear(), now.getMonth(), 1);
-  function iso(d) {
-    var m = ('0' + (d.getMonth() + 1)).slice(-2), day = ('0' + d.getDate()).slice(-2);
-    return d.getFullYear() + '-' + m + '-' + day;
-  }
-  return { start: iso(start), end: iso(now) };
-}
+// ── QuickBooks transactions live in Finance (Andrew, 2026-09-25) ──
 function finRenderQboTxnsCard() {
-  if (!_finStatus.connected) {
-    return '<div class="fin-card-title" style="font-size:18px;">QuickBooks Transactions</div>'
-      + '<p class="fin-data-card-body">Connect QuickBooks above, then browse its transactions here.</p>';
-  }
-  var range = finQboDefaultTxnRange();
   return '<div class="fin-card-title" style="font-size:18px;">QuickBooks Transactions</div>'
-    + '<div class="fin-card-sub">Date, transaction, the account it posted to, and the amount — pulled live from QuickBooks for whatever range you pick, with a link straight back into QuickBooks to edit any one of them.</div>'
-    + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:10px;">'
-      + '<label style="font-size:.75rem;color:var(--warm-gray);">From<br><input type="date" id="fin-qb-txn-start" value="' + esc(range.start) + '"></label>'
-      + '<label style="font-size:.75rem;color:var(--warm-gray);">To<br><input type="date" id="fin-qb-txn-end" value="' + esc(range.end) + '"></label>'
-      + '<button class="btn-primary" onclick="finLoadQboTransactions()">Load</button>'
-      + '<label style="font-size:.75rem;color:var(--warm-gray);margin-left:auto;">Filter<br><input type="text" id="fin-qb-txn-filter" placeholder="name, memo, account…" oninput="finFilterQboTransactions(this.value)"></label>'
-    + '</div>'
-    + '<div id="fin-qb-txn-msg" style="font-size:.78rem;margin-top:8px;color:var(--warm-gray);"></div>'
-    + '<div id="fin-qb-txn-table" style="margin-top:10px;"></div>';
-}
-function finLoadQboTransactions() {
-  var startEl = document.getElementById('fin-qb-txn-start');
-  var endEl = document.getElementById('fin-qb-txn-end');
-  var msgEl = document.getElementById('fin-qb-txn-msg');
-  var start = startEl ? startEl.value : '';
-  var end = endEl ? endEl.value : '';
-  if (!msgEl) return;
-  if (!start || !end) { msgEl.textContent = 'Choose both a from and to date.'; return; }
-  msgEl.textContent = 'Loading…';
-  var qs = '?start_date=' + encodeURIComponent(start) + '&end_date=' + encodeURIComponent(end);
-  api('/admin/api/finance/qb/transactions' + qs).then(function(d) {
-    if (!d || d.error) { msgEl.textContent = (d && d.error) || 'Could not load transactions.'; return; }
-    _finQboTxns = d.transactions || [];
-    _finQboTxnsLoaded = true;
-    msgEl.textContent = (d.warnings && d.warnings.length ? d.warnings.join(' ') + ' ' : '')
-      + _finQboTxns.length + ' transaction' + (_finQboTxns.length === 1 ? '' : 's') + '.';
-    finRenderQboTxnsTable();
-  }).catch(function(err) {
-    if (err.message !== 'Unauthorized') msgEl.textContent = 'Error: ' + err.message;
-  });
-}
-function finFilterQboTransactions(v) {
-  _finQboTxnsFilter = (v || '').toLowerCase();
-  finRenderQboTxnsTable();
-}
-function finSortQboTransactions(key) {
-  if (_finQboTxnsSort.key === key) _finQboTxnsSort.dir = (_finQboTxnsSort.dir === 'asc') ? 'desc' : 'asc';
-  else _finQboTxnsSort = { key: key, dir: (key === 'date') ? 'desc' : 'asc' };
-  finRenderQboTxnsTable();
-}
-function finQboTxnSortValue(t, key) {
-  if (key === 'amount') return parseFloat(t.amount) || 0;
-  return (t[key] || '').toString().toLowerCase();
-}
-function finRenderQboTxnsTable() {
-  var el = document.getElementById('fin-qb-txn-table');
-  if (!el) return;
-  if (!_finQboTxnsLoaded) { el.innerHTML = ''; return; }
-  var filter = _finQboTxnsFilter;
-  var rows = _finQboTxns.filter(function(t) {
-    if (!filter) return true;
-    return ((t.name || '') + ' ' + (t.memo || '') + ' ' + (t.account || '') + ' ' + (t.type || '')).toLowerCase().indexOf(filter) !== -1;
-  });
-  var sort = _finQboTxnsSort;
-  rows = rows.slice().sort(function(a, b) {
-    var av = finQboTxnSortValue(a, sort.key), bv = finQboTxnSortValue(b, sort.key);
-    var cmp = av < bv ? -1 : (av > bv ? 1 : 0);
-    return sort.dir === 'asc' ? cmp : -cmp;
-  });
-  if (!rows.length) { el.innerHTML = '<p style="font-size:.82rem;color:var(--warm-gray);">No transactions in this range' + (filter ? ' match that filter' : '') + '.</p>'; return; }
-  function th(label, key) {
-    var arrow = (sort.key === key) ? (sort.dir === 'asc' ? ' &uarr;' : ' &darr;') : '';
-    return '<th style="text-align:left;padding:6px 8px;cursor:pointer;user-select:none;" onclick="finSortQboTransactions(' + jsAttr(key) + ')">' + esc(label) + arrow + '</th>';
-  }
-  var body = rows.map(function(t) {
-    var what = esc(t.type || '(unknown)') + (t.name ? ' — ' + esc(t.name) : '')
-      + (t.memo ? '<div style="font-size:.75rem;color:var(--warm-gray);">' + esc(t.memo) + '</div>' : '');
-    var link = t.viewUrl
-      ? '<a href="' + esc(t.viewUrl) + '" target="_blank" rel="noopener">View in QuickBooks</a>'
-      : '<span style="color:var(--warm-gray);font-size:.75rem;" title="No known direct link for this transaction type yet.">—</span>';
-    return '<tr>'
-      + '<td style="padding:6px 8px;white-space:nowrap;vertical-align:top;">' + esc(t.date || '') + '</td>'
-      + '<td style="padding:6px 8px;vertical-align:top;">' + what + '</td>'
-      + '<td style="padding:6px 8px;vertical-align:top;">' + esc(t.account || '') + '</td>'
-      + '<td style="padding:6px 8px;text-align:right;white-space:nowrap;vertical-align:top;">$' + finFmtMoney(parseFloat(t.amount) || 0) + '</td>'
-      + '<td style="padding:6px 8px;white-space:nowrap;vertical-align:top;">' + link + '</td>'
-      + '</tr>';
-  }).join('');
-  el.innerHTML = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:.82rem;">'
-    + '<thead style="border-bottom:2px solid var(--navy);"><tr>'
-      + th('Date', 'date') + th('Transaction', 'type') + th('Account / Line', 'account') + th('Amount', 'amount') + '<th style="padding:6px 8px;"></th>'
-    + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+    + '<p class="fin-data-card-body">QuickBooks is managed in Finance. <a href="https://finance.timothystl.org/?section=quickbooks&amp;page=transactions" target="_blank" rel="noopener">Open transactions in Finance</a>.</p>';
 }
 
 // ── Budget vs Actual — generic renderer for QuickBooks' Columns/Rows report shape ──
@@ -5854,55 +5663,6 @@ function finChurchConfirmBalanceMultiImport() {
   }).catch(function(err) {
     btn.disabled = false;
     if (err && err.message !== 'Unauthorized') finToast('Import failed: ' + (err.message || 'Unknown error'));
-  });
-}
-
-// ── Sync Selected Fiscal Years: actuals-only QuickBooks sync for admin-picked years, decoupled
-// from the always-on "Sync Now" (which also pulls Budget vs Actual + the rolling window). ──────
-var _finSyncYearsChecked = {}; // { [year]: true }
-
-function finOpenSyncYears() {
-  var thisYear = new Date().getFullYear();
-  var years = [];
-  for (var y = thisYear; y >= thisYear - 15; y--) years.push(y);
-  var el = document.getElementById('fin-sync-years-picker');
-  if (!el) return;
-  var checked = _finSyncYearsChecked;
-  el.innerHTML = '<p style="font-size:.78rem;color:var(--warm-gray);margin:0 0 8px;">Pull QuickBooks actuals (Statement of Activity / Profit &amp; Loss) for just the years checked below — budget data is never touched by this. A year synced here overrides any uploaded actuals for that same year.</p>'
-    + '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">'
-    + years.map(function(y) {
-      return '<label style="font-size:.78rem;border:1px solid var(--border);border-radius:6px;padding:3px 8px;cursor:pointer;">'
-        + '<input type="checkbox" style="margin-right:4px;" ' + (checked[y] ? 'checked' : '') + ' onchange="finSyncYearsToggle(' + y + ',this.checked)">' + y + '</label>';
-    }).join('')
-    + '</div>'
-    + '<button class="btn-primary" style="font-size:.78rem;padding:4px 10px;" onclick="finSyncYears(this)">Sync Selected Years</button>'
-    + '<div id="fin-sync-years-msg" style="font-size:.78rem;margin-top:6px;"></div>';
-  el.style.display = el.style.display === 'none' ? '' : 'none';
-}
-
-function finSyncYearsToggle(year, checked) {
-  if (checked) _finSyncYearsChecked[year] = true;
-  else delete _finSyncYearsChecked[year];
-}
-
-function finSyncYears(btn) {
-  var years = Object.keys(_finSyncYearsChecked).map(Number);
-  var msgEl = document.getElementById('fin-sync-years-msg');
-  if (!years.length) { if (msgEl) msgEl.textContent = 'Check at least one year first.'; return; }
-  if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
-  if (msgEl) msgEl.textContent = 'Syncing ' + years.join(', ') + '…';
-  api('/admin/api/finance/qb/sync-years', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fiscal_years: years }),
-  }).then(function(d) {
-    if (btn) { btn.disabled = false; btn.textContent = 'Sync Selected Years'; }
-    if (d && d.error) { if (msgEl) msgEl.textContent = 'Error: ' + d.error; return; }
-    if (msgEl) msgEl.textContent = (d.warnings && d.warnings.length) ? 'Synced with warnings: ' + d.warnings.join(' ') : 'Synced ' + d.years.join(', ') + '.';
-    finRenderChurchReport();
-    finRefreshHealthIfLoaded();
-  }).catch(function(err) {
-    if (btn) { btn.disabled = false; btn.textContent = 'Sync Selected Years'; }
-    if (msgEl) msgEl.textContent = 'Error: ' + (err && err.message || 'Unknown error');
   });
 }
 

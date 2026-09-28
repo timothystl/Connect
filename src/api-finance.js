@@ -7,40 +7,11 @@
 // giving_entries/tuition figures.
 import { json, getAuthInfo } from './auth.js';
 import { resolveGeneralFundIds, resolveGeneralFundBudget, parseCsvRows } from './api-utils.js';
-import { getAuthorizeUrl, exchangeCodeForTokens, refreshTokens, revokeToken, makeQboClient, qboConfigured, buildQboTransactionUrl } from './quickbooks.js';
-import { quickbooksManagedByFinance } from './finance-storage.js';
 import { makeDaycareClient, daycareConfigured } from './daycare.js';
 import { ensureGivingYearRollups } from './giving-rollups.js';
 
-const CALLBACK_PATH = '/admin/api/finance/qb/callback';
-
 async function getConnection(db) {
   return await db.prepare('SELECT * FROM finance_qb_connection WHERE id=1').first();
-}
-
-// Refreshes the access token if it's expired or about to be (within 2 minutes), persisting
-// the new tokens. QBO rotates the refresh token on every use, so the old one must be replaced.
-async function ensureFreshAccessToken(env, db, conn) {
-  // Never refresh (and so rotate) Finance's token from Connect once Finance owns QuickBooks.
-  if (quickbooksManagedByFinance(env)) throw new Error('QuickBooks is managed in Finance');
-  const expiresAtMs = conn.access_token_expires_at ? new Date(conn.access_token_expires_at).getTime() : 0;
-  if (expiresAtMs - Date.now() > 2 * 60 * 1000) return conn;
-  const refreshed = await refreshTokens(env, conn.refresh_token);
-  const now = Date.now();
-  const accessExpiresAt = new Date(now + (refreshed.expires_in || 3600) * 1000).toISOString();
-  const refreshExpiresAt = new Date(now + (refreshed.x_refresh_token_expires_in || 8640000) * 1000).toISOString();
-  await db.prepare(
-    `UPDATE finance_qb_connection SET access_token=?, refresh_token=?, access_token_expires_at=?, refresh_token_expires_at=? WHERE id=1`
-  ).bind(refreshed.access_token, refreshed.refresh_token, accessExpiresAt, refreshExpiresAt).run();
-  return { ...conn, access_token: refreshed.access_token, refresh_token: refreshed.refresh_token,
-           access_token_expires_at: accessExpiresAt, refresh_token_expires_at: refreshExpiresAt };
-}
-
-// Redirect target uses a query param (not a hash query) so the SPA's hash-based tab router
-// (which expects '#finance' exactly, see showTab()) is untouched — the frontend reads the
-// oauth result from location.search separately (see finCheckOauthReturn in js-finance.js).
-function redirectToApp(url, qsParam, qsValue) {
-  return new Response(null, { status: 302, headers: { Location: `${url.origin}/?${qsParam}=${encodeURIComponent(qsValue)}#finance` } });
 }
 
 // Merges a single leaf/subtotal row's budget amount in, by exact account-name match against
@@ -2072,48 +2043,6 @@ async function fetchQboJson(label, resPromise, warnings, hint) {
   return null;
 }
 
-// ── Transaction List report parsing ─────────────────────────────────────────────────────────
-// The TransactionList report is a flat, one-row-per-transaction report — a different shape from
-// the account-tree Columns/Rows reports (budgetVsActual/profitAndLoss) the rest of this file
-// parses via flattenReportTree, so it gets its own small parser rather than being forced through
-// that one. Fields are resolved by column METADATA (ColType, falling back to ColTitle) rather
-// than by fixed position — QBO's default column set is stable in practice (Date/Transaction
-// Type/Num/Name/Memo/Account/Amount, in that order, when no `columns` param is sent — see
-// transactionList() in quickbooks.js for why none is sent), but a reordered or renamed column
-// should degrade to a missing field, never a silently wrong one.
-const QBO_TXN_COLUMN_ALIASES = {
-  date:    { colTypes: ['tx_date'],                                titles: ['date'] },
-  type:    { colTypes: ['txn_type'],                               titles: ['transaction type'] },
-  docNum:  { colTypes: ['doc_num'],                                titles: ['num'] },
-  name:    { colTypes: ['name', 'cust_name', 'vend_name', 'emp_name'], titles: ['name'] },
-  memo:    { colTypes: ['memo'],                                   titles: ['memo/description', 'memo'] },
-  account: { colTypes: ['account_name', 'split_acc', 'split'],     titles: ['account', 'split'] },
-  amount:  { colTypes: ['subt_nat_amount', 'amount'],              titles: ['amount'] },
-};
-
-function indexQboTxnColumns(columns) {
-  const idx = {};
-  (columns || []).forEach((col, i) => {
-    const colType = (col.ColType || '').toLowerCase();
-    const colTitle = (col.ColTitle || '').toLowerCase();
-    for (const field of Object.keys(QBO_TXN_COLUMN_ALIASES)) {
-      if (idx[field] != null) continue;
-      const aliases = QBO_TXN_COLUMN_ALIASES[field];
-      if (aliases.colTypes.includes(colType) || aliases.titles.includes(colTitle)) idx[field] = i;
-    }
-  });
-  return idx;
-}
-
-// QBO reports attach the linkable entity's Id to the ColData cell of whichever column the report
-// treats as that row's "link" column — for TransactionList that is normally the Transaction Type
-// cell, but which cell carries `id` is not documented, so every cell in the row is checked rather
-// than assuming it is always the same one.
-function extractQboRowTxnId(cells) {
-  for (const c of cells || []) { if (c && c.id) return c.id; }
-  return null;
-}
-
 // TransactionList comes back flat under Rows.Row in the normal (ungrouped) case this app always
 // requests, but a report row can also be a Section (Header/Rows/Summary) if QBO is ever asked to
 // group it — handled here too, defensively, even though finance/qb/transactions never sets a
@@ -2124,33 +2053,6 @@ function flattenQboTransactionRows(rows, out) {
     if (row.type === 'Data' && row.ColData) out.push(row.ColData);
     if (row.Rows && row.Rows.Row) flattenQboTransactionRows(row.Rows.Row, out);
   }
-}
-
-// Pure — takes the raw TransactionList report JSON QuickBooks returned and produces the flat rows
-// the frontend renders and the finance/qb/transactions route below returns. Never throws on an
-// empty/malformed report; just returns no rows.
-export function parseQboTransactionListReport(report) {
-  const columns = report && report.Columns && report.Columns.Column;
-  const idx = indexQboTxnColumns(columns);
-  const dataRows = [];
-  if (report && report.Rows && report.Rows.Row) flattenQboTransactionRows(report.Rows.Row, dataRows);
-  return dataRows.map((cells) => {
-    const cellAt = (field) => (idx[field] != null ? cells[idx[field]] : null);
-    const typeCell = cellAt('type');
-    const txnType = typeCell ? (typeCell.value || '') : '';
-    const txnId = (typeCell && typeCell.id) || extractQboRowTxnId(cells);
-    return {
-      date: cellAt('date')?.value || '',
-      type: txnType,
-      docNum: cellAt('docNum')?.value || '',
-      name: cellAt('name')?.value || '',
-      memo: cellAt('memo')?.value || '',
-      account: cellAt('account')?.value || '',
-      amount: cellAt('amount')?.value || '',
-      txnId: txnId || null,
-      viewUrl: buildQboTransactionUrl(txnType, txnId),
-    };
-  });
 }
 
 // Given all finance_church_entries rows for a set of years (any source), resolves per-year
@@ -4431,7 +4333,9 @@ export async function handleFinanceApi(req, env, url, method, seg, db, isAdmin, 
     const conn = await getConnection(db);
     const daycareSyncRow = await db.prepare("SELECT value FROM finance_settings WHERE key='daycare_last_synced_at'").first();
     return json({
-      configured: qboConfigured(env),
+      // QuickBooks is connected and synced in Finance; Connect only reads Finance's copy.
+      configured: true,
+      managedInFinance: true,
       connected: !!(conn && conn.realm_id),
       companyName: conn?.company_name || '',
       environment: conn?.environment || 'production',
@@ -4442,299 +4346,10 @@ export async function handleFinanceApi(req, env, url, method, seg, db, isAdmin, 
     });
   }
 
-  // ── Begin OAuth: redirect the admin's browser to Intuit's consent screen ──
-  // QuickBooks belongs to Finance once QBO_MANAGED_BY_FINANCE is "1" (Andrew, 2026-09-25): every
-  // Connect QuickBooks action, including token refresh, stops here so Finance holds the only
-  // refresh token. Reads of the connection and report cache are routed to Finance's copy by
-  // finance-storage.js. See docs/QUICKBOOKS_FINANCE_CUTOVER.md.
-  if (seg.startsWith('finance/qb/') && quickbooksManagedByFinance(env)) {
+  // QuickBooks belongs to Finance (Andrew, 2026-09-25; cutover confirmed 2026-09-28). Connect no
+  // longer has QuickBooks routes or credentials; any old link or bookmark gets this answer.
+  if (seg.startsWith('finance/qb/')) {
     return json({ error: 'QuickBooks is now managed in Finance: open finance.timothystl.org, then QuickBooks.', movedTo: 'https://finance.timothystl.org/?section=quickbooks' }, 409);
-  }
-  if (seg === 'finance/qb/connect' && method === 'GET') {
-    if (!isAdmin) return json({ error: 'Access denied: connecting QuickBooks requires admin access' }, 403);
-    if (!qboConfigured(env)) return json({ error: 'QuickBooks is not configured. An admin must add QB_CLIENT_ID and QB_CLIENT_SECRET (see SECRETS.md).' }, 503);
-    // P22-E: fail CLOSED, not open, when the KV binding backing CSRF-state validation is
-    // missing — a state param that's minted but never checked on the way back is no
-    // protection at all, so refuse to start the flow rather than silently skip the check.
-    if (!env.KV) return json({ error: 'QuickBooks connect is temporarily unavailable (state store not configured)' }, 503);
-    const redirectUri = new URL(CALLBACK_PATH, url.origin).toString();
-    const state = crypto.randomUUID();
-    await env.KV.put(`qb_oauth_state:${state}`, '1', { expirationTtl: 600 });
-    return new Response(null, { status: 302, headers: { Location: await getAuthorizeUrl(env, redirectUri, state) } });
-  }
-
-  // ── OAuth callback: Intuit redirects here with ?code&realmId&state ────
-  if (seg === 'finance/qb/callback' && method === 'GET') {
-    if (!isAdmin) return json({ error: 'Access denied' }, 403);
-    const code = url.searchParams.get('code');
-    const realmId = url.searchParams.get('realmId');
-    const state = url.searchParams.get('state');
-    const oauthError = url.searchParams.get('error');
-    if (oauthError) return redirectToApp(url, 'qb_error', oauthError);
-    if (!code || !realmId || !state) return redirectToApp(url, 'qb_error', 'missing_params');
-    if (!env.KV) return redirectToApp(url, 'qb_error', 'state_store_unavailable');
-    {
-      const stateOk = await env.KV.get(`qb_oauth_state:${state}`);
-      if (!stateOk) return redirectToApp(url, 'qb_error', 'invalid_or_expired_state');
-      await env.KV.delete(`qb_oauth_state:${state}`);
-    }
-    const redirectUri = new URL(CALLBACK_PATH, url.origin).toString();
-    let tokens;
-    try { tokens = await exchangeCodeForTokens(env, code, redirectUri); }
-    catch (e) { return redirectToApp(url, 'qb_error', e.message); }
-    const environment = env.QB_ENVIRONMENT === 'sandbox' ? 'sandbox' : 'production';
-    const now = Date.now();
-    const accessExpiresAt = new Date(now + (tokens.expires_in || 3600) * 1000).toISOString();
-    const refreshExpiresAt = new Date(now + (tokens.x_refresh_token_expires_in || 8640000) * 1000).toISOString();
-    let companyName = '';
-    try {
-      const client = makeQboClient(env, { realm_id: realmId, access_token: tokens.access_token, environment });
-      const ciRes = await client.companyInfo();
-      if (ciRes.ok) { const ci = await ciRes.json(); companyName = ci?.CompanyInfo?.CompanyName || ''; }
-    } catch { /* non-fatal — connection still succeeds without a display name */ }
-    await db.prepare(
-      `INSERT INTO finance_qb_connection (id, realm_id, company_name, access_token, refresh_token, access_token_expires_at, refresh_token_expires_at, environment, connected_at, last_synced_at)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, datetime('now'), '')
-       ON CONFLICT(id) DO UPDATE SET realm_id=excluded.realm_id, company_name=excluded.company_name,
-         access_token=excluded.access_token, refresh_token=excluded.refresh_token,
-         access_token_expires_at=excluded.access_token_expires_at, refresh_token_expires_at=excluded.refresh_token_expires_at,
-         environment=excluded.environment, connected_at=datetime('now')`
-    ).bind(realmId, companyName, tokens.access_token, tokens.refresh_token, accessExpiresAt, refreshExpiresAt, environment).run();
-    return redirectToApp(url, 'qb_connected', '1');
-  }
-
-  // ── Disconnect ──────────────────────────────────────────────────────
-  if (seg === 'finance/qb/disconnect' && method === 'POST') {
-    if (!isAdmin) return json({ error: 'Access denied: disconnecting QuickBooks requires admin access' }, 403);
-    const conn = await getConnection(db);
-    if (conn?.refresh_token) await revokeToken(env, conn.refresh_token);
-    await db.prepare('DELETE FROM finance_qb_connection WHERE id=1').run();
-    await db.prepare("DELETE FROM finance_qb_snapshot").run();
-    return json({ ok: true });
-  }
-
-  // ── List every Budget object in the connected company, so an admin can pick which one to
-  // use instead of the sync silently guessing (relevant when a company has more than one — e.g.
-  // a leftover test budget alongside the real one). Also returns the currently-selected id.
-  if (seg === 'finance/qb/budgets' && method === 'GET') {
-    const conn = await getConnection(db);
-    if (!conn || !conn.realm_id) return json({ error: 'QuickBooks is not connected yet.' }, 400);
-    let fresh;
-    try { fresh = await ensureFreshAccessToken(env, db, conn); }
-    catch (e) { return json({ error: 'QuickBooks re-authentication failed — try disconnecting and reconnecting. (' + e.message + ')' }, 502); }
-    const client = makeQboClient(env, fresh);
-    const warnings = [];
-    const budgetsData = await fetchQboJson('Budget entity', client.budgets(), warnings);
-    const budgetList = (budgetsData?.QueryResponse?.Budget || []).map(b => ({
-      id: b.Id, name: b.Name || '(unnamed budget)', startDate: b.StartDate, endDate: b.EndDate,
-      entryType: b.BudgetEntryType, active: !!b.Active,
-    }));
-    const selectedRow = await db.prepare("SELECT value FROM finance_settings WHERE key='finance_qb_selected_budget_id'").first();
-    return json({ budgets: budgetList, selectedBudgetId: selectedRow?.value || null, warnings });
-  }
-  if (seg === 'finance/qb/budgets' && method === 'PATCH') {
-    if (!isAdmin) return json({ error: 'Access denied: selecting the QuickBooks budget requires admin access' }, 403);
-    const b = await req.json().catch(() => ({}));
-    const id = (b.budget_id == null || b.budget_id === '') ? null : String(b.budget_id);
-    if (id === null) await db.prepare("DELETE FROM finance_settings WHERE key='finance_qb_selected_budget_id'").run();
-    else await db.prepare(
-      `INSERT INTO finance_settings (key,value) VALUES ('finance_qb_selected_budget_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`
-    ).bind(id).run();
-    return json({ ok: true });
-  }
-
-  // ── Sync: pull Budget vs Actual + account balances, cache them ────────
-  if (seg === 'finance/qb/sync' && method === 'POST') {
-    const conn = await getConnection(db);
-    if (!conn || !conn.realm_id) return json({ error: 'QuickBooks is not connected yet.' }, 400);
-    let fresh;
-    try { fresh = await ensureFreshAccessToken(env, db, conn); }
-    catch (e) { return json({ error: 'QuickBooks re-authentication failed — try disconnecting and reconnecting. (' + e.message + ')' }, 502); }
-    const client = makeQboClient(env, fresh);
-    const year = new Date().getFullYear();
-    const warnings = [];
-    const preferredBudgetRow = await db.prepare("SELECT value FROM finance_settings WHERE key='finance_qb_selected_budget_id'").first();
-    const preferredBudgetId = preferredBudgetRow?.value || null;
-
-    // Built once via our own trusted merge pipeline (known, tested Columns shape) — used both
-    // to persist finance_church_entries below (always) and as the Overview tab's fallback
-    // display when QuickBooks' own BudgetVsActual report call fails. Never flatten the real
-    // budgetVsActual report itself into finance_church_entries: its exact column layout isn't
-    // guaranteed to match this function's known 4-column shape.
-    const currentYearMerge = await mergeCurrentYearBudgetAndActual(client, year, warnings, preferredBudgetId);
-
-    // The native BudgetVsActuals report is a confirmed-undocumented, Intuit-unsupported
-    // endpoint (see FIN2 in CLAUDE.md) — it spent months returning a "5020 Permission Denied"
-    // error, and once the endpoint-name bug was fixed (2026-07-28) it started responding but
-    // with numbers that don't hold up (e.g. an "Actual" many times larger than its own "Budget"
-    // for the same account, consistent with the report not honoring start_date/end_date and
-    // instead summing since the QuickBooks company's inception rather than just this fiscal
-    // year). Still called here — a genuine failure is worth surfacing as a warning — but its
-    // Rows/Columns are deliberately never shown to the user; the always-trusted reconstruction
-    // below (Budget entity + a date-scoped ProfitAndLoss report, both confirmed to respect
-    // start_date/end_date correctly) is the only thing ever rendered.
-    const nativeBudgetVsActual = await fetchQboJson(
-      'Budget vs Actual (native report)',
-      client.budgetVsActual({ start_date: `${year}-01-01`, end_date: `${year}-12-31` }),
-      warnings,
-      `make sure a Budget for ${year} exists in QuickBooks under Settings > Budgeting`
-    );
-    if (nativeBudgetVsActual) warnings.push('Budget vs Actual: QuickBooks\' native report responded, but its figures are not used — see the reconstructed report below instead (the native report is unsupported by Intuit and has returned unreliable totals).');
-    let budgetVsActual = null;
-    if (currentYearMerge) {
-      budgetVsActual = {
-        Columns: { Column: [{ ColTitle: 'Account' }, { ColTitle: 'Actual' }, { ColTitle: 'Budget' }, { ColTitle: 'Over Budget By' }] },
-        Rows: { Row: currentYearMerge.rows },
-        _synthesized: true,
-      };
-    } else if (!nativeBudgetVsActual) {
-      warnings.push('Budget vs Actual: could not build any Budget vs Actual data this sync — both the native report and the Budget-entity reconstruction failed.');
-    }
-    const accounts = await fetchQboJson('Account balances', client.accounts(), warnings);
-    // Board-level "Church Report": one P&L column per calendar year over a 5-year trailing
-    // window (matches the app's existing 5-year convention, e.g. AT6's multi-year attendance
-    // comparison). No Budget setup required — P&L is actuals-only.
-    const PNL_YEARS_BACK = 4;
-    const profitAndLoss = await fetchQboJson(
-      'Profit & Loss (multi-year)',
-      client.profitAndLoss({ start_date: `${year - PNL_YEARS_BACK}-01-01`, end_date: `${year}-12-31`, summarize_column_by: 'Year' }),
-      warnings
-    );
-    // Monthly granularity, current + prior year ONLY (not the full 5-year window, to bound sync/
-    // storage cost) — this is what makes the This Year view's YoY-to-date comparison and
-    // year-end projection possible; annual-only rows can't support a same-period comparison.
-    const profitAndLossMonthly = await fetchQboJson(
-      'Profit & Loss (monthly, current + prior year)',
-      client.profitAndLoss({ start_date: `${year - 1}-01-01`, end_date: `${year}-12-31`, summarize_column_by: 'Month' }),
-      warnings
-    );
-    const syncedAt = new Date().toISOString();
-    const ops = [];
-    if (budgetVsActual) ops.push(db.prepare(
-      `INSERT INTO finance_qb_snapshot (key,value,synced_at) VALUES ('budget_vs_actual',?,?)
-       ON CONFLICT(key) DO UPDATE SET value=excluded.value, synced_at=excluded.synced_at`
-    ).bind(JSON.stringify(budgetVsActual), syncedAt));
-    if (accounts) ops.push(db.prepare(
-      `INSERT INTO finance_qb_snapshot (key,value,synced_at) VALUES ('accounts',?,?)
-       ON CONFLICT(key) DO UPDATE SET value=excluded.value, synced_at=excluded.synced_at`
-    ).bind(JSON.stringify(accounts), syncedAt));
-    if (ops.length) await db.batch(ops);
-
-    // ── Persist into finance_church_entries ────────────────────────────
-    // The multi-year (actuals-only) pass is EXCLUDED from writing the current year at all —
-    // reported live 2026-07-28: the Overview KPI cards (read from finance_church_entries via
-    // computeYearSummary) showed roughly double the correct total (~$1.18M expenses) compared
-    // to the fresh, verified-correct Budget vs Actual reconstruction (~$605K) for the identical
-    // sync. The original design relied on "current-year rows are written second, so their ON
-    // CONFLICT DO UPDATE overwrites the multi-year pass's row for that year" — but that only
-    // self-heals when both passes produce byte-identical category_path strings for the same
-    // account; QuickBooks' multi-year summarized report (summarize_column_by:'Year') doesn't
-    // reliably match the single-year report's account tree shape, so a mismatched path becomes
-    // a second, un-overwritten row instead of a correction — silently doubling the total. Since
-    // currentYearMerge already covers the current year (with real budget data, unlike this
-    // actuals-only pass), the multi-year pass now only contributes PRIOR years, where there's no
-    // second pass to conflict or duplicate with.
-    const churchRows = [];
-    if (profitAndLoss && profitAndLoss.Rows) {
-      // Column 0 is the account-name column (cells[0]); the extractors index years from cells[1],
-      // so they must be given the data columns only. Passing every column shifted each year onto
-      // the next year's figures.
-      const cols = ((profitAndLoss.Columns && profitAndLoss.Columns.Column) || []).slice(1);
-      const colYears = cols.map(c => { const m = /(\d{4})/.exec(c.ColTitle || ''); const y = m ? parseInt(m[1], 10) : null; return (y === year) ? null : y; });
-      flattenReportTree(profitAndLoss.Rows.Row, [], null, makeMultiYearExtractor(colYears), churchRows);
-    }
-    if (currentYearMerge) {
-      flattenReportTree(currentYearMerge.rows, [], null, makeCurrentYearExtractor(year), churchRows);
-    }
-    // Monthly rows use period_month 1-12 (vs. 0 for the annual rows above), so they don't
-    // collide in the UNIQUE(fiscal_year, period_month, category_path, source) constraint —
-    // order relative to the annual flattens above doesn't matter for that reason.
-    if (profitAndLossMonthly && profitAndLossMonthly.Rows) {
-      // Same for monthly columns: data columns only, or each month takes the next month's figure.
-      const monthCols = ((profitAndLossMonthly.Columns && profitAndLossMonthly.Columns.Column) || []).slice(1);
-      const colPeriods = monthCols.map(c => parseMonthColTitle(c.ColTitle || ''));
-      flattenReportTree(profitAndLossMonthly.Rows.Row, [], null, makeMonthlyExtractor(colPeriods), churchRows);
-    }
-    await persistChurchEntries(db, churchRows, syncedAt);
-
-    await db.prepare('UPDATE finance_qb_connection SET last_synced_at=? WHERE id=1').bind(syncedAt).run();
-    return json({ ok: true, syncedAt, warnings, fetched: { budgetVsActual: !!budgetVsActual, accounts: !!accounts, profitAndLoss: !!profitAndLoss, profitAndLossMonthly: !!profitAndLossMonthly }, churchEntriesSynced: churchRows.length });
-  }
-
-  // ── Sync: actuals only, for specific admin-picked fiscal years (Statement of Activity /
-  // Profit & Loss) ────────────────────────────────────────────────────────────────────────────
-  // A deliberately narrower sibling of finance/qb/sync above: no Budget entity, no native
-  // BudgetVsActuals report call, no finance_qb_snapshot writes — this never touches budget data
-  // at all, sidestepping that whole unsupported-endpoint saga (see FIN2) entirely. One
-  // profitAndLoss() call per requested year (not a single summarize_column_by:'Year' call, so
-  // non-contiguous years — e.g. 2019 and 2026 with nothing in between — work the same as a
-  // contiguous range), persisted under the SAME 'qbo_sync' source as the main sync so precedence
-  // against 'activity_import'/'import' for those specific years resolves exactly like a full
-  // sync would (see CHURCH_SOURCE_PRIORITY) — persistChurchEntries() only deletes/rewrites the
-  // years actually present in `rows`, so every year not selected here is left completely alone.
-  if (seg === 'finance/qb/sync-years' && method === 'POST') {
-    const conn = await getConnection(db);
-    if (!conn || !conn.realm_id) return json({ error: 'QuickBooks is not connected yet.' }, 400);
-    const b = await req.json().catch(() => ({}));
-    const years = Array.isArray(b.fiscal_years) ? [...new Set(b.fiscal_years.map(y => parseInt(y, 10)))].filter(Number.isFinite) : [];
-    if (!years.length) return json({ error: 'fiscal_years is required (a non-empty array of years)' }, 400);
-    const thisYear = new Date().getFullYear();
-    if (years.some(y => y < 2000 || y > thisYear + 1)) return json({ error: 'fiscal_years contains an implausible year' }, 400);
-    let fresh;
-    try { fresh = await ensureFreshAccessToken(env, db, conn); }
-    catch (e) { return json({ error: 'QuickBooks re-authentication failed — try disconnecting and reconnecting. (' + e.message + ')' }, 502); }
-    const client = makeQboClient(env, fresh);
-    const warnings = [];
-    const churchRows = [];
-    for (const year of years.sort((a, c) => a - c)) {
-      const pnl = await fetchQboJson(
-        `Profit & Loss (${year})`,
-        client.profitAndLoss({ start_date: `${year}-01-01`, end_date: `${year}-12-31` }),
-        warnings
-      );
-      if (pnl && pnl.Rows) flattenReportTree(pnl.Rows.Row, [], null, makeSingleYearActualExtractor(year), churchRows);
-    }
-    const syncedAt = new Date().toISOString();
-    await persistChurchEntries(db, churchRows, syncedAt);
-    return json({ ok: true, syncedAt, warnings, years, churchEntriesSynced: churchRows.length });
-  }
-
-  // ── Transactions: a plain, sortable/filterable read of what is actually in QuickBooks, per
-  // Andrew's own complaint that QuickBooks' own UI "is not intuitive to deal with and find
-  // things, the columns hide names of things too". Read-only (GET only, never writes/posts/
-  // voids/modifies anything in QuickBooks) and always a LIVE pull — deliberately never cached in
-  // finance_qb_snapshot like the Sync button's data, because the whole point is picking a
-  // different date range on demand rather than being stuck with one fixed synced window. Each row
-  // carries a `viewUrl` (see buildQboTransactionUrl in quickbooks.js) so the frontend can offer a
-  // direct "View in QuickBooks" link back to that exact transaction for editing, satisfying the
-  // "a way to go back to QuickBooks to make changes" ask without any write-back API of our own.
-  if (seg === 'finance/qb/transactions' && method === 'GET') {
-    const conn = await getConnection(db);
-    if (!conn || !conn.realm_id) return json({ error: 'QuickBooks is not connected yet.' }, 400);
-    const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-    const now = new Date();
-    // Default window is "this calendar month so far" — a small, cheap live call rather than
-    // guessing a wider default nobody asked for; the frontend always lets Andrew pick another
-    // range, per the explicit "don't just default to some fixed window" instruction this came
-    // with.
-    const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-    const defaultEnd = now.toISOString().slice(0, 10);
-    const startDate = url.searchParams.get('start_date') || defaultStart;
-    const endDate = url.searchParams.get('end_date') || defaultEnd;
-    if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) return json({ error: 'start_date and end_date must be in YYYY-MM-DD form' }, 400);
-    if (startDate > endDate) return json({ error: 'start_date must not be after end_date' }, 400);
-    let fresh;
-    try { fresh = await ensureFreshAccessToken(env, db, conn); }
-    catch (e) { return json({ error: 'QuickBooks re-authentication failed — try disconnecting and reconnecting. (' + e.message + ')' }, 502); }
-    const client = makeQboClient(env, fresh);
-    const warnings = [];
-    const report = await fetchQboJson(
-      'Transaction List',
-      client.transactionList({ start_date: startDate, end_date: endDate, sort_by: 'tx_date', sort_order: 'descend' }),
-      warnings
-    );
-    const transactions = report ? parseQboTransactionListReport(report) : [];
-    return json({ ok: true, startDate, endDate, realmId: conn.realm_id, environment: conn.environment, transactions, warnings });
   }
 
   // ── Overview: cached QBO data + daycare summary, for the Finance tab ──

@@ -44,8 +44,6 @@ export const ACCOUNTING_BOOT = String.raw`(function(){
   // OAuth/sync/transaction controls; never send those operations to the retired Connect owner.
   finRenderConnection=function(){var el=document.getElementById('fin-connection');if(el){var badge=el.previousElementSibling&&el.previousElementSibling.lastElementChild;if(badge){badge.textContent='Managed in Finance';badge.className='fin-chip';}el.innerHTML='<p><a href="/?section=quickbooks">Open QuickBooks connection and sync</a></p>';}};
   finRenderQboTxnsCard=function(){return '<h3>QuickBooks transactions</h3><p><a href="/?section=quickbooks&page=transactions">Open transactions, vendor spend and expense detail</a></p>';};
-  finRenderQboTxnsTable=function(){};
-  finSyncYears=function(){window.location.href='/?section=quickbooks';};
   // Keep navigation within this workspace; Connect's app/session/service-worker startup is off.
   showTab=function(name,section){
     if(name!=='finance') return;

@@ -7,10 +7,10 @@ function database(){
  function statement(sql,args=[]){return {bind:(...a)=>statement(sql,a),async first(){return raw.prepare(sql).get(...args)||null},async all(){return {results:raw.prepare(sql).all(...args)}},async run(){return raw.prepare(sql).run(...args)}};}
  return {raw,prepare:statement,async batch(items){raw.exec('BEGIN');try{const out=[];for(const s of items)out.push(await s.run());raw.exec('COMMIT');return out;}catch(e){raw.exec('ROLLBACK');throw e}}};
 }
-it('switches accounting reads and writes together, retaining identity and QuickBooks owners',async()=>{
+it('switches accounting and QuickBooks reads and writes together, retaining identity owners',async()=>{
  const DB=database(),FINANCE_DB=database();
- DB.raw.exec("INSERT INTO finance_settings VALUES('x','old'); INSERT INTO app_users VALUES('office'); INSERT INTO finance_qb_connection VALUES(1)");
- FINANCE_DB.raw.exec("INSERT INTO finance_settings VALUES('x','new')");
+ DB.raw.exec("INSERT INTO finance_settings VALUES('x','old'); INSERT INTO app_users VALUES('office'); INSERT INTO finance_qb_connection VALUES(99)");
+ FINANCE_DB.raw.exec("INSERT INTO finance_settings VALUES('x','new'); INSERT INTO finance_qb_connection VALUES(1)");
  const env={DB,FINANCE_DB,FINANCE_STORAGE_MODE:'finance'},db=financeStorageDb(env);
  expect(financeStorageDb({...env})).toBe(db);
  expect((await db.prepare("SELECT value FROM finance_settings WHERE key=?").bind('x').first()).value).toBe('new');
