@@ -32,7 +32,7 @@ import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, fetchGivingBoard, fet
 import { GIVING_REPORTS_STYLES, givingReportParams, givingReportRequests, impactStatementsFromForm, renderGivingReportPage } from './giving-reports-pages.js';
 import { DONOR_LETTERS_STYLES, kindOfPage, renderDonorLettersPage } from './donor-letters-pages.js';
 import { fetchGivingLetters, lettersParams, listQuery } from './donor-letters-service.js';
-import { canSendLetters, handleDonorLettersPrint, handleDonorLettersWrite, handleStatementCsv } from './donor-letters-routes.js';
+import { canSendLetters, handleDonorLettersPrint, handleDonorLettersWrite, handleStatementCsv, handleLetterSettingsWrite } from './donor-letters-routes.js';
 import { COUNCIL_REPORT_STYLES, councilAnalysisRequests, councilParams, renderCouncilEmailHtml, renderCouncilReportPage } from './council-report-pages.js';
 import { fetchAccessRoles } from './connect-access-client.js';
 import { fetchFinanceClassification } from './finance-classification-client.js';
@@ -237,6 +237,9 @@ const SECURITY_HEADERS = Object.freeze({
 // The Compensation Planner page (Compensation → Planner) is Finance's one interactive page: it
 // loads its own bundled script from this Worker (script-src 'self', never inline) and calls back
 // only to this Worker. Everything else stays as SECURITY_HEADERS sets it.
+// Donor letters show the church's letterhead logo (served by Connect, so an emailed letter can load
+// it) and any image embedded in a letter template (a data: URL). Images only; still no script.
+const DONOR_LETTERS_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https://connect.timothystl.org; font-src 'self'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'";
 const PLANNER_PAGE_CSP = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'";
 
 function response(body, init = {}, { cacheControl } = {}) {
@@ -1412,6 +1415,7 @@ function renderSectionBody(ctx) {
       : ctx.searchParams.get('status') === 'error' ? { ok: false, message: ctx.searchParams.get('message') || 'The request did not complete.' } : null;
     return renderDonorLettersPage(page.id, {
       namedHidden, status, canEdit: canSendLetters(roleResult, councilPreview),
+      canAdmin: !councilPreview && roleResult.ok && roleResult.role === 'admin',
       params: lettersParams((k) => ctx.searchParams.get(k) || '', isoDay(new Date())),
       result: d.list ? asResult(d.list) : { ok: false, message: 'not requested' },
       funds: d.funds?.ok ? d.funds.result.funds : [],
@@ -2048,6 +2052,7 @@ export default {
 
     if (route.id === 'giving-impact-write-v1') return handleGivingImpactWrite(request, env, url);
     if (route.id === 'giving-letters-write-v1') return handleDonorLettersWrite(request, env, url);
+    if (route.id === 'giving-letters-settings-v1') return handleLetterSettingsWrite(request, env, url);
     if (route.id === 'giving-letters-print') return handleDonorLettersPrint(request, env, url);
     if (route.id === 'giving-statement-csv') return handleStatementCsv(request, env, url);
     if (route.id === 'giving-board-email-v1') {
@@ -4472,6 +4477,7 @@ export default {
             ]);
             return { statement, config, search, key, q };
           }
+          if (lettersPageId === 'settings') return { config: await fetchGivingLetters(env, accessJwt, 'config') };
           if (lettersPageId === 'letters' && lp.type === 'memorial') return {};
           const [op, query] = listQuery(kindOfPage(lettersPageId), lp);
           const [list, funds] = await Promise.all([
@@ -4552,6 +4558,8 @@ export default {
         });
         if (plannerPage && !printMode) {
           shellResponse.headers.set('Content-Security-Policy', PLANNER_PAGE_CSP);
+        } else if (lettersPageId) {
+          shellResponse.headers.set('Content-Security-Policy', DONOR_LETTERS_PAGE_CSP);
         }
         return shellResponse;
       } catch {

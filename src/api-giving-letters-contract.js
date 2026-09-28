@@ -12,6 +12,8 @@
 //   GET  giving-letters-v1?op=nudges      the giving-nudge recipients
 //   POST giving-letters-send-v1           send up to 20 rendered letters; records each send
 //   POST giving-letters-mark-v1           record (or undo) printed or sent letters
+//   POST giving-letters-settings-v1       save the church's letter settings, templates and logo
+//                                         (admin only, as Connect's own Settings)
 //
 // Reads need Giving view; sending and marking need Giving edit (or admin), as in Connect. Every
 // read reuses Connect's own handlers or the statement queries, so a letter shows exactly the
@@ -20,7 +22,8 @@ import { json } from './auth.js';
 import { handleGivingApi } from './api-giving.js';
 import { authorizeGivingAnalyticsContract } from './api-giving-analytics-contracts.js';
 import { sendBrevoTransactionalEmail } from './api-emails.js';
-import { LETTER_TYPES } from './api-utils.js';
+import { LETTER_TYPES, logoSizeWarning, sanitizeLetterTemplateHtml } from './api-utils.js';
+import { validateImageUpload } from './api-people.js';
 import { DEFAULT_MIDYEAR_TEMPLATE, DEFAULT_YEAR_END_TEMPLATE } from './giving-letter-templates.js';
 
 export const LETTER_SEND_LIMIT = 20;
@@ -170,6 +173,62 @@ export async function markLetters(db, marks, unmark) {
   return { ok: true, marked: stmts.length, unmarked: !!unmark };
 }
 
+// The church's letter settings, saved as Connect's Settings › Church and Giving settings save
+// them: a blank field keeps what is stored, templates are cleaned of stray base64 and capped, and
+// the letterhead logo is checked to be a real image before it replaces the stored one.
+const SETTING_KEYS = { church_name: 200, church_from_name: 200, church_from_email: 254, church_ein: 20 };
+const TEMPLATE_KEYS = { template_year_end: 'giving_letter_template', template_midyear: 'giving_midyear_letter_template' };
+const TEMPLATE_MAX_CHARS = 1_000_000;
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+
+export async function saveLetterSettings(env, db, body) {
+  const b = body && typeof body === 'object' ? body : {};
+  const stmts = [];
+  const setConfig = (key, value) => db.prepare('INSERT INTO chms_config(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(key, value);
+  const setGiving = (key, value) => db.prepare('INSERT INTO giving_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(key, value);
+  for (const [key, max] of Object.entries(SETTING_KEYS)) {
+    const value = String(b[key] ?? '').trim();
+    if (!value) continue;
+    if (value.length > max) return { error: `That ${key.replace(/_/g, ' ')} is too long.` };
+    if (key === 'church_from_email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return { error: 'The sending address is not an email address.' };
+    stmts.push(setConfig(key, value));
+  }
+  const url = String(b.online_giving_url ?? '').trim();
+  if (url) {
+    if (!/^https:\/\/[^\s"'<>]+$/.test(url) || url.length > 500) return { error: 'The online giving link must be an https:// address.' };
+    stmts.push(setGiving('online_giving_url', url));
+  }
+  for (const [field, key] of Object.entries(TEMPLATE_KEYS)) {
+    const value = String(b[field] ?? '');
+    if (!value.trim()) continue;
+    if (value.length > TEMPLATE_MAX_CHARS) return { error: 'A letter template is too large to save (likely an embedded image). Use a smaller image or remove it.' };
+    stmts.push(setGiving(key, sanitizeLetterTemplateHtml(value).cleaned));
+  }
+  let warning = '';
+  let logo = null;
+  if (b.logo?.data_base64) {
+    if (!env.PHOTOS) return { error: 'Photo storage is not configured in Connect.' };
+    let bytes;
+    try { bytes = Uint8Array.from(atob(String(b.logo.data_base64)), (c) => c.charCodeAt(0)); } catch { return { error: 'The logo could not be read.' }; }
+    if (bytes.byteLength > LOGO_MAX_BYTES) return { error: 'The logo is larger than 2 MB. Use a smaller image.' };
+    const v = await validateImageUpload(new Blob([bytes]));
+    if (!v.ok) return { error: v.error };
+    logo = v;
+    warning = logoSizeWarning(bytes.byteLength);
+  }
+  const prev = (b.remove_logo || logo) ? await db.prepare("SELECT value FROM chms_config WHERE key='letterhead_logo_ext'").first() : null;
+  if (logo) {
+    if (prev?.value && prev.value !== logo.ext) { try { await env.PHOTOS.delete(`branding/letterhead-logo.${prev.value}`); } catch { /* replaced below */ } }
+    await env.PHOTOS.put(`branding/letterhead-logo.${logo.ext}`, logo.buf, { httpMetadata: { contentType: logo.ct } });
+    stmts.push(setConfig('letterhead_logo_ext', logo.ext));
+  } else if (b.remove_logo) {
+    if (prev?.value && env.PHOTOS) { try { await env.PHOTOS.delete(`branding/letterhead-logo.${prev.value}`); } catch { /* row removed below */ } }
+    stmts.push(db.prepare("DELETE FROM chms_config WHERE key='letterhead_logo_ext'"));
+  }
+  if (stmts.length) await db.batch(stmts);
+  return { ok: true, saved: stmts.length, warning };
+}
+
 export async function handleGivingLettersContracts(req, env, path) {
   if (path === '/api/contracts/giving-letters-v1' && req.method === 'GET') {
     const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'people' });
@@ -197,6 +256,15 @@ export async function handleGivingLettersContracts(req, env, path) {
     if (!result) return json({ error: 'Unknown letters operation' }, 404);
     if (!result.ok) return result;
     return json({ contract: 'connect.giving-letters.v1', op, ...(await result.json()) });
+  }
+  if (path === '/api/contracts/giving-letters-settings-v1' && req.method === 'POST') {
+    const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'write' });
+    if (auth.response) return auth.response;
+    if (auth.user.role !== 'admin') return json({ error: 'Letter settings are changed by an administrator, as in Connect’s Settings.' }, 403);
+    let body = {};
+    try { body = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+    const result = await saveLetterSettings(env, env.DB, body);
+    return result.error ? json({ error: result.error }, 400) : json(result);
   }
   if ((path === '/api/contracts/giving-letters-send-v1' || path === '/api/contracts/giving-letters-mark-v1') && req.method === 'POST') {
     const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'write' });

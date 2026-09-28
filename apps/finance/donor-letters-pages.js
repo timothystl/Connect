@@ -6,7 +6,7 @@
 import { LETTER_TYPES, escapeHtml as e, fmtDate, fmtMoney, letterTypeOf, renderStatementLetter } from './donor-letters.js';
 import { EMAIL_BATCH, PRINT_LIMIT } from './donor-letters-service.js';
 
-export const DONOR_LETTER_PAGES = ['letters', 'receipts', 'nudge-letters', 'statement'];
+export const DONOR_LETTER_PAGES = ['letters', 'receipts', 'nudge-letters', 'statement', 'settings'];
 const KIND_OF_PAGE = { letters: 'letters', receipts: 'receipts', 'nudge-letters': 'nudges' };
 export const PAGE_OF_KIND = { letters: 'letters', receipts: 'receipts', nudges: 'nudge-letters' };
 
@@ -141,12 +141,58 @@ export function renderStatementPage({ search, statement, config, params: p, key,
       <div class="dl-letter">${letter}</div>${sendForm}</section>`;
 }
 
+// ── Letter settings ──────────────────────────────────────────────────────────────────────────
+// What every letter uses: the church's name and EIN, the sending address, the online giving link,
+// the letterhead logo and the two templates. An administrator changes them (as in Connect's
+// Settings); Giving view sees them. Previews use a fictional giver.
+const SAMPLE_STATEMENT = {
+  mode: 'person', kind: 'person', year: 0, total_cents: 35000, person: { first_name: 'Sample', last_name: 'Giver' },
+  entries: [{ gift_date: '', fund_name: '40085 General Fund', amount: 25000, method: 'check' }, { gift_date: '', fund_name: '50010 Missions', amount: 10000, method: 'online' }],
+};
+const MERGE_FIELDS = [['{{name}}', 'the giver or household'], ['{{year}}', 'the letter’s year'], ['{{total}}', 'total given'], ['{{gift_table}}', 'the table of gifts'],
+  ['{{date}}', 'today’s date'], ['{{ein}}', 'the EIN'], ['{{#if_ein}} … {{/if_ein}}', 'the IRS acknowledgement, only when an EIN is set'],
+  ['{{giving_url}}', 'the online giving link'], ['{{#if_giving_url}} … {{/if_giving_url}}', 'shown only when the link is set']];
+
+export function renderLetterSettingsPage({ config, canAdmin, params: p, status }) {
+  if (!config?.ok) return statusBanner(status) + unavailable(config?.message);
+  const c = config.data;
+  const sample = { ...SAMPLE_STATEMENT, year: p.year, entries: SAMPLE_STATEMENT.entries.map((x, i) => ({ ...x, gift_date: `${p.year}-0${i + 3}-01` })) };
+  const preview = (type) => `<div class="dl-letter">${renderStatementLetter(sample, type, c, p.today)}</div>`;
+  const ro = canAdmin ? '' : ' disabled';
+  const field = (name, label, value, attrs = '') => `<label>${label}<input name="${name}" value="${e(value || '')}"${attrs}${ro}></label>`;
+  const intro = canAdmin
+    ? '<p class="muted dl-desc">Every letter and statement uses these. A blank field keeps what is saved. Changes apply to the next letter sent.</p>'
+    : '<p class="muted dl-desc">Every letter and statement uses these. An administrator changes them.</p>';
+  const form = `<form method="POST" action="/api/v1/giving-letters-settings" enctype="multipart/form-data" class="dl-settings">
+    <section class="dl-card"><h2>Church and sender</h2><div class="dl-fields">
+      ${field('church_name', 'Church name', c.church_name, ' maxlength="200"')}
+      ${field('church_ein', 'EIN (tax ID)', c.church_ein, ' maxlength="20" placeholder="00-0000000"')}
+      ${field('church_from_name', 'Sent from (name)', c.from_name, ' maxlength="200"')}
+      ${field('church_from_email', 'Sent from (email)', c.from_email, ' type="email" maxlength="254"')}
+      ${field('online_giving_url', 'Online giving link', c.online_giving_url, ' type="url" maxlength="500" placeholder="https://"')}
+    </div>${c.church_ein ? '' : '<p class="status status-error">No EIN is set, so year-end statements leave out the IRS acknowledgement sentence.</p>'}${c.from_email ? '' : '<p class="status status-error">No sending address is set, so letters cannot be emailed.</p>'}</section>
+    <section class="dl-card"><h2>Letterhead logo</h2>
+      <p class="muted">Shown beside the church name at the top of every letter, about 44 pixels tall. A small PNG or JPEG under 300 KB shows best in email.</p>
+      ${c.logo_url ? `<p><img src="${e(c.logo_url)}" alt="Current letterhead logo" height="44" class="dl-logo"></p>` : '<p class="muted">No logo; letters show the church name alone.</p>'}
+      ${canAdmin ? `<div class="dl-fields"><label>Replace with <input type="file" name="logo" accept="image/png,image/jpeg,image/gif,image/webp"></label>${c.logo_url ? '<label class="dl-check"><input type="checkbox" name="remove_logo" value="1"> Remove the logo</label>' : ''}</div>` : ''}</section>
+    <section class="dl-card"><h2>Year-end and quarterly template</h2><p class="muted">Used for year-end and quarterly statements and memorial letters. HTML.</p>
+      <textarea name="template_year_end" rows="12" class="dl-template"${ro}>${e(c.templates?.year_end || '')}</textarea>
+      <details><summary>Preview with a sample giver</summary>${preview('year_end')}</details></section>
+    <section class="dl-card"><h2>Mid-year, thank-you and appeal template</h2><p class="muted">Used for mid-year updates, thank-you letters and giving appeals. HTML.</p>
+      <textarea name="template_midyear" rows="12" class="dl-template"${ro}>${e(c.templates?.midyear || '')}</textarea>
+      <details><summary>Preview with a sample giver</summary>${preview('midyear')}</details></section>
+    <section class="dl-card"><h2>Merge fields</h2><table class="dl-table"><tbody>${MERGE_FIELDS.map(([f, d]) => `<tr><td><code>${e(f)}</code></td><td>${e(d)}</td></tr>`).join('')}</tbody></table></section>
+    ${canAdmin ? '<div class="dl-actions"><button type="submit" class="dl-primary">Save letter settings</button></div>' : ''}</form>`;
+  return statusBanner(status) + intro + form;
+}
+
 export function renderDonorLettersPage(pageId, ctx) {
   if (ctx.namedHidden) return namedRefusal;
   switch (pageId) {
     case 'receipts': return renderReceiptsPage(ctx);
     case 'nudge-letters': return renderNudgeLettersPage(ctx);
     case 'statement': return renderStatementPage(ctx);
+    case 'settings': return renderLetterSettingsPage(ctx);
     default: return renderLettersPage(ctx);
   }
 }
@@ -189,5 +235,11 @@ export const DONOR_LETTERS_STYLES = `
   .dl-cardhead { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; }
   .dl-letter { margin-top:14px; padding:28px 32px; border:1px solid var(--line-soft); border-radius:8px; background:#FDFCF9; color:#16213A; }
   .dl-hits { margin:12px 0 0; padding-left:20px; line-height:1.9; }
+  .dl-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px 16px; margin-top:10px; }
+  .dl-fields label { display:flex; flex-direction:column; gap:4px; font-weight:600; font-size:13px; }
+  .dl-fields label.dl-check { flex-direction:row; align-items:center; font-weight:400; }
+  .dl-template { width:100%; box-sizing:border-box; margin-top:8px; font:12px/1.5 ui-monospace,Menlo,monospace; }
+  .dl-logo { max-height:44px; width:auto; }
+  .dl-settings details { margin-top:10px; }
   .dl-table tfoot td { font-weight:700; border-top:2px solid var(--navy); }
 `;

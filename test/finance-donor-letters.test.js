@@ -34,6 +34,7 @@ function env({ role = 'finance', permissions = { finance: 'edit', giving: 'edit'
       const call = { path: u.pathname.split('/').pop(), query: Object.fromEntries(u.searchParams), body: req.method === 'POST' ? await req.json() : null };
       calls.push(call);
       if (call.path === 'giving-letters-send-v1') return Response.json(sendAnswer ? sendAnswer(call.body.letters) : { ok: true, sent: call.body.letters.map((l) => l.recipient_key), failed: [], stopped: false });
+      if (call.path === 'giving-letters-settings-v1') return Response.json({ ok: true, saved: 2, warning: '' });
       if (call.path === 'giving-letters-mark-v1') return Response.json({ ok: true, marked: call.body.marks.length, unmarked: !!call.body.unmark });
       if (call.path === 'giving-reports-v1') return Response.json({ report: 'funds', funds: [{ id: 4, name: '40085 General Fund' }] });
       const op = u.searchParams.get('op');
@@ -54,10 +55,10 @@ function post(e, fields) {
 const location = (res) => new URL(res.headers.get('Location'), 'https://finance.test').searchParams;
 
 describe('Finance › Donor letters', () => {
-  it('is four pages under Giving, closed to council', async () => {
+  it('is five pages under Giving, closed to council', async () => {
     const section = FINANCE_PARITY_SECTIONS.find((s) => s.id === 'giving-letters');
     expect(section.group).toBe('Giving');
-    expect(section.pages.map((p) => p.id)).toEqual(['letters', 'receipts', 'nudge-letters', 'statement']);
+    expect(section.pages.map((p) => p.id)).toEqual(['letters', 'receipts', 'nudge-letters', 'statement', 'settings']);
     expect(roleCanAccessSection('staff', section, { giving: 'none', finance: 'edit' })).toBe(false);
     const e = env({ role: 'council', permissions: { giving: 'anon', finance: 'view' } });
     const html = await page(e, 'letters', '&year=2026');
@@ -164,5 +165,40 @@ describe('Finance › Donor letters', () => {
     expect(renderStatementLetter(STATEMENTS.p3, 'year_end', CONFIG, '2026-12-31')).toContain('Our EIN/Tax ID is 00-0000000');
     expect(renderStatementLetter(STATEMENTS.p3, 'year_end', { ...CONFIG, church_ein: '' }, '2026-12-31')).not.toContain('EIN/Tax ID');
     expect(renderReceiptLetter({ name: '<b>x</b>', amount_cents: 100, gift_date: '2026-01-01', reasons: [] }, CONFIG)).toContain('&lt;b&gt;x&lt;/b&gt;');
+  });
+  it('shows letter settings with previews, editable only by an administrator', async () => {
+    const e = env();
+    const res = await call(e, '/?section=giving-letters&page=settings&year=2026');
+    expect(res.headers.get('Content-Security-Policy')).toContain("img-src 'self' data: https://connect.timothystl.org");
+    const html = await res.text();
+    expect(html).toContain('value="00-0000000"');
+    expect(html).toContain('Sample Giver');
+    expect(html).toContain('Our EIN/Tax ID is 00-0000000');
+    expect(html).not.toContain('Save letter settings');
+    expect(html).toMatch(/name="church_ein"[^>]*disabled/);
+    const admin = await page(env({ role: 'admin', permissions: {} }), 'settings', '&year=2026');
+    expect(admin).toContain('Save letter settings');
+    expect(admin).toContain('name="logo"');
+  });
+
+  it('relays an administrator’s settings and logo to Connect, and refuses anyone else', async () => {
+    const form = () => {
+      const fd = new FormData();
+      fd.append('church_ein', '11-1111111');
+      fd.append('template_year_end', '<p>Dear {{name}}</p>');
+      fd.append('logo', new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])], { type: 'image/png' }), 'logo.png');
+      return fd;
+    };
+    const send = (e) => call(e, '/api/v1/giving-letters-settings', { method: 'POST', body: form(), headers: { 'Sec-Fetch-Site': 'same-origin' } });
+    const staff = env();
+    const refused = await send(staff);
+    expect(location(refused).get('message')).toMatch(/administrator/);
+    expect(staff.calls).toEqual([]);
+    const e = env({ role: 'admin', permissions: {} });
+    const res = await send(e);
+    expect(location(res).get('page')).toBe('settings');
+    expect(location(res).get('msg')).toBe('Letter settings saved.');
+    const { body } = e.calls.find((c) => c.path === 'giving-letters-settings-v1');
+    expect(body).toMatchObject({ church_ein: '11-1111111', church_name: '', template_year_end: '<p>Dear {{name}}</p>', logo: { data_base64: 'iVBORwECAw==' } });
   });
 });

@@ -70,12 +70,13 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     // Donor letters sent from Finance (Andrew, Sept 28 2026): statements and letters, thank-you
     // receipts, nudge letters and one statement at a time. Records and delivery through Connect.
     id: 'giving-letters', label: 'Donor letters', group: 'Giving', permission: 'finance',
-    capabilities: ['year-end, mid-year and quarterly statements', 'thank-you, appeal and memorial letters', 'email or print with sent tracking', 'thank-you receipts queue', 'nudge letters', 'one statement with CSV'],
+    capabilities: ['year-end, mid-year and quarterly statements', 'thank-you, appeal and memorial letters', 'email or print with sent tracking', 'thank-you receipts queue', 'nudge letters', 'one statement with CSV', 'church details, EIN, logo and templates'],
     pages: [
       { id: 'letters', label: 'Statements and letters', status: 'live' },
       { id: 'receipts', label: 'Thank-you receipts', status: 'live' },
       { id: 'nudge-letters', label: 'Nudge letters', status: 'live' },
       { id: 'statement', label: 'One statement', status: 'live' },
+      { id: 'settings', label: 'Letter settings', status: 'live' },
     ],
   },
   {

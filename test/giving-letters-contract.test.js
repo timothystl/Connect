@@ -110,6 +110,7 @@ describe('Donor letters for Finance (giving-letters-v1, -send-v1, -mark-v1)', ()
   }
   const read = (db, op, query = '', email) => call(db, '/api/contracts/giving-letters-v1', { email, query: `?op=${op}${query}` });
   const send = (db, letters, email) => call(db, '/api/contracts/giving-letters-send-v1', { email, method: 'POST', body: { letters } });
+  const settings = (db, body, email, extraEnv = {}) => { const token = signToken(keyPair.privateKey, kid, accessPayload(email)); return token.then((t) => handleContractsServiceApi(new Request('https://connect.example/api/contracts/giving-letters-settings-v1', { method: 'POST', headers: { 'X-Contract-Key': 'right-secret', 'Cf-Access-Jwt-Assertion': t, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), { ...env(db), ...extraEnv }, '/api/contracts/giving-letters-settings-v1')); };
   const mark = (db, marks, unmark = false, email) => call(db, '/api/contracts/giving-letters-mark-v1', { email, method: 'POST', body: { marks, unmark } });
 
   // Fictional givers: a household of two and a single giver whose only gift was voided.
@@ -200,5 +201,25 @@ describe('Donor letters for Finance (giving-letters-v1, -send-v1, -mark-v1)', ()
     db._raw.prepare("INSERT INTO giving_letter_sends (person_id, year, letter_type, channel, recipient_key) VALUES (1, 2025, 'year_end', 'print', 'p1')").run();
     expect(() => db._raw.prepare("INSERT INTO giving_letter_sends (person_id, year, letter_type, channel, recipient_key) VALUES (2, 2025, 'year_end', 'email', NULL)").run()).toThrow();
     expect(await rebuildGivingLetterSendsIfLegacy(db)).toBe(false);
+  });
+  it('saves letter settings for an administrator only, keeping what a blank field leaves', async () => {
+    const { db } = setup();
+    insertUser(db, { username: 'ada', email: 'ada@example.test', role: 'admin' });
+    expect((await settings(db, { church_ein: '11-1111111' }, 'sarah@example.test')).status).toBe(403);
+    expect((await settings(db, { church_from_email: 'nope' }, 'ada@example.test')).status).toBe(400);
+    expect((await settings(db, { online_giving_url: 'javascript:alert(1)' }, 'ada@example.test')).status).toBe(400);
+    const stored = {};
+    const PHOTOS = { async put(k, v) { stored[k] = v; }, async delete(k) { delete stored[k]; } };
+    const png = btoa(String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0));
+    const ok = await (await settings(db, { church_ein: '11-1111111', church_name: '', template_year_end: '<p>Dear {{name}}</p>', logo: { data_base64: png } }, 'ada@example.test', { PHOTOS })).json();
+    expect(ok).toMatchObject({ ok: true, saved: 3 });
+    expect(Object.keys(stored)).toEqual(['branding/letterhead-logo.png']);
+    const cfg = await (await read(db, 'config')).json();
+    expect(cfg).toMatchObject({ church_ein: '11-1111111', church_name: 'Sample Church', logo_url: 'https://connect.timothystl.org/admin/letterhead-logo' });
+    expect(cfg.templates.year_end).toBe('<p>Dear {{name}}</p>');
+    expect((await settings(db, { logo: { data_base64: btoa('not an image') } }, 'ada@example.test', { PHOTOS })).status).toBe(400);
+    await settings(db, { remove_logo: true }, 'ada@example.test', { PHOTOS });
+    expect(stored).toEqual({});
+    expect((await (await read(db, 'config')).json()).logo_url).toBe('');
   });
 });

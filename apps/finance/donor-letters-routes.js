@@ -4,7 +4,7 @@ import { fetchVerifiedRole } from './connect-role-client.js';
 import { isSameOriginPost } from './form-post.js';
 import { csvText, csvNum } from './payroll-report-render.js';
 import {
-  EMAIL_BATCH, PRINT_LIMIT, LETTER_KINDS, buildLetters, fetchGivingLetters, lettersParams, postGivingLettersMark, postGivingLettersSend,
+  EMAIL_BATCH, PRINT_LIMIT, LETTER_KINDS, buildLetters, fetchGivingLetters, lettersParams, postGivingLettersMark, postGivingLettersSend, postGivingLettersSettings,
 } from './donor-letters-service.js';
 import { PAGE_OF_KIND, renderPrintSheet } from './donor-letters-pages.js';
 import { fmtDate, letterSubject, renderStatementLetter } from './donor-letters.js';
@@ -103,8 +103,8 @@ export async function handleDonorLettersPrint(request, env, url) {
   const roleResult = await fetchVerifiedRole(env, jwt);
   const html = (body, status = 200) => new Response(body, { status, headers: {
     'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'same-origin',
-    // The letterhead logo is Connect's public image; nothing else loads.
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' https://connect.timothystl.org; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    // The letterhead logo is Connect's public image, and a template may embed an image (data:).
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https://connect.timothystl.org; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   } });
   if (!canReadLetters(roleResult)) return html('<p>Letters need Giving view access.</p>', 403);
   const get = (k) => url.searchParams.get(k) || '';
@@ -142,6 +142,35 @@ export async function handleStatementCsv(request, env, url) {
   return new Response(`${lines.map((l) => l.join(',')).join('\r\n')}\r\n`, { headers: {
     'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${file}"`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
   } });
+}
+
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+function toBase64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+// Letter settings: an administrator's form, relayed to Connect (which checks admin again).
+export async function handleLetterSettingsWrite(request, env, url) {
+  const back = (status, message) => redirect('settings', { status, [status === 'ok' ? 'msg' : 'message']: String(message).slice(0, 300) });
+  if (!isSameOriginPost(request, url)) return back('error', 'That form did not come from Timothy Finance.');
+  const jwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
+  const role = await fetchVerifiedRole(env, jwt);
+  if (!role?.ok || role.role !== 'admin') return back('error', 'Letter settings are changed by an administrator.');
+  let form;
+  try { form = await request.formData(); } catch { return back('error', 'The form could not be read.'); }
+  const text = (k) => String(form.get(k) || '');
+  const body = {};
+  for (const k of ['church_name', 'church_ein', 'church_from_name', 'church_from_email', 'online_giving_url', 'template_year_end', 'template_midyear']) body[k] = text(k);
+  const logo = form.get('logo');
+  if (logo && typeof logo === 'object' && logo.size) {
+    if (logo.size > LOGO_MAX_BYTES) return back('error', 'The logo is larger than 2 MB. Use a smaller image.');
+    body.logo = { data_base64: toBase64(new Uint8Array(await logo.arrayBuffer())) };
+  } else if (text('remove_logo') === '1') body.remove_logo = true;
+  const res = await postGivingLettersSettings(env, jwt, body);
+  if (!res.ok) return back('error', describe(res));
+  return back('ok', res.result.warning ? `Letter settings saved. ${res.result.warning}` : 'Letter settings saved.');
 }
 
 export { LETTER_KINDS };

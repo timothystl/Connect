@@ -263,6 +263,7 @@ const ROUTES = [
   // Donor letters (donor-letters-routes.js): email a batch or mark letters (Giving edit), the print
   // sheet and a statement's CSV (Giving view); all read and deliver through Connect's letters contracts.
   { id: 'giving-letters-write-v1', paths: ['/api/v1/giving-letters'], methods: WRITE_METHODS, dataSource: 'live-relay', writer: true, contract: 'connect.giving-letters-send.v1' },
+  { id: 'giving-letters-settings-v1', paths: ['/api/v1/giving-letters-settings'], methods: WRITE_METHODS, dataSource: 'live-relay', writer: true, contract: 'connect.giving-letters-settings.v1' },
   { id: 'giving-letters-print', paths: ['/giving-letters/print'], dataSource: 'live-relay-read', contract: 'connect.giving-letters.v1' },
   { id: 'giving-statement-csv', paths: ['/api/v1/giving-statement.csv'], dataSource: 'live-relay-read', contract: 'connect.giving-letters.v1' },
   { id: 'giving-impact-write-v1', paths: ['/api/v1/giving-impact'], methods: WRITE_METHODS, dataSource: 'live-relay', writer: true, contract: 'connect.giving-impact-write.v1' },

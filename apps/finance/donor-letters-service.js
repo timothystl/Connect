@@ -18,6 +18,7 @@ export function fetchGivingLetters(env, accessJwt, op, query = {}) {
   return callConnectContract(env, accessJwt, 'giving-letters-v1', { query: { op, ...clean } });
 }
 export const postGivingLettersSend = (env, accessJwt, letters) => callConnectContract(env, accessJwt, 'giving-letters-send-v1', { method: 'POST', body: { letters } });
+export const postGivingLettersSettings = (env, accessJwt, settings) => callConnectContract(env, accessJwt, 'giving-letters-settings-v1', { method: 'POST', body: settings });
 export const postGivingLettersMark = (env, accessJwt, marks, unmark = false) => callConnectContract(env, accessJwt, 'giving-letters-mark-v1', { method: 'POST', body: { marks, unmark } });
 
 const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
