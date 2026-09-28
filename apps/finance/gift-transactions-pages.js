@@ -313,11 +313,12 @@ function onlineHref(view, extra = {}) {
 
 // The Online giving tabs. Form settings is its own page (page=online-form) so its reads and
 // writes stay separate, but it sits in the same tab row as the other three views.
-export function renderOnlineGivingTabs(active, unmatchedCount = 0) {
+export function renderOnlineGivingTabs(active, unmatchedCount = 0, testCount = 0) {
   const tabs = [
     ['payments', 'Payments', onlineHref('payments')],
     ['recurring', 'Recurring', onlineHref('recurring')],
     ['associations', `Givers &amp; matching${unmatchedCount ? ` (${unmatchedCount})` : ''}`, onlineHref('associations')],
+    ['test', `Test gifts${testCount ? ` (${testCount})` : ''}`, onlineHref('test')],
     ['form', 'Form settings', '/?section=giving&amp;page=online-form'],
   ];
   return `<div class="chip-row" role="navigation" aria-label="Online giving">${tabs.map(([id, label, href]) => (id === active
@@ -350,7 +351,7 @@ function recurringView(data) {
   const rows = data.recurring.map((s) => {
     const active = s.status !== 'cancelled';
     const hidden = `<input type="hidden" name="schedule_id" value="${s.id}"><input type="hidden" name="return" value="online"><input type="hidden" name="back" value="view=recurring">`;
-    return `<tr class="${active ? '' : 'is-void'}"><td>${s.person_id ? e(s.person_name) : `${e(s.payer_name || 'Unknown')} <small class="tone-bad">not matched</small>`}</td>
+    return `<tr class="${active ? '' : 'is-void'}"><td>${s.person_id ? e(s.person_name) : `${e(s.payer_name || 'Unknown')} <small class="tone-bad">not matched</small>`}${s.test ? ' <span class="tx-badge">Test</span>' : ''}</td>
       <td>${e(s.fund_name)}</td><td class="num">${money(s.amount_cents)}</td><td>${e((INTERVALS.find(([k]) => k === s.interval) || [0, s.interval])[1])}</td>
       <td>${active ? (s.has_stax_schedule ? 'Active' : `<span class="tone-bad" title="${e(s.stax_error || '')}">Needs setup</span>`) : 'Cancelled'}</td><td>${e(day(s.created_at))}</td>
       <td class="actions">${active ? `<details class="tx-edit"><summary>Change</summary>
@@ -365,6 +366,27 @@ function recurringView(data) {
   return `<div class="panel panel-spaced list-panel"><div class="table-scroll"><table class="pm-table">
     <thead><tr><th>Giver</th><th>Fund</th><th class="num">Amount</th><th>How often</th><th>Status</th><th>Started</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>
     <p class="muted-line">Recurring gifts set up through Timothy’s online giving form. Recurring gifts from Breeze/Tithe.ly are managed there until that service is retired.</p>`;
+}
+
+// Test gifts: made through the online form while the processor is in test mode. They are kept
+// apart from real giving (Connect's giving_test_gifts), so no total, report or statement counts them.
+function testGiftsView(data) {
+  const t = data.test_totals || { gifts: 0, gift_cents: 0, schedules: 0 };
+  const gifts = data.test_gifts || [];
+  const rows = gifts.map((g) => `<tr><td>${e(day(g.gift_date))}</td>
+      <td>${g.person_id ? e(g.person_name) : `${e(g.payer_name || 'No name given')} <small class="tone-bad">would not match</small>`}</td>
+      <td>${e(g.fund_name)}</td><td>${e(methodLabel(g.method))}${g.card_last4 ? ` <small>${e(g.card_brand)} ····${e(g.card_last4)}</small>` : ''}</td>
+      <td class="num">${money(g.amount_cents)}</td><td class="num">${g.fee_cents ? money(g.fee_cents) : '—'}</td></tr>`).join('');
+  const nothing = !t.gifts && !t.schedules;
+  return `<div class="panel panel-spaced">
+      <p>Gifts made through the online form while it is in test mode. They are kept apart from real giving, so they never count in totals, reports, statements or the other tabs here.${t.schedules ? ` There ${t.schedules === 1 ? 'is' : 'are'} also ${t.schedules} test recurring gift${t.schedules === 1 ? '' : 's'}, marked Test on the Recurring tab.` : ''}</p>
+      ${nothing ? '<div class="empty-note">No test gifts right now.</div>' : `<form method="POST" action="/api/v1/gift-batch-write" class="inline-form">
+        <input type="hidden" name="op" value="clear_test_gifts"><input type="hidden" name="return" value="online"><input type="hidden" name="back" value="view=test">
+        <button type="submit" class="button-outline tone-bad">Remove all test gifts (${t.gifts} gift${t.gifts === 1 ? '' : 's'}, ${money(t.gift_cents)}${t.schedules ? `, ${t.schedules} recurring` : ''})</button></form>`}
+    </div>
+    ${gifts.length ? `<div class="panel panel-spaced list-panel"><div class="table-scroll"><table class="pm-table">
+      <thead><tr><th>Date</th><th>Would be credited to</th><th>Fund</th><th>Type</th><th class="num">Amount</th><th class="num">Fee</th></tr></thead>
+      <tbody>${rows}</tbody></table></div></div>` : ''}`;
 }
 
 function associationsView(data, params, people) {
@@ -400,7 +422,7 @@ export function renderOnlineGivingPage({ result, params, status, people = [] }) 
   if (!result.ok) return `${statusBanner(status)}${unavailable('Online giving', result.message)}`;
   const data = result.data;
   const t = data.totals;
-  const view = ['recurring', 'associations'].includes(params.get('view')) ? params.get('view') : 'payments';
+  const view = ['recurring', 'associations', 'test'].includes(params.get('view')) ? params.get('view') : 'payments';
   const activeRecurring = data.recurring.filter((s) => s.status !== 'cancelled');
   return `${statusBanner(status)}
     <div class="grid">
@@ -409,8 +431,8 @@ export function renderOnlineGivingPage({ result, params, status, people = [] }) 
       <div class="card"><small>Processor fees this year</small><strong>${money(t.year_fee_cents)}</strong><span>Where the processor reports them</span></div>
       <div class="card"><small>Recurring gifts</small><strong>${activeRecurring.length}</strong><span>${data.unmatched.length ? `<span class="tone-warn">${data.unmatched.length} online gift${data.unmatched.length === 1 ? '' : 's'} to match</span>` : 'All online gifts matched'}</span></div>
     </div>
-    ${renderOnlineGivingTabs(view, data.unmatched.length)}
-    ${view === 'recurring' ? recurringView(data) : view === 'associations' ? associationsView(data, params, people) : paymentsView(data)}`;
+    ${renderOnlineGivingTabs(view, data.unmatched.length, data.test_totals?.gifts || 0)}
+    ${view === 'recurring' ? recurringView(data) : view === 'associations' ? associationsView(data, params, people) : view === 'test' ? testGiftsView(data) : paymentsView(data)}`;
 }
 
 export const GIFT_TRANSACTIONS_STYLES = `

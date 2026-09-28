@@ -22,11 +22,14 @@ import { sendBrevoTransactionalEmail } from './api-emails.js';
 // charge-stax-payment functions) — mirrored here, not re-derived from scratch.
 const STAX_API_URL = 'https://apiprod.fattlabs.com';
 
-// Production Connect sets STAX_SANDBOX_REFUSED (wrangler.toml) so sandbox test gifts never reach
-// the real giving ledger; Stax testing runs against staging, which has its own database.
-export const STAX_SANDBOX_REFUSED_MESSAGE = 'Stax sandbox testing runs on Connect staging. Production Connect does not record test gifts.';
-export function staxSandboxRefused(env) {
-  return !!env && env.STAX_SANDBOX_REFUSED === '1';
+// Test mode: while Connect only has Stax sandbox keys, every gift, recurring schedule and customer
+// link the mockup makes is a test (Andrew, 2026-09-28: test on the live system, never count test
+// gifts, and a button to remove them). Test gifts go to giving_test_gifts, never giving_entries,
+// so no total, report, statement or rollup can include one; Finance → Online giving → Test gifts
+// lists and removes them. Setting STAX_LIVE=1 (only once real, non-sandbox keys exist) records
+// into the real ledger instead.
+export function staxTestMode(env) {
+  return !(env && env.STAX_LIVE === '1');
 }
 
 export function staxMockupConfigured(env) {
@@ -136,7 +139,7 @@ export async function matchPersonForPayer(db, { email, phone } = {}) {
 // matches a known Connect person. An unmatched donor still gets a fresh, unlinked Stax customer
 // so their tokenize() call gets the same AVS exemption — recordStaxGift already carries
 // stax_customer_id through to giving_stax_unmatched for staff to link retroactively.
-async function getOrCreateStaxCustomerId(db, apiKey, contact) {
+async function getOrCreateStaxCustomerId(db, apiKey, contact, { test = false } = {}) {
   const person = await matchPersonForPayer(db, { email: contact.payerEmail, phone: contact.payerPhone });
   if (person) {
     const link = await db.prepare(
@@ -154,7 +157,9 @@ async function getOrCreateStaxCustomerId(db, apiKey, contact) {
   });
   if (!created.ok || !created.data?.id) return { error: 'Could not start payment with Stax.' };
   const customerId = created.data.id;
-  if (person) {
+  // A test-mode customer is never remembered on the person: it is a sandbox id, and the link
+  // would make them look like an online giver in the real Who gives online list.
+  if (person && !test) {
     await db.prepare(
       `INSERT INTO giving_stax_customers (person_id, stax_customer_id) VALUES (?,?)
        ON CONFLICT(person_id) DO UPDATE SET stax_customer_id=excluded.stax_customer_id`
@@ -164,6 +169,42 @@ async function getOrCreateStaxCustomerId(db, apiKey, contact) {
     });
   }
   return { customerId, personId: person ? person.id : null };
+}
+
+// ── Test mode: a Stax gift → giving_test_gifts (never the real ledger) ──────
+// Same idempotency and per-fund split ids as the ledger path below, and the same donor matching,
+// so a test shows who the gift would have been credited to. Nothing else is written: no batch, no
+// review-queue row, no customer link.
+async function recordTestGift(db, g, externalTxnId, splits) {
+  const existing = await db.prepare(
+    `SELECT id, person_id FROM giving_test_gifts WHERE external_txn_id=? OR external_txn_id LIKE ? LIMIT 1`
+  ).bind(externalTxnId, externalTxnId + '-f%').first();
+  if (existing) return { test: true, testGiftId: existing.id, alreadyRecorded: true, matched: existing.person_id != null, personId: existing.person_id || null };
+  let person = null;
+  if (g.staxCustomerId) {
+    person = await db.prepare(
+      `SELECT p.id FROM giving_stax_customers c JOIN people p ON p.id=c.person_id WHERE c.stax_customer_id=?`
+    ).bind(g.staxCustomerId).first();
+  }
+  if (!person) person = await matchPersonForPayer(db, { email: g.payerEmail, phone: g.payerPhone });
+  const payerName = g.payerName || [g.payerFirstName, g.payerLastName].filter(Boolean).join(' ');
+  const ids = [];
+  for (let i = 0; i < splits.length; i++) {
+    const r = await db.prepare(
+      `INSERT INTO giving_test_gifts
+         (external_txn_id, contribution_date, fund_id, amount_cents, fee_cents, method, note, person_id,
+          payer_name, payer_email, card_brand, card_last4, stax_customer_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(
+      splits.length === 1 ? externalTxnId : `${externalTxnId}-f${splits[i].fundId}`,
+      g.contributionDate || todayIso(), splits[i].fundId, splits[i].amountCents,
+      i === 0 ? Math.max(0, Math.round(Number(g.feeCents) || 0)) : 0,
+      g.method || 'card', g.note || '', person ? person.id : null,
+      payerName, g.payerEmail || '', g.cardBrand || '', g.cardLast4 || '', g.staxCustomerId || ''
+    ).run();
+    ids.push(r.meta?.last_row_id);
+  }
+  return { test: true, testGiftId: ids[0], testGiftIds: ids, entryIds: [], alreadyRecorded: false, matched: !!person, personId: person ? person.id : null };
 }
 
 // ── Shared insert path: a verified Stax gift → giving_entries ──────────────
@@ -193,6 +234,7 @@ export async function recordStaxGift(db, g) {
   if (new Set(splits.map(s => s.fundId)).size !== splits.length) {
     return { error: 'the same fund cannot appear twice in one gift' };
   }
+  if (g.test) return recordTestGift(db, g, externalTxnId, splits);
 
   const existing = await db.prepare(
     `SELECT id, person_id FROM giving_entries WHERE processor='stax' AND (external_txn_id=? OR external_txn_id LIKE ?) LIMIT 1`
@@ -402,8 +444,6 @@ async function recordStaxReversal(db, { kind, eventTxnId, parentTxnId, amountCen
 export async function handleStaxGivingWebhook(req, env, url) {
   if (req.method === 'GET' || req.method === 'HEAD') return json({ ok: true }, 200);
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
-  // Acknowledged so Stax stops redelivering, but nothing is recorded (see staxSandboxRefused).
-  if (staxSandboxRefused(env)) return json({ ok: true, ignored: 'sandbox' }, 200);
 
   const secret = env.STAX_GIVING_WEBHOOK_SECRET;
   const apiKey = env.STAX_SANDBOX_API_KEY;
@@ -454,6 +494,7 @@ export async function handleStaxGivingWebhook(req, env, url) {
     } catch { splits = null; }
     if (!splits) splits = [{ fundId: meta.fund_id, amountCents }];
     const result = await recordStaxGift(db, {
+      test: staxTestMode(env),
       externalTxnId: eventTransactionId,
       splits,
       feeCents: cents(transaction?.total_fees) || 0,
@@ -480,6 +521,8 @@ export async function handleStaxGivingWebhook(req, env, url) {
   if (!verifiedSuccess) return json({ received: true, ignored: `${kind} not successful` }, 200);
   const parentTransactionId = String(transaction?.reference_id || '');
   if (!parentTransactionId || amountCents === null) return json({ error: 'Verified reversal is incomplete' }, 409);
+  // A refund or void of a test gift changes nothing: test gifts are never counted.
+  if (staxTestMode(env)) return json({ received: true, ignored: `${kind} of a test gift` }, 200);
   const result = await recordStaxReversal(db, { kind, eventTxnId: eventTransactionId, parentTxnId: parentTransactionId, amountCents });
   if (result.error) return json({ error: result.error }, 409);
   return json({ received: true, ...result }, 200);
@@ -611,8 +654,6 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
       headers: { ...cors, 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400' },
     });
   }
-  // Every route, reads included, so the form says so up front instead of failing at checkout.
-  if (staxSandboxRefused(env)) return j({ error: STAX_SANDBOX_REFUSED_MESSAGE, sandbox_refused: true }, 410);
 
   if (path === 'funds' && method === 'GET') {
     const rows = (await db.prepare(
@@ -641,7 +682,7 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
     const contact = contactFieldsFrom(b);
     const contactError = requireContact(contact);
     if (contactError) return j({ error: contactError }, 400);
-    const result = await getOrCreateStaxCustomerId(db, env.STAX_SANDBOX_API_KEY, contact);
+    const result = await getOrCreateStaxCustomerId(db, env.STAX_SANDBOX_API_KEY, contact, { test: staxTestMode(env) });
     if (result.error) return j({ error: result.error }, 502);
     return j({ customerId: result.customerId });
   }
@@ -665,6 +706,7 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
       // rest of the mockup (matching, review queue, statements) is fully clickable without live
       // sandbox keys. A synthetic transaction id keeps it distinguishable in the ledger.
       const result = await recordStaxGift(db, {
+      test: staxTestMode(env),
         externalTxnId: `demo-${crypto.randomUUID()}`,
         splits, method: 'card', note: memo, ...contact,
       });
@@ -681,7 +723,7 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
     // demo/test caller that skipped that step) still works: fall back to creating one inline.
     let staxCustomerId = String(b.stax_customer_id || '').trim();
     if (!staxCustomerId) {
-      const result = await getOrCreateStaxCustomerId(db, apiKey, contact);
+      const result = await getOrCreateStaxCustomerId(db, apiKey, contact, { test: staxTestMode(env) });
       if (result.error) return j({ error: result.error }, 502);
       staxCustomerId = result.customerId;
     }
@@ -713,6 +755,7 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
     // external_txn_id, so if the webhook ALSO fires for this same transaction id later
     // (Stax's normal behavior), that second call is a confirmed no-op, not a double gift.
     const result = await recordStaxGift(db, {
+      test: staxTestMode(env),
       externalTxnId: String(charge.data.id),
       splits,
       feeCents: cents(charge.data?.total_fees) || 0,
@@ -764,9 +807,9 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
       for (const split of splits) {
         const r = await db.prepare(
           `INSERT INTO giving_stax_recurring_schedules
-             (person_id, fund_id, amount_cents, interval, stax_customer_id, stax_schedule_id, status, payer_name, payer_email, schedule_group, stax_error)
-           VALUES (NULL,?,?,?,?,?,?,?,?,?,?)`
-        ).bind(split.fundId, split.amountCents, interval, '', '', 'pending_manual_setup', payerName, contact.payerEmail, scheduleGroup, 'Demo mode — STAX_SANDBOX_API_KEY/STAX_SANDBOX_WEB_PAYMENTS_TOKEN not configured, no Stax call attempted').run();
+             (person_id, fund_id, amount_cents, interval, stax_customer_id, stax_schedule_id, status, payer_name, payer_email, schedule_group, stax_error, test)
+           VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?)`
+        ).bind(split.fundId, split.amountCents, interval, '', '', 'pending_manual_setup', payerName, contact.payerEmail, scheduleGroup, 'Demo mode — STAX_SANDBOX_API_KEY/STAX_SANDBOX_WEB_PAYMENTS_TOKEN not configured, no Stax call attempted', staxTestMode(env) ? 1 : 0).run();
         ids.push(r.meta?.last_row_id);
       }
       return j({ ok: true, demo: true, ids, id: ids[0] });
@@ -780,7 +823,7 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
     // Stax customer for the same donor. Falls back to creating one inline if it's missing.
     let staxCustomerId = String(b.stax_customer_id || '').trim();
     if (!staxCustomerId) {
-      const result = await getOrCreateStaxCustomerId(db, apiKey, contact);
+      const result = await getOrCreateStaxCustomerId(db, apiKey, contact, { test: staxTestMode(env) });
       if (result.error) return j({ error: result.error }, 502);
       staxCustomerId = result.customerId;
     }
@@ -818,6 +861,7 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
       return j({ error: chargeFailureMessage(charge.data), pending: chargeOutcomeUnknown(charge.data) }, 402);
     }
     const chargeResult = await recordStaxGift(db, {
+      test: staxTestMode(env),
       externalTxnId: String(charge.data.id),
       splits,
       feeCents: cents(charge.data?.total_fees) || 0,
@@ -876,9 +920,9 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
       }
       const r = await db.prepare(
         `INSERT INTO giving_stax_recurring_schedules
-           (person_id, fund_id, amount_cents, interval, stax_customer_id, stax_schedule_id, status, payer_name, payer_email, schedule_group, stax_error)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`
-      ).bind(chargeResult.personId || null, split.fundId, split.amountCents, interval, staxCustomerId, staxScheduleId, status, payerName, contact.payerEmail, scheduleGroup, staxError).run();
+           (person_id, fund_id, amount_cents, interval, stax_customer_id, stax_schedule_id, status, payer_name, payer_email, schedule_group, stax_error, test)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+      ).bind(chargeResult.personId || null, split.fundId, split.amountCents, interval, staxCustomerId, staxScheduleId, status, payerName, contact.payerEmail, scheduleGroup, staxError, staxTestMode(env) ? 1 : 0).run();
       ids.push(r.meta?.last_row_id);
     }
     return j({ ok: true, demo: false, totalCents, giftEntryIds: chargeResult.entryIds, ids, id: ids[0] });

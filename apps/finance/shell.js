@@ -898,7 +898,7 @@ function resolveIncomeVsBudget(churchReportLive) {
 // identity and decides whether this person may enter gifts; Finance only shapes the form.
 const GIFT_BATCH_OPS = new Set([
   'create_batch', 'add_gift', 'remove_gift', 'close_batch', 'reopen_batch', 'deposit_batch', 'reconcile_deposit', 'reopen_deposit',
-  'correct_gift', 'void_gift', 'restore_gift', 'link_online_gift', 'ignore_online_gift', 'update_recurring', 'cancel_recurring',
+  'correct_gift', 'void_gift', 'restore_gift', 'link_online_gift', 'ignore_online_gift', 'update_recurring', 'cancel_recurring', 'clear_test_gifts',
   'create_deposit', 'set_deposit_line', 'remove_deposit_line', 'assign_gifts', 'unassign_gifts', 'update_deposit', 'delete_deposit',
 ]);
 // Deposit tools (Reconciliation to bank): these return to the deposit they changed.
@@ -907,7 +907,7 @@ const GIFT_BATCH_MESSAGES = {
   create_batch: 'Batch started.', add_gift: 'Gift added.', remove_gift: 'Gift removed.', close_batch: 'Batch closed and locked for deposit.',
   reopen_batch: 'Batch reopened.', deposit_batch: 'Batch put on a deposit.', reconcile_deposit: 'Deposit matched to the bank.', reopen_deposit: 'Deposit reopened.',
   correct_gift: 'Gift corrected. The change is in its history.', void_gift: 'Recorded. The gift’s totals and statement now reflect it.', restore_gift: 'Void undone.',
-  link_online_gift: 'Online gift matched to the giver.', ignore_online_gift: 'Left anonymous.', update_recurring: 'Recurring gift changed.', cancel_recurring: 'Recurring gift cancelled.',
+  link_online_gift: 'Online gift matched to the giver.', ignore_online_gift: 'Left anonymous.', update_recurring: 'Recurring gift changed.', cancel_recurring: 'Recurring gift cancelled.', clear_test_gifts: 'Test gifts removed.',
   create_deposit: 'Deposit started. Add its batches or gifts below.', set_deposit_line: 'Batch amount on this deposit saved.', remove_deposit_line: 'Batch taken off this deposit.',
   assign_gifts: 'Gifts added to this deposit.', unassign_gifts: 'Gifts taken off this deposit.', update_deposit: 'Deposit details saved.', delete_deposit: 'Deposit deleted. Its batches and gifts are waiting for a deposit again.',
 };
@@ -954,6 +954,10 @@ async function handleGiftBatchWrite(request, env, url) {
     if (!result.ok) return back(returnTo, { ...keep, status: 'error', message: describeGivingBatchFailure(result).slice(0, 200) });
     let msg = GIFT_BATCH_MESSAGES[op];
     if (op === 'correct_gift' && result.result.changed === 0) msg = 'Nothing was different, so nothing changed.';
+    if (op === 'clear_test_gifts') {
+      const r = result.result;
+      msg = `Removed ${r.removed_gifts} test gift${r.removed_gifts === 1 ? '' : 's'} and ${r.removed_schedules} test recurring gift${r.removed_schedules === 1 ? '' : 's'}. Real giving was not touched.`;
+    }
     if (op === 'cancel_recurring' && result.result.had_stax_schedule && !result.result.stax_cancelled) msg = 'Cancelled here, but the processor did not confirm. Check the processor dashboard so the giver is not charged again.';
     return back(returnTo, { ...keep, status: 'ok', msg });
   }
