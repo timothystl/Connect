@@ -1,6 +1,6 @@
 // Accounting storage cutover. Connect remains the authenticated compatibility API;
-// accounting records have one selected database, while people/Giving/QuickBooks stay
-// in Connect. Do not use this wrapper during Connect schema initialization.
+// accounting records and QuickBooks have one selected database, while people and Giving
+// stay in Connect. Do not use this wrapper during Connect schema initialization.
 export const FINANCE_TABLES = new Set([
   'finance_settings', 'finance_church_entries', 'finance_church_balances',
   'finance_daycare_entries', 'finance_budget_plan', 'finance_property_monthly',
@@ -9,16 +9,12 @@ export const FINANCE_TABLES = new Set([
   'finance_property_reserve_disbursements', 'finance_daycare_rooms',
   'finance_import_history',
 ]);
-// Once QuickBooks is owned by Finance (QBO_MANAGED_BY_FINANCE="1", Andrew 2026-09-25), the
-// connection and its report cache live only in Finance's database: Connect's legacy screens and
-// its data-status contract read Finance's copy, and Connect's own QuickBooks routes are refused.
+// QuickBooks belongs to Finance (Andrew, 2026-09-25; cutover confirmed 2026-09-28): its connection
+// and report cache live in Finance's database, and Connect's legacy screens and data-status
+// contract read that copy. Connect has no QuickBooks routes or credentials of its own.
 export const QUICKBOOKS_TABLES = new Set(['finance_qb_connection', 'finance_qb_snapshot']);
 const FINANCE_AND_QUICKBOOKS_TABLES = new Set([...FINANCE_TABLES, ...QUICKBOOKS_TABLES]);
 const cache = new WeakMap();
-
-export function quickbooksManagedByFinance(env) {
-  return env.QBO_MANAGED_BY_FINANCE === '1';
-}
 
 export function accountingQuery(sql, financeTables = FINANCE_TABLES) {
   // Strip values/comments so an account label never changes the selected database.
@@ -38,7 +34,7 @@ export function financeStorageDb(env) {
   if (mode === 'connect') return env.DB;
   if (!['copying', 'finance'].includes(mode)) throw new Error('Invalid Finance storage mode');
   if (mode === 'finance' && !env.FINANCE_DB) throw new Error('Finance database binding missing');
-  const quickbooks = mode === 'finance' && quickbooksManagedByFinance(env);
+  const quickbooks = mode === 'finance';
   const tables = quickbooks ? FINANCE_AND_QUICKBOOKS_TABLES : FINANCE_TABLES;
   let entries = cache.get(env.DB);
   if (!entries) cache.set(env.DB, entries = []);

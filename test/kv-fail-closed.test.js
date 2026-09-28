@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { handleAdminLogin } from '../src/api-admin.js';
 import { handleIntakeApi } from '../src/api-intake.js';
-import { handleFinanceApi } from '../src/api-finance.js';
 
-// P22-E (retires SEC20). Three call sites treated a missing KV binding as "skip
-// the check" rather than "refuse" — login rate limiting, intake rate limiting, and QuickBooks
+// P22-E (retires SEC20). Call sites treated a missing KV binding as "skip
+// the check" rather than "refuse" — login rate limiting, intake rate limiting, and (until
+// QuickBooks moved to Finance, whose OAuth state lives in its own D1 table) QuickBooks
 // OAuth `state` CSRF validation. A misconfigured environment silently lost brute-force
 // protection, spam protection, and CSRF protection on the connect flow with nothing logged and
 // nothing visible on screen. All three now fail CLOSED: refuse the request/flow instead of
@@ -72,49 +72,5 @@ describe('intake rate limiting fails closed with no KV', () => {
     const res = await handleIntakeApi(req(), env, '/api/intake/prayer');
     expect(res.status).toBe(200);
     expect(inserted.length).toBe(1);
-  });
-});
-
-describe('QuickBooks OAuth state validation fails closed with no KV', () => {
-  const qboEnv = (extra = {}) => ({
-    QB_CLIENT_ID: 'id', QB_CLIENT_SECRET: 'secret', ...extra,
-  });
-
-  it('refuses to start the connect flow (503, no redirect to Intuit) when KV is missing', async () => {
-    const url = new URL('https://connect.timothystl.org/admin/api/finance/qb/connect');
-    const res = await handleFinanceApi(
-      new Request(url), qboEnv(), url, 'GET', 'finance/qb/connect', null, /* isAdmin */ true, /* isFinance */ true
-    );
-    expect(res.status).toBe(503);
-    expect(res.headers.get('Location')).toBeFalsy();
-  });
-
-  it('starts the connect flow normally (302 to Intuit) when KV IS present', async () => {
-    const url = new URL('https://connect.timothystl.org/admin/api/finance/qb/connect');
-    const store = makeKvStore();
-    const res = await handleFinanceApi(
-      new Request(url), qboEnv({ KV: store }), url, 'GET', 'finance/qb/connect', null, true, true
-    );
-    expect(res.status).toBe(302);
-    expect(res.headers.get('Location')).toContain('http');
-    expect(store._store.size).toBe(1);
-  });
-
-  it('refuses the callback (redirects with an error, never trusts state) when KV is missing', async () => {
-    const url = new URL('https://connect.timothystl.org/admin/api/finance/qb/callback?code=abc&realmId=1&state=forged');
-    const res = await handleFinanceApi(
-      new Request(url), qboEnv(), url, 'GET', 'finance/qb/callback', null, true, true
-    );
-    expect(res.status).toBe(302);
-    expect(res.headers.get('Location')).toContain('qb_error=state_store_unavailable');
-  });
-
-  it('rejects a callback whose state was never minted, even when KV IS present', async () => {
-    const url = new URL('https://connect.timothystl.org/admin/api/finance/qb/callback?code=abc&realmId=1&state=forged');
-    const res = await handleFinanceApi(
-      new Request(url), qboEnv({ KV: makeKvStore() }), url, 'GET', 'finance/qb/callback', null, true, true
-    );
-    expect(res.status).toBe(302);
-    expect(res.headers.get('Location')).toContain('qb_error=invalid_or_expired_state');
   });
 });

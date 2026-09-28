@@ -8,8 +8,8 @@
 //
 // One refresh-token writer at every moment. Intuit rotates the refresh token on use, so two
 // services holding the same connection would break each other. The cutover therefore never copies
-// Connect's token: Connect is switched off (QBO_MANAGED_BY_FINANCE) and disconnected first, then an
-// admin makes a fresh "Connect QuickBooks" consent here, giving Finance its own token. See
+// Connect's token: Connect was disconnected first (and its QuickBooks code has since been removed),
+// then an admin makes a fresh "Connect QuickBooks" consent here, giving Finance its own token. See
 // docs/QUICKBOOKS_FINANCE_CUTOVER.md.
 //
 // Each handler takes `(req, url, env, db, ctx)`; `ctx.isAdmin` must come from Finance's verified
