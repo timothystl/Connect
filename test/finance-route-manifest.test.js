@@ -43,7 +43,7 @@ const WRITE_ROUTE_IDS = new Set([
   'connect-planner-save-v1',
 ]);
 const OWN_DB_WRITE_ROUTE_IDS = new Set(['budget-plan-save-v1']);
-const LIVE_READ_ROUTE_IDS = new Set(['accounting-workspace-page', 'board-packet-export-v1', 'payroll-relay-diagnostic-v1', 'payroll-csv-v1', 'connect-planner-read-v1']);
+const LIVE_READ_ROUTE_IDS = new Set(['accounting-workspace-page', 'tuition-aid-workspace-page', 'board-packet-export-v1', 'payroll-relay-diagnostic-v1', 'payroll-csv-v1', 'connect-planner-read-v1']);
 const LIVE_POST_READ_ROUTE_IDS = new Set([
   'church-budget-xlsx-preview-v1', 'church-balances-xlsx-preview-v1',
   'church-monthly-xlsx-preview-v1', 'church-activity-xlsx-preview-v1',
@@ -133,6 +133,7 @@ describe('Finance staging route manifest', () => {
       '/print/board-packet',
       '/api/v1/qb/connect', '/api/v1/qb/callback', '/api/v1/qb/disconnect', '/api/v1/qb/sync', '/api/v1/qb/sync-years', '/api/v1/qb/restore',
       '/accounting', '/accounting/app.js', '/accounting/app.css', '/api/v1/accounting-workspace',
+      '/tuition-aid', '/api/v1/tuition-aid-workspace',
       '/compensation-planner/app.js',
       '/api/v1/connect-planner/salary', '/api/v1/connect-planner/church-year', '/api/v1/connect-planner/board-categories', '/api/v1/connect-planner/purpose-tags',
       '/api/v1/connect-planner/salary-save',
@@ -142,6 +143,12 @@ describe('Finance staging route manifest', () => {
         expect(route.methods).toEqual(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
         expect(route.writer).toBe(true);
         expect(route.contract).toBe('connect.finance-workspace.v1');
+        continue;
+      }
+      if (route.id === 'tuition-aid-workspace-api') {
+        expect(route.methods).toEqual(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+        expect(route.writer).toBe(true);
+        expect(route.contract).toBe('connect.tuition-aid-workspace.v1');
         continue;
       }
       if (WRITE_ROUTE_IDS.has(route.id)) {

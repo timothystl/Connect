@@ -1,4 +1,5 @@
 import { handleAccountingWorkspaceContract } from './api-accounting-workspace.js';
+import { handleTuitionAidWorkspaceContract } from './api-tuition-aid-workspace.js';
 // ── Cross-Worker server-to-server contract endpoints ────────────────────────
 // Called from the Finance application (staging today; production once Finance
 // has its own Worker), not from a browser or a staff session directly. Every
@@ -51,6 +52,7 @@ export async function handleContractsServiceApi(req, env, path) {
   if (!(await timingSafeEqual(key, expectedKey))) return json({ error: 'Unauthorized' }, 401);
   if (env.FINANCE_STORAGE_MODE === 'copying' && path.startsWith('/api/contracts/finance-') && !['GET','HEAD'].includes(req.method)) return json({error:'Accounting maintenance: please retry shortly.'},503);
   if (path === '/api/contracts/finance-workspace-v1') return handleAccountingWorkspaceContract(req, env);
+  if (path === '/api/contracts/tuition-aid-workspace-v1') return handleTuitionAidWorkspaceContract(req, env);
   env = { ...env, DB: financeStorageDb(env) };
 
   // Gift Entry batches (Finance v3): donor-level, identity-checked -- see api-giving-batch-contracts.js.

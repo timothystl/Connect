@@ -346,6 +346,10 @@ const ROUTES = [
   { id: 'accounting-workspace-page', paths: ['/accounting'], dataSource: 'live-relay-read' },
   { id: 'accounting-workspace-asset', paths: ['/accounting/app.js', '/accounting/app.css'], dataSource: 'none' },
   { id: 'accounting-workspace-api', paths: ['/api/v1/accounting-workspace'], methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], dataSource: 'live-relay', writer: true, contract: 'connect.finance-workspace.v1' },
+  // The Tuition Aid planner (tuition-aid-workspace.js): Connect's planner served by Finance, its
+  // calls relayed to Connect's tuition-aid-workspace-v1. It reuses the accounting workspace assets.
+  { id: 'tuition-aid-workspace-page', paths: ['/tuition-aid'], dataSource: 'live-relay-read' },
+  { id: 'tuition-aid-workspace-api', paths: ['/api/v1/tuition-aid-workspace'], methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], dataSource: 'live-relay', writer: true, contract: 'connect.tuition-aid-workspace.v1' },
   { id: 'compensation-planner-asset', paths: ['/compensation-planner/app.js'], dataSource: 'none' },
   { id: 'connect-planner-read-v1', paths: ['/api/v1/connect-planner/salary', '/api/v1/connect-planner/church-year', '/api/v1/connect-planner/board-categories', '/api/v1/connect-planner/purpose-tags'], dataSource: 'live-relay-read' },
   { id: 'connect-planner-save-v1', paths: ['/api/v1/connect-planner/salary-save'], methods: WRITE_METHODS, dataSource: 'live-relay', writer: true, contract: 'connect.finance-compensation-write-relay.v1' },
