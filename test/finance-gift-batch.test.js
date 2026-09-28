@@ -72,7 +72,19 @@ describe('Gift Entry batches (Finance v3)', () => {
     expect(html).toContain('href="/?section=giving&amp;page=batch&amp;batch_id=1039&amp;person=7&amp;person_name=Walter+Krause"');
     expect(html).toContain('Close batch #1039');
     expect(html).toContain('Split this gift across funds');
-    expect(html).toContain('>Record a single gift</a>');
+    expect(html).not.toContain('Record a single gift');
+  });
+
+  it('has no single-gift entry: old links land on Enter a batch and the old relay is gone', async () => {
+    const { env, calls } = makeEnv();
+    const html = await (await get(env, '&page=quick-entry')).text();
+    expect(html).toContain('<h1 class="page-title">Enter a batch</h1>');
+    expect(html).not.toContain('connect-giving-quick-entry');
+    const res = await worker.fetch(new Request('https://finance.test/api/v1/connect-giving-quick-entry', {
+      method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'jwt', 'Sec-Fetch-Site': 'same-origin' }, body: new URLSearchParams({ fund_id: '1', amount: '5' }),
+    }), env);
+    expect(res.status).toBe(404);
+    expect(calls.some((c) => c.path.includes('quick-entry'))).toBe(false);
   });
 
   it('checks a cash count against the batch’s cash gifts without saving it', async () => {

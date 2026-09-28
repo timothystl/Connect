@@ -176,11 +176,12 @@ expectation.
 The route manifest is the closed inventory for the alpha Worker. Every published path defaults to
 read-only (`GET`/`HEAD`) and declares whether it uses no data, the dedicated synthetic D1, or a
 committed synthetic static fixture. Routes that read D1 name their query budget; unknown paths fail
-closed with `404`. Three routes are deliberate exceptions: `giving-quick-entry-v1` and
-`budget-plan-write-v1` each accept `POST` and relay the write to Connect's own contract endpoint —
-neither ever writes to Finance's own database; `budget-plan-save-v1` is the one route that DOES
-write to Finance's own database. Their own `methods`/`writer`/`dataSource` fields in the manifest
-keep all three exceptions visible in one place rather than hidden behind a runtime check.
+closed with `404`. Write routes are deliberate exceptions: `budget-plan-write-v1` and the other
+relays accept `POST` and relay the write to Connect's own contract endpoint — never writing to
+Finance's own database; `budget-plan-save-v1` is the one route that DOES write to Finance's own
+database. Their own `methods`/`writer`/`dataSource` fields in the manifest keep each exception
+visible in one place rather than hidden behind a runtime check. (The single-gift
+`giving-quick-entry-v1` relay was removed on September 28, 2026: every gift is entered in a batch.)
 `budget-plan-write-v1` relays a hand-typed Budget Plan category/fiscal-year edit from the new
 Budget builder edit form (`planning-pages.js`'s `renderBudgetEditForm`, shown only to a viewer
 Finance's own role check independently verified as admin or council) to Connect's

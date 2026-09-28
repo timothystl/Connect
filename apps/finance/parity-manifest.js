@@ -21,8 +21,10 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
   {
     id: 'giving', label: 'Giving Entry', group: 'Gift Entry', permission: 'finance',
     // Batches, deposits and gifts live in Connect's giving_* tables; these pages read and write
-    // them through the giving-batch-*-v1 contracts (connect-giving-batch-client.js).
-    capabilities: ['enter a batch', 'find and correct a gift', 'void or refund a gift', 'online giving and recurring gifts', 'bank reconciliation', 'batch reports', 'record a gift', 'online form settings', 'relayed live to Connect, never stored in Finance'],
+    // them through the giving-batch-*-v1 contracts (connect-giving-batch-client.js). Every gift is
+    // entered in a batch; the old single-gift page (page=quick-entry) is gone, and its links land
+    // on Enter a batch, the section's first page.
+    capabilities: ['enter a batch', 'find and correct a gift', 'void or refund a gift', 'online giving and recurring gifts', 'bank reconciliation', 'batch reports', 'online form settings', 'relayed live to Connect, never stored in Finance'],
     pages: [
       { id: 'batch', label: 'Enter a batch', status: 'live' },
       { id: 'transactions', label: 'Transactions', status: 'live' },
@@ -30,7 +32,6 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
       { id: 'funds', label: 'Funds', status: 'live' },
       { id: 'reconciliation', label: 'Reconciliation to bank', status: 'live' },
       { id: 'reports', label: 'Batch reports', status: 'live' },
-      { id: 'quick-entry', label: 'Record a single gift', status: 'live' },
       // A tab of Online giving (Payments · Recurring · Givers & matching · Form settings), so it
       // is left out of the sidebar list and highlights Online giving there instead.
       { id: 'online-form', label: 'Online form settings', status: 'live', navParent: 'online' },

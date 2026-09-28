@@ -6,7 +6,7 @@ import { FINANCE_RELEASE_CHANNEL, FINANCE_VERSION } from './version.js';
 import givingFixture from '../../contracts/examples/giving-summary-v1.synthetic.json';
 import { acceptConnectGivingSummaryV1 } from '../../contracts/validators/connect-giving-consumer.js';
 import { reconcileSyntheticGivingDelivery } from './connect-giving-transport.js';
-import { fetchLiveConnectGivingSummary, defaultLiveGivingPeriod, postConnectGivingQuickEntry } from './connect-giving-client.js';
+import { fetchLiveConnectGivingSummary, defaultLiveGivingPeriod } from './connect-giving-client.js';
 import { fetchVerifiedRole, roleCanAccessSection } from './connect-role-client.js';
 import { callPayrollProxy } from './payroll-proxy-client.js';
 import {
@@ -215,10 +215,9 @@ const SYNTHETIC_GIVING_TRANSPORT = Object.freeze({
 
 const SECURITY_HEADERS = Object.freeze({
   'Cache-Control': 'no-store',
-  // form-action is 'self', not 'none', for exactly one reason: the Giving quick-entry form
-  // (see the 'giving' section below) has to submit somewhere. It still can't target any other
-  // origin. Nothing else here changed -- still no script-src of any kind, so no inline or
-  // external JS can run on this page regardless.
+  // form-action is 'self', not 'none', because Finance's own forms (gift batches, corrections,
+  // budget edits and the rest) have to submit somewhere. It still can't target any other
+  // origin. Still no script-src of any kind, so no inline or external JS can run on this page.
   // img-src/font-src 'self' only admit the logo and fonts served by this Worker itself
   // (brand-assets.js) -- still no third-party origins and no script of any kind.
   'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'",
@@ -254,20 +253,8 @@ function releaseMetadata(env) {
   };
 }
 
-// Maps a postConnectGivingQuickEntry() failure (or Connect's own refusal message) to something
+// Maps a postConnectFinanceBudgetWrite() failure (or Connect's own refusal message) to something
 // a bookkeeper can act on, without leaking wire-level detail (network error text, status codes).
-function describeGivingEntryError(reason, message) {
-  switch (reason) {
-    case 'not_configured': return 'Giving entry is not connected yet. Nothing was recorded.';
-    case 'no_access_identity': return 'Your sign-in was not recognized by Connect. Try reloading the page.';
-    case 'network_error': return 'Could not reach Connect. Nothing was recorded — please try again.';
-    case 'invalid_json': return 'Connect returned an unexpected response. Nothing was confirmed as recorded.';
-    case 'http_error': return message ? String(message) : 'Connect refused the entry.';
-    default: return 'The gift was not recorded.';
-  }
-}
-
-// Same shape as describeGivingEntryError above, for postConnectFinanceBudgetWrite() failures.
 function describeBudgetEntryError(reason, message) {
   switch (reason) {
     case 'not_configured': return 'Budget Plan editing is not connected yet. Nothing was saved.';
@@ -1060,7 +1047,7 @@ function renderSectionBody(ctx) {
     daycareReport, daycareReportLive, daycareEntries, daycareEditId, propertyReport, propertyReportLive, propertyReserves, propertyReservesLive,
     propertyLedgers, propertyLedgersLive, propertyValuation, propertyPolicy, propertyDebt,
     propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, accountsReport, dataStatus, classification, compensationReport,
-    compensationReportLive, compensationBenchmarks, compensationBenefits, cashRunway, canManageCashPolicy, cashPolicyStatus, cashPolicyMessage, givingEntryStatus, givingEntryMessage,
+    compensationReportLive, compensationBenchmarks, compensationBenefits, cashRunway, canManageCashPolicy, cashPolicyStatus, cashPolicyMessage,
     budgetEntryStatus, budgetEntryMessage, payrollBundle,
     compensationPlanRaw, canEditCompensation, compensationEditIndex, compensationEntryStatus, compensationEntryMessage,
     compensationProjection,
@@ -1288,7 +1275,7 @@ function renderSectionBody(ctx) {
       if (page.id === 'reports') return renderBatchReportsPage({ result: batchResult, today });
       return renderBatchPage({ result: batchResult, params: ctx.searchParams, status: batchStatus, today });
     }
-    return renderGiftEntryPage(page.id, { giving, givingSource, givingEntryStatus, givingEntryMessage });
+    return renderGiftEntryPage(page.id, { giving, givingSource });
   }
   if (section.id === 'tuition') {
     // Finance's own planner (tuition-planner/): the page carries its settings and script; every
@@ -1924,32 +1911,6 @@ export default {
     if (route.id === 'giving-impact-write-v1') return handleGivingImpactWrite(request, env, url);
     if (route.id === 'giving-board-email-v1') {
       return handleGivingBoardEmail(request, env, url);
-    }
-
-    if (route.id === 'giving-quick-entry-v1') {
-      const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
-      let form;
-      try {
-        form = await request.formData();
-      } catch {
-        return response(null, { status: 303, headers: { Location: '/?section=giving&page=quick-entry&status=error&reason=invalid_json' } });
-      }
-      const entry = {
-        date: form.get('date') || '',
-        fund_id: form.get('fund_id') || '',
-        amount: form.get('amount') || '',
-        method: form.get('method') || '',
-        check_number: form.get('check_number') || '',
-        person_id: form.get('person_id') || '',
-        notes: form.get('notes') || '',
-      };
-      const result = await postConnectGivingQuickEntry(env, accessJwt, entry);
-      if (result.ok) {
-        return response(null, { status: 303, headers: { Location: '/?section=giving&page=quick-entry&status=ok' } });
-      }
-      const params = new URLSearchParams({ section: 'giving', page: 'quick-entry', status: 'error', reason: result.reason || 'unknown' });
-      if (result.message) params.set('message', String(result.message).slice(0, 200));
-      return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
     }
 
     // ── Budget builder edit/save -- Finance's own genuine write to FINANCE_DB's finance_budget_plan
@@ -3207,7 +3168,7 @@ export default {
     // proxy is the real, authoritative gate (payroll_manage on the resolved contract-relay
     // identity, plus the period-lock check on payroll_save_hours) -- these handlers only
     // orchestrate the calls and redirect back to the page with a status message, the same
-    // 303-redirect-after-POST shape giving-quick-entry-v1 above already uses.
+    // 303-redirect-after-POST shape the Giving and Budget relays above already use.
     if (route.id === 'payroll-hours-save-v1') {
       const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
       let form;
@@ -4072,10 +4033,6 @@ export default {
           ? resolveGivingSummary(env) : { giving: SYNTHETIC_GIVING, source: 'synthetic-fallback' };
         let giving = after(givingSummary, (result) => result.giving);
         let givingSource = after(givingSummary, (result) => result.source);
-        const givingEntryStatus = section.id === 'giving' ? url.searchParams.get('status') : null;
-        const givingEntryMessage = givingEntryStatus === 'error'
-          ? describeGivingEntryError(url.searchParams.get('reason'), url.searchParams.get('message'))
-          : null;
         // 'op' distinguishes a generate/generate-all/commit/remove redirect (planOp* below) from a
         // plain manual-edit redirect (budgetEntryStatus, unchanged) -- both land back on
         // ?section=planning with the same status/reason/message shape, so the presence of 'op' is
@@ -4331,7 +4288,7 @@ export default {
           quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, cashRunway, canManageCashPolicy, cashPolicyStatus, cashPolicyMessage,
           compensationPlanRaw, canEditCompensation, compensationEditIndex, compensationEntryStatus, compensationEntryMessage,
     compensationProjection,
-          givingEntryStatus, givingEntryMessage, budgetEntryStatus, budgetEntryMessage, payrollBundle,
+          budgetEntryStatus, budgetEntryMessage, payrollBundle,
           planOpKind, planOpStatus, planOpMessage, baseProjectionEntryStatus, baseProjectionEntryMessage,
           churchOverrideStatus, churchOverrideMessage,
           churchBudgetXlsxImportStatus, churchBudgetXlsxImportMessage,
