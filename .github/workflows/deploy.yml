@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  actions: read # find the last successful production deploy for the DEPLOY_VERSION check
 
 concurrency:
   group: production-deploy
@@ -56,6 +57,20 @@ jobs:
 
       - name: Verify built HTML scripts parse
         run: node .github/scripts/check-built-scripts.js
+
+      - name: Require a DEPLOY_VERSION bump since the last production deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          last="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy.yml --status success \
+            --limit 1 --json headSha --jq '.[0].headSha // empty')"
+          if [ -z "$last" ]; then
+            echo "::warning::No previous successful Connect deploy found; skipping the DEPLOY_VERSION check."
+            exit 0
+          fi
+          node --no-warnings .github/scripts/check-deploy-version.js "$last"
 
       - name: Deploy approved commit
         uses: cloudflare/wrangler-action@v3
