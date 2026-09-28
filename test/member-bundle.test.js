@@ -501,6 +501,128 @@ describe('app-ext.js is lazy for every role', () => {
   });
 });
 
+describe('app-ext.js is prefetched in the background once the landing tab is up', () => {
+  const SERVE = { '/admin/app-staff.js': CHMS_APP_STAFF_JS, '/admin/app-ext.js': CHMS_APP_EXT_JS };
+  const staffCtx = (opts) => {
+    const ctx = runBundles([
+      ['app-member.js', CHMS_APP_MEMBER_JS],
+      ['app-staff.js', CHMS_APP_STAFF_JS],
+    ], { serve: SERVE, ...opts });
+    ctx.EXT_PREFETCH_DELAY_MS = 0; // same-context global; keeps the test from waiting 2s
+    return ctx;
+  };
+  const names = (ctx) => ctx.__injected.map((x) => x.split('?')[0]);
+  const tick = () => new Promise((r) => setTimeout(r, 10));
+  // app-ext.js is large; on a busy runner it can still be evaluating after one tick (see #1158).
+  const until = async (ready) => { for (let i = 0; i < 100 && !ready(); i += 1) await tick(); };
+  const extReady = (ctx) => () => typeof ctx.initReports === 'function';
+
+  it('is scheduled by the boot sequence, after the landing tab is shown', () => {
+    const at = CHMS_APP_MEMBER_JS.indexOf('.finally(function() {');
+    const block = CHMS_APP_MEMBER_JS.slice(at, CHMS_APP_MEMBER_JS.indexOf('\n  });', at));
+    expect(block).toMatch(/showTab\(hashTab \|\| defaultTab\);[\s\S]*scheduleExtPrefetch\(\);/);
+  });
+
+  it('fetches app-ext.js for a staff role without any tab being opened', async () => {
+    const ctx = staffCtx();
+    ctx.applyRoleUI('admin', '', null);
+    ctx.scheduleExtPrefetch();
+    await until(extReady(ctx));
+    expect(names(ctx)).toEqual(['/admin/app-ext.js']);
+    expect(typeof ctx.initReports).toBe('function');
+  });
+
+  it('waits before starting, so the landing tab\'s own requests go first', async () => {
+    const ctx = staffCtx();
+    ctx.EXT_PREFETCH_DELAY_MS = 50;
+    ctx.applyRoleUI('admin', '', null);
+    ctx.scheduleExtPrefetch();
+    await tick();
+    expect(names(ctx)).toEqual([]);
+    await until(extReady(ctx));
+    expect(names(ctx)).toEqual(['/admin/app-ext.js']);
+  });
+
+  it('uses requestIdleCallback when the browser has it', async () => {
+    const ctx = staffCtx();
+    const idle = [];
+    ctx.requestIdleCallback = (fn, opts) => { idle.push(opts); fn(); };
+    ctx.applyRoleUI('admin', '', null);
+    ctx.scheduleExtPrefetch();
+    await until(extReady(ctx));
+    expect(idle).toEqual([{ timeout: 5000 }]);
+    expect(names(ctx)).toEqual(['/admin/app-ext.js']);
+  });
+
+  it('does not prefetch for a member', async () => {
+    const ctx = runBundles([['app-member.js', CHMS_APP_MEMBER_JS]], { serve: SERVE });
+    ctx.EXT_PREFETCH_DELAY_MS = 0;
+    ctx.applyRoleUI('member', '', { finance: false, staff: false, register: false, reports: true });
+    ctx.scheduleExtPrefetch();
+    await tick();
+    expect(names(ctx)).toEqual([]);
+  });
+
+  for (const [label, connection] of [
+    ['Save-Data is on', { saveData: true, effectiveType: '4g' }],
+    ['the connection is 2G', { effectiveType: '2g' }],
+    ['the connection is slow-2G', { effectiveType: 'slow-2g' }],
+  ]) {
+    it('does not prefetch when ' + label, async () => {
+      const ctx = staffCtx();
+      ctx.navigator.connection = connection;
+      ctx.applyRoleUI('admin', '', null);
+      ctx.scheduleExtPrefetch();
+      await tick();
+      expect(names(ctx)).toEqual([]);
+    });
+  }
+
+  it('still prefetches on 3G/4G', async () => {
+    for (const effectiveType of ['3g', '4g']) {
+      const ctx = staffCtx();
+      ctx.navigator.connection = { saveData: false, effectiveType };
+      ctx.applyRoleUI('admin', '', null);
+      ctx.scheduleExtPrefetch();
+      await until(extReady(ctx));
+      expect(names(ctx), effectiveType).toEqual(['/admin/app-ext.js']);
+    }
+  });
+
+  it('a tab opened after the prefetch finished needs no fetch of its own', async () => {
+    const ctx = staffCtx();
+    ctx.applyRoleUI('admin', '', null);
+    ctx.scheduleExtPrefetch();
+    await until(extReady(ctx));
+    ctx.showTab('giving');
+    await tick();
+    expect(names(ctx)).toEqual(['/admin/app-ext.js']);
+  });
+
+  it('a tab opened mid-prefetch joins the same load', async () => {
+    const ctx = staffCtx();
+    ctx.applyRoleUI('admin', '', null);
+    ctx.showTab('attendance'); // starts the load
+    ctx.scheduleExtPrefetch(); // then the prefetch fires while it is in flight
+    await until(extReady(ctx));
+    expect(names(ctx)).toEqual(['/admin/app-ext.js']);
+  });
+
+  it('a failed prefetch is silent, and the next tab open retries and reports', async () => {
+    const failing = ['/admin/app-ext.js'];
+    const ctx = staffCtx({ fail: failing });
+    ctx.applyRoleUI('admin', '', null);
+    ctx.scheduleExtPrefetch();
+    await tick();
+    const banner = ctx.document.getElementById('error-boundary');
+    expect(banner.innerHTML).toBe('');
+    ctx.showTab('giving');
+    await tick();
+    expect(banner.innerHTML).toContain('Could not load that section');
+    expect(names(ctx)).toEqual(['/admin/app-ext.js', '/admin/app-ext.js']);
+  });
+});
+
 describe('the shell decides, because the cached assets cannot', () => {
   const tags = (h) => (h.match(/app-[a-z]+\.js/g) || []);
 

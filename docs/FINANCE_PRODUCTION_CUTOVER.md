@@ -27,13 +27,26 @@ back first. The retained source is a recovery snapshot, not an automatic failove
 No backup, compensation record, or token belongs in Git.
 
 Completed execution: Connect write-pause release `7995827500749be8f86cdfe5ec1cf165f402e409`
-passed [deployment](https://github.com/timothystl/chms/actions/runs/35936148954).
+passed [deployment](https://github.com/timothystl/connect/actions/runs/35936148954).
 The frozen source contained **13,411 rows across 14 tables**. The production destination copy
 passed SQLite integrity checks, every full-row SHA-256 comparison, and all **13 accounting report
 contract comparisons**. The activation release sets `FINANCE_STORAGE_MODE=finance`, restores
 accounting writes onto the selected destination, and makes the standalone app the main Finance
 entry from Connect. Advanced tools remain reachable and use the same selected accounting data.
 Finance `1.0.0-alpha.53` also corrects production/staging labels and records its deployment SHA.
+
+## September 27 user-interface cutover
+
+Connect now sends live accounting work to `finance.timothystl.org`. Its embedded Finance workspace
+retains only **Budget** and **Compensation**, at Andrew's direction, because those are planning and
+scenario surfaces rather than live accounting reports. The Connect sidebar exposes those two
+destinations separately; the Finance App link opens the standalone application.
+
+This does not sever the application contract. Connect remains authoritative for people, roles,
+funds, individual gifts, batches, deposits, donor statements, and Giving analytics. Finance reads
+and writes those facts through authenticated versioned Connect contracts; it never creates a
+second donor or Giving ledger. Retiring the embedded report navigation therefore must not remove
+the Connect contract endpoints or the `CONNECT_SERVICE` binding.
 
 Alternate native draft/import writers are intentionally not enabled alongside the established
 handlers. Their incomplete parallel schemas would create conflicting records. Production uses
@@ -44,7 +57,7 @@ the existing validated edit workflows against the migrated accounting tables ins
 Infrastructure setup Steps 1–6 below completed September 15. They are a historical record;
 do not recreate the database or repeat the initial route/Access setup for each release.
 Production release `582c72a8f` succeeded
-[September 18](https://github.com/timothystl/chms/actions/runs/35351838490).
+[September 18](https://github.com/timothystl/connect/actions/runs/35351838490).
 Routine deployments use `deploy-finance.yml` with the tested main SHA/reason under current
 [AGENTS.md](../AGENTS.md), without a new approval question.
 
