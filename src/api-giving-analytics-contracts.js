@@ -14,6 +14,8 @@
 // X-Contract-Key (the request came from Finance's Worker); the Cf-Access-Jwt-Assertion is
 // re-verified here and the person's real Connect role decides access.
 import { json } from './auth.js';
+import { computeGivingBoard } from './api-reports.js';
+import { sendBrevoTransactionalEmail } from './api-emails.js';
 import { verifyAccessJwt } from './access-jwt.js';
 import { getRolePermissions, permissionsForRole, resolveGeneralFundIds, normalizeFundCategory, fundCategoryLabel } from './api-utils.js';
 
@@ -609,11 +611,61 @@ export async function applyGivingFollowupWrite(db, body, email) {
   return { status: 200, ok: true };
 }
 
+const EMAIL_RE = /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]+$/;
+
+export async function sendGivingBoardEmail(env, db, body) {
+  const to = [...new Set((Array.isArray(body.to) ? body.to : String(body.to || '').split(/[\s,;]+/))
+    .map((a) => String(a).trim().toLowerCase()).filter(Boolean))];
+  if (!to.length) return { error: 'Add at least one email address.', status: 400 };
+  if (to.length > 25) return { error: 'Send to 25 addresses or fewer at a time.', status: 400 };
+  const bad = to.filter((a) => !EMAIL_RE.test(a) || a.length > 200);
+  if (bad.length) return { error: `Not an email address: ${bad.slice(0, 3).join(', ')}`, status: 400 };
+  const subject = String(body.subject || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 200) || 'Giving Report to the Church Council';
+  const html = String(body.html || '');
+  if (!html) return { error: 'Nothing to send.', status: 400 };
+  if (html.length > 400000) return { error: 'The report is too large to email.', status: 400 };
+  const fromName = (await db.prepare("SELECT value FROM chms_config WHERE key='church_from_name'").first())?.value || 'Timothy Lutheran Church';
+  const fromEmail = (await db.prepare("SELECT value FROM chms_config WHERE key='church_from_email'").first())?.value || '';
+  const sent = [];
+  const failed = [];
+  for (const address of to) {
+    const r = await sendBrevoTransactionalEmail(env, { toEmail: address, toName: '', subject, html, fromName, fromEmail });
+    if (r.ok) sent.push(address);
+    else {
+      failed.push({ address, error: r.error });
+      // A missing key or sender address fails every recipient the same way; stop at the first.
+      if (r.status === 500 || /not configured|not set/i.test(r.error || '')) break;
+    }
+  }
+  if (!sent.length) return { error: failed[0]?.error || 'The email could not be sent.', status: 502 };
+  return { ok: true, sent: sent.length, failed: failed.map((f) => f.address) };
+}
+
 export async function handleGivingAnalyticsContracts(req, env, path) {
   if (path === '/api/contracts/giving-analytics-v1' && req.method === 'GET') {
     const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'aggregate' });
     if (auth.response) return auth.response;
     return respondWithGivingAnalyticsV1(new URL(req.url), env.DB);
+  }
+  // The Giving Report to the Council, the same computation as Connect's Giving › Reports board.
+  // Aggregate only (council's totals-only Giving access may read it).
+  if (path === '/api/contracts/giving-board-v1' && req.method === 'GET') {
+    const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'aggregate' });
+    if (auth.response) return auth.response;
+    const period = String(new URL(req.url).searchParams.get('period') || '');
+    if (period && !/^\d{4}(-(0?[1-9]|1[0-2]|Q[1-4]))?$/.test(period)) return json({ error: 'Choose a month, quarter, or year.' }, 400);
+    return json({ contract: 'connect.giving-board.v1', ...(await computeGivingBoard(env.DB, period)) });
+  }
+  // Email packet: Finance renders the council report and Connect sends it from the church's own
+  // address, one message per recipient. Aggregate content, but sending mail is an action, so it
+  // needs Giving edit (or admin). At most 25 recipients and 400 KB of HTML per send.
+  if (path === '/api/contracts/giving-board-email-v1' && req.method === 'POST') {
+    const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'write' });
+    if (auth.response) return auth.response;
+    let body = {};
+    try { body = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+    const result = await sendGivingBoardEmail(env, env.DB, body);
+    return result.ok ? json(result) : json({ error: result.error }, result.status || 400);
   }
   if (path === '/api/contracts/giving-analytics-people-v1' && req.method === 'GET') {
     const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'people' });

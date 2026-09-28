@@ -25,7 +25,8 @@ import { renderGymIncomePage } from './gym-income-pages.js';
 import { fetchGymIncome, describeGymIncomeFailure } from './gym-income-client.js';
 import { describeGivingBatchFailure, fetchGivingBatchLedger, fetchGivingBatchWorkspace, fetchGivingTransactions, fetchOnlineGiving, postGivingBatchWrite, fetchGivingOnlineSettings, postGivingOnlineSettingsWrite } from './connect-giving-batch-client.js';
 import { GIFT_TRANSACTIONS_STYLES, buildTransactionsCsv, normalizeTransactionParams, renderOnlineGivingPage, renderTransactionsPage, transactionsCsvFilename, transactionsCsvParams } from './gift-transactions-pages.js';
-import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, postGivingFollowupWrite } from './connect-giving-analytics-client.js';
+import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, fetchGivingBoard, postGivingBoardEmail, postGivingFollowupWrite } from './connect-giving-analytics-client.js';
+import { COUNCIL_REPORT_STYLES, councilParams, renderCouncilEmailHtml, renderCouncilReportPage } from './council-report-pages.js';
 import { fetchAccessRoles } from './connect-access-client.js';
 import { fetchFinanceClassification } from './finance-classification-client.js';
 import { fetchFinancePropertyDebt } from './finance-property-debt-client.js';
@@ -993,6 +994,28 @@ async function handleGivingFollowupWrite(request, env, url) {
   return back({ ...keep, status: 'ok', msg: GIVING_FOLLOWUP_MESSAGES[op] });
 }
 
+// Council report › Email packet: read the same report Connect computes for this lens and period,
+// render the emailed version here, and have Connect send it from the church's address. Connect
+// re-checks the signed-in person's Giving edit access before anything is sent.
+async function handleGivingBoardEmail(request, env, url) {
+  let form = null;
+  try { form = await request.formData(); } catch { /* reported below */ }
+  const field = (name, max = 200) => String(form?.get(name) || '').trim().slice(0, max);
+  const picked = councilParams(new URLSearchParams({ period: field('period', 10), lens: field('lens', 20), view: field('view', 12) }), isoDay(new Date()));
+  const keep = { period: picked.period, lens: picked.lens, ...(picked.mode === 'narrative' ? { view: 'narrative' } : {}) };
+  const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving-analytics', page: 'council', ...keep, ...params }).toString()}` } });
+  if (!isSameOriginPost(request, url)) return back({ status: 'error', message: 'That form did not come from Timothy Finance.' });
+  if (!form) return back({ status: 'error', message: 'The form could not be read.' });
+  const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
+  const board = await fetchGivingBoard(env, accessJwt, { period: picked.period });
+  if (!board.ok) return back({ status: 'error', message: describeGivingBatchFailure(board).slice(0, 200) });
+  const html = renderCouncilEmailHtml(board.result, picked.lens, { note: field('note', 2000) });
+  const sent = await postGivingBoardEmail(env, accessJwt, { to: field('to', 3000), subject: field('subject'), html });
+  if (!sent.ok) return back({ status: 'error', message: describeGivingBatchFailure(sent).slice(0, 200) });
+  const failed = sent.result.failed || [];
+  return back({ status: 'ok', msg: `Report emailed to ${sent.result.sent} address${sent.result.sent === 1 ? '' : 'es'}.${failed.length ? ` Not sent to: ${failed.join(', ').slice(0, 120)}.` : ''}` });
+}
+
 // The v3 Budget builder asks for growth as a percentage (3 for 3%); the older forms and Connect's
 // routes take a fraction (0.03). A percentage field, when sent, is converted here.
 function budgetGrowthFraction(form) {
@@ -1259,6 +1282,10 @@ function renderSectionBody(ctx) {
       : ctx.searchParams.get('status') === 'error' ? { ok: false, message: `Not saved: ${ctx.searchParams.get('message') || 'the request did not complete.'}` } : null;
     const keep = councilPreview ? { council: '1' } : {};
     switch (page.id) {
+      case 'council': return renderCouncilReportPage({
+        result: totals, params: ctx.searchParams, today: isoDay(new Date()), status,
+        canEmail: canEditNudges, print: ctx.searchParams.get('print') === '1', council: councilPreview,
+      });
       case 'year-over-year': return renderYearOverYearPage({ result: totals, keep });
       case 'household-bands': return renderHouseholdBandsPage({ result: totals, keep });
       case 'pledges': return renderPledgesPage({ result: totals, keep });
@@ -1603,7 +1630,7 @@ function renderShell(ctx) {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Timothy Finance${production ? '' : ' — Staging'}</title>
   <link rel="icon" href="/assets/finance-mark.png"><link rel="apple-touch-icon" href="/assets/finance-icon.png">
-  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}</style>
+  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${COUNCIL_REPORT_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}</style>
 </head>
 <body${councilPreview ? ' class="council-preview"' : ''}>
   <header class="app-header">
@@ -1842,6 +1869,10 @@ export default {
 
     if (route.id === 'giving-followup-write-v1') {
       return handleGivingFollowupWrite(request, env, url);
+    }
+
+    if (route.id === 'giving-board-email-v1') {
+      return handleGivingBoardEmail(request, env, url);
     }
 
     if (route.id === 'giving-quick-entry-v1') {
@@ -4201,7 +4232,9 @@ export default {
         let accessRoles = section.id === 'accounts' && resolveFinancePage(section, pageId).id === 'access'
           ? fetchAccessRoles(env, accessJwt) : null;
         const givingAnalyticsLoads = analyticsPageId ? Promise.all([
-          analyticsPageId === 'statements' ? null : fetchGivingAnalytics(env, accessJwt, { fund: url.searchParams.get('fund') || 'general' }),
+          analyticsPageId === 'statements' ? null
+            : analyticsPageId === 'council' ? fetchGivingBoard(env, accessJwt, { period: councilParams(url.searchParams, isoDay(new Date())).period })
+              : fetchGivingAnalytics(env, accessJwt, { fund: url.searchParams.get('fund') || 'general' }),
           ['statements', 'nudges'].includes(analyticsPageId) && !councilPreview
             && !(roleResult.ok && roleResult.role !== 'admin' && roleResult.permissions?.giving === 'anon')
             ? fetchGivingAnalyticsPeople(env, accessJwt) : null,

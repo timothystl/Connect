@@ -36,8 +36,9 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
   },
   {
     id: 'giving-analytics', label: 'Giving', group: 'Giving', permission: 'finance',
-    capabilities: ['trends', 'year over year', 'household bands', 'pledges', 'what-if modeling', 'statements', 'nudges'],
+    capabilities: ['council giving report', 'trends', 'year over year', 'household bands', 'pledges', 'what-if modeling', 'statements', 'nudges'],
     pages: [
+      { id: 'council', label: 'Council report', status: 'live' },
       { id: 'trends', label: 'Trends', status: 'live' },
       { id: 'year-over-year', label: 'Year over year', status: 'live' },
       { id: 'household-bands', label: 'Household bands', status: 'live' },
