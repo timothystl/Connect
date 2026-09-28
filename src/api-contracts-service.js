@@ -21,6 +21,7 @@ import { handleGivingOnlineContracts } from './api-giving-online-contracts.js';
 import { handleGivingAnalyticsContracts } from './api-giving-analytics-contracts.js';
 import { handleGivingReportsContracts } from './api-giving-reports-contract.js';
 import { handleGivingLettersContracts } from './api-giving-letters-contract.js';
+import { handleGivingPledgesContracts } from './api-giving-pledges-contract.js';
 import { respondWithFinancePlanningBasisV1 } from './api-planning-contracts.js';
 import { respondWithFinanceAccessRolesV1 } from './api-access-contracts.js';
 import { respondWithFinanceBudgetBuilderV1 } from './api-budget-builder-contracts.js';
@@ -86,6 +87,12 @@ export async function handleContractsServiceApi(req, env, path) {
   if (path.startsWith('/api/contracts/giving-letters-')) {
     const lettersResponse = await handleGivingLettersContracts(req, env, path);
     if (lettersResponse) return lettersResponse;
+  }
+
+  // Pledges kept from Finance: the year's pledge list and the pledge writer.
+  if (path === '/api/contracts/giving-pledges-v1' || path === '/api/contracts/giving-pledges-write-v1') {
+    const pledgesResponse = await handleGivingPledgesContracts(req, env, path);
+    if (pledgesResponse) return pledgesResponse;
   }
 
   if (path === '/api/contracts/connect-giving-summary-v1' && req.method === 'GET') {

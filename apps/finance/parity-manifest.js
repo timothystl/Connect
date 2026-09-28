@@ -41,12 +41,13 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     id: 'giving-analytics', label: 'Giving', group: 'Giving', permission: 'finance',
     // Household bands and Giving nudges moved into Giving reports (Giving bands; Nudges and next
     // steps) on Sept 28 2026; shell.js redirects their old links.
-    capabilities: ['council giving report', 'trends', 'year over year', 'pledges', 'what-if modeling', 'statements'],
+    capabilities: ['council giving report', 'trends', 'year over year', 'pledges', 'pledge list and pledge entry', 'what-if modeling', 'statements'],
     pages: [
       { id: 'council', label: 'Council report', status: 'live' },
       { id: 'trends', label: 'Trends', status: 'live' },
       { id: 'year-over-year', label: 'Year over year', status: 'live' },
       { id: 'pledges', label: 'Pledges', status: 'live' },
+      { id: 'pledge-list', label: 'Pledge list', status: 'live' },
       { id: 'what-if', label: 'Giving what-if', status: 'live' },
       { id: 'statements', label: 'Giving statements', status: 'live' },
     ],

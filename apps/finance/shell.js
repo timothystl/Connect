@@ -32,6 +32,7 @@ import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, fetchGivingBoard, fet
 import { GIVING_REPORTS_STYLES, givingReportParams, givingReportRequests, impactStatementsFromForm, renderGivingReportPage } from './giving-reports-pages.js';
 import { DONOR_LETTERS_STYLES, kindOfPage, renderDonorLettersPage } from './donor-letters-pages.js';
 import { fetchGivingLetters, lettersParams, listQuery } from './donor-letters-service.js';
+import { PLEDGE_STYLES, canEditPledges, fetchPledges, handlePledgeWrite, pledgeParams, renderPledgeListPage } from './pledge-pages.js';
 import { canSendLetters, handleDonorLettersPrint, handleDonorLettersWrite, handleStatementCsv, handleLetterSettingsWrite } from './donor-letters-routes.js';
 import { COUNCIL_REPORT_STYLES, councilAnalysisRequests, councilParams, renderCouncilEmailHtml, renderCouncilReportPage } from './council-report-pages.js';
 import { fetchAccessRoles } from './connect-access-client.js';
@@ -1402,6 +1403,10 @@ function renderSectionBody(ctx) {
       });
       case 'year-over-year': return renderYearOverYearPage({ result: totals, keep });
       case 'pledges': return renderPledgesPage({ result: totals, keep });
+      case 'pledge-list': return renderPledgeListPage({
+        result: asResult(ctx.pledgeList), params: pledgeParams((k) => ctx.searchParams.get(k) || '', isoDay(new Date())),
+        canEdit: canEditPledges(roleResult, councilPreview), namedHidden, status,
+      });
       case 'what-if': return renderWhatIfPage({ result: totals, params: ctx.searchParams, keep });
       case 'statements': return renderStatementsPage({ result: asResult(ctx.givingAnalyticsPeople), councilPreview: namedHidden });
       default: return renderTrendsPage({ result: totals, keep, mdoBooks: ctx.givingMdoBooks });
@@ -1799,7 +1804,7 @@ function renderShell(ctx) {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Timothy Finance${production ? '' : ' — Staging'}</title>
   <link rel="icon" href="/assets/finance-mark.png"><link rel="apple-touch-icon" href="/assets/finance-icon.png">
-  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${COUNCIL_REPORT_STYLES}${GIVING_REPORTS_STYLES}${DONOR_LETTERS_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}</style>
+  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${COUNCIL_REPORT_STYLES}${GIVING_REPORTS_STYLES}${DONOR_LETTERS_STYLES}${PLEDGE_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}</style>
 </head>
 <body${councilPreview ? ' class="council-preview"' : ''}>
   <header class="app-header">
@@ -2052,6 +2057,7 @@ export default {
 
     if (route.id === 'giving-impact-write-v1') return handleGivingImpactWrite(request, env, url);
     if (route.id === 'giving-letters-write-v1') return handleDonorLettersWrite(request, env, url);
+    if (route.id === 'giving-pledges-write-v1') return handlePledgeWrite(request, env, url);
     if (route.id === 'giving-letters-settings-v1') return handleLetterSettingsWrite(request, env, url);
     if (route.id === 'giving-letters-print') return handleDonorLettersPrint(request, env, url);
     if (route.id === 'giving-statement-csv') return handleStatementCsv(request, env, url);
@@ -4433,7 +4439,10 @@ export default {
         const councilView = analyticsPageId === 'council' ? councilParams(url.searchParams, isoDay(new Date())) : null;
         const councilAnalysisLoad = councilView?.mode === 'analysis'
           ? Promise.all(councilAnalysisRequests(councilView.year).map(([report, query]) => fetchGivingReport(env, accessJwt, report, query))) : null;
-        const givingAnalyticsLoads = analyticsPageId ? Promise.all([
+        // Giving › Pledge list names each pledger: read only for Giving view, never in council preview.
+        const pledgeListLoad = analyticsPageId === 'pledge-list' && !reportsNamedHiddenEarly
+          ? fetchPledges(env, accessJwt, pledgeParams((k) => url.searchParams.get(k) || '', isoDay(new Date()))) : null;
+        const givingAnalyticsLoads = analyticsPageId && analyticsPageId !== 'pledge-list' ? Promise.all([
           analyticsPageId === 'statements' || councilAnalysisLoad ? null
             : analyticsPageId === 'council' ? fetchGivingBoard(env, accessJwt, { period: councilView.period })
               // Charts › Giving vs. pace: one period for one fund scope (totals only).
@@ -4510,6 +4519,7 @@ export default {
           printFragment: printMode && url.searchParams.get('fragment') === '1',
           givingReports: givingReportsLoad ? await givingReportsLoad : null,
           donorLetters: donorLettersLoad ? await donorLettersLoad : null,
+          pledgeList: pledgeListLoad ? await pledgeListLoad : null,
           councilAnalysis: councilAnalysisLoad ? await councilAnalysisLoad : null,
           councilBudgetDraft: councilBudgetDraftLoad ? await councilBudgetDraftLoad : null,
           healthView: url.searchParams.get('view'), healthAppeal: url.searchParams.get('appeal'), healthFlow: url.searchParams.get('flow'), financeHealth, facilities, hr, givingBatch, givingAnalytics, givingAnalyticsPeople, givingMdoBooks, gymIncome, accessRoles, budgetBuilder, boardLayout, planningBasis, planningScenarios, planningRunway, propertyBooks, searchParams: url.searchParams,
