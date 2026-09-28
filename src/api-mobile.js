@@ -42,9 +42,11 @@ function timeAgo(dateStr) {
 
 // Most recent Sunday including today — the Sunday whose attendance a staffer would be
 // entering on any given day of that week (the day of, or the days right after).
-function currentSundayISO() {
-  const now = new Date();
-  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+// Uses the church's own calendar day (St. Louis), not UTC: after ~7pm Central on a Saturday
+// UTC is already Sunday, which would point a late Saturday entry at the NEXT Sunday.
+export function currentSundayISO(now = new Date()) {
+  const [y, m, day] = now.toLocaleDateString('en-CA', { timeZone: 'America/Chicago' }).split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1, day));
   d.setUTCDate(d.getUTCDate() - d.getUTCDay());
   return d.toISOString().slice(0, 10);
 }
@@ -281,8 +283,12 @@ export async function handleMobileApi(req, env, url, method, role) {
     if (canViewAttendance) {
       const rows = (await db.prepare(
         `SELECT id, service_time, attendance FROM worship_services
-         WHERE service_date=? AND service_type='sunday'`
+         WHERE service_date=? AND service_time IN ('08:00','10:45')
+         ORDER BY (service_type='sunday') ASC, id ASC`
       ).bind(sundayDate).all()).results || [];
+      // Last row per time wins, which is the same row the quick-entry POST below writes to
+      // (a 'sunday'-typed row first, newest id next) — so a saved count is the one shown even
+      // when that date/time has a duplicate or a differently-typed row from an import.
       const byTime = {};
       for (const r of rows) byTime[r.service_time] = r;
       services = services.map(s => {
@@ -627,7 +633,8 @@ export async function handleMobileApi(req, env, url, method, role) {
     if (time !== '08:00' && time !== '10:45') return json({ error: 'Invalid service time' }, 400);
     const count = Math.max(0, parseInt(b.count, 10) || 0);
     const existing = await db.prepare(
-      `SELECT id FROM worship_services WHERE service_date=? AND service_time=?`
+      `SELECT id FROM worship_services WHERE service_date=? AND service_time=?
+       ORDER BY (service_type='sunday') DESC, id DESC LIMIT 1`
     ).bind(date, time).first();
     let id;
     if (existing) {

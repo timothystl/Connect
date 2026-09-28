@@ -431,7 +431,8 @@ function renderHome() {
 
 async function saveSvc(time) {
   const input = document.querySelector('[data-svc-input="' + CSS.escape(time) + '"]');
-  const count = parseInt(input && input.value, 10) || 0;
+  const raw = input ? input.value : state.svcDraft[time];
+  const count = Math.max(0, parseInt(raw, 10) || 0);
   try {
     await api('/admin/api/mobile/attendance', { method: 'POST', body: JSON.stringify({ date: state.dash.sunday_date, time, count }) });
     const svc = state.dash.services.find(s => s.time === time);
@@ -1363,12 +1364,21 @@ document.getElementById('content').addEventListener('click', (e) => {
   }
 });
 document.getElementById('content').addEventListener('input', (e) => {
-  if (e.target && e.target.id === 'ppl-search') onSearchInput(e.target.value);
+  // Remember a typed Sunday count as it's typed: renderHome() rebuilds the whole card, so
+  // opening the other service (or any re-render) would otherwise wipe a number not yet saved.
+  if (e.target && e.target.dataset && e.target.dataset.svcInput) state.svcDraft[e.target.dataset.svcInput] = e.target.value;
+  else if (e.target && e.target.id === 'ppl-search') onSearchInput(e.target.value);
   else if (e.target && e.target.id === 'giv-person-search') onGivPersonSearch(e.target.value);
   else if (e.target && e.target.id === 'hh-search') onHhSearchInput(e.target.value);
   else if (e.target && e.target.id === 'giv-edit-amount' && state.givEditDraft) state.givEditDraft.amount = e.target.value;
   else if (e.target && e.target.id === 'giv-edit-date' && state.givEditDraft) state.givEditDraft.date = e.target.value;
   else if (e.target && e.target.id === 'giv-edit-check' && state.givEditDraft) state.givEditDraft.checkNumber = e.target.value;
+});
+// The phone keypad's Enter/Go key saves the count, same as tapping Save.
+document.getElementById('content').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || !e.target || !e.target.dataset) return;
+  if (e.target.dataset.svcInput) { e.preventDefault(); saveSvc(e.target.dataset.svcInput); }
+  else if (e.target.dataset.attEditInput) { e.preventDefault(); attSaveEdit(parseInt(e.target.dataset.attEditInput, 10)); }
 });
 document.getElementById('content').addEventListener('change', (e) => {
   if (e.target && e.target.id === 'giv-method') {
