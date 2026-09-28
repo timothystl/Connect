@@ -1730,7 +1730,7 @@ if (seg === 'reports/giving-statement' && method === 'GET') {
      FROM giving_entries ge
      JOIN funds f ON ge.fund_id=f.id
      JOIN giving_batches gb ON ge.batch_id=gb.id
-     WHERE ge.person_id=?
+     WHERE ge.person_id=? AND NOT (ge.amount = 0 AND ge.original_amount_cents > 0)
        AND substr(COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date),1,4)=?
      ORDER BY gift_date, ge.id`
   ).bind(personId, String(year)).all()).results || [];
@@ -1774,7 +1774,7 @@ if (seg === 'reports/giving-statement-household' && method === 'GET') {
      JOIN funds f ON ge.fund_id=f.id
      JOIN giving_batches gb ON ge.batch_id=gb.id
      JOIN people p ON ge.person_id=p.id
-     WHERE p.household_id=?
+     WHERE p.household_id=? AND NOT (ge.amount = 0 AND ge.original_amount_cents > 0)
        AND substr(COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date),1,4)=?
      ORDER BY gift_date, p.last_name, ge.id`
   ).bind(householdId, String(year)).all()).results || [];

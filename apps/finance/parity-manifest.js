@@ -22,9 +22,11 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     id: 'giving', label: 'Giving Entry', group: 'Gift Entry', permission: 'finance',
     // Batches, deposits and gifts live in Connect's giving_* tables; these pages read and write
     // them through the giving-batch-*-v1 contracts (connect-giving-batch-client.js).
-    capabilities: ['enter a batch', 'bank reconciliation', 'batch reports', 'record a gift', 'relayed live to Connect, never stored in Finance'],
+    capabilities: ['enter a batch', 'find and correct a gift', 'void or refund a gift', 'online giving and recurring gifts', 'bank reconciliation', 'batch reports', 'record a gift', 'relayed live to Connect, never stored in Finance'],
     pages: [
       { id: 'batch', label: 'Enter a batch', status: 'live' },
+      { id: 'transactions', label: 'Transactions', status: 'live' },
+      { id: 'online', label: 'Online giving', status: 'live' },
       { id: 'funds', label: 'Funds', status: 'live' },
       { id: 'reconciliation', label: 'Reconciliation to bank', status: 'live' },
       { id: 'reports', label: 'Batch reports', status: 'live' },
