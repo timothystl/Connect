@@ -1476,21 +1476,12 @@ describe('Finance alpha staging shell', () => {
     expect(statements[0]).toMatch(/^SELECT\b/i);
   });
 
-  it('renders a synthetic role-level Compensation plan, its sub-pages, and its own read budget', async () => {
-    statements.length = 0;
-    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan'), env);
-    const html = await res.text();
-    expect(res.status).toBe(200);
-    expect(html).toContain('Synthetic Compensation Report');
-    expect(html).toContain('Role-level plan for fiscal year 2027');
-    expect(html).toContain('Synthetic Ministry Role');
-    expect(html).toContain('Synthetic Operations Role');
-    expect(html).toContain('$105,000');
-    expect(html).toContain('$21,000');
-    expect(html).toContain('$126,000');
-    expect(html).toContain('No personal identities');
-    expect(statements).toHaveLength(3);
-    expect(statements.every((sql) => /^SELECT\b/i.test(sql))).toBe(true);
+  it('sends the retired Compensation Plan page to the Planner, and renders the synthetic sub-pages', async () => {
+    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan&edit=0'), env);
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe('/?section=compensation&page=planner');
+    const preview = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan&council=1'), env);
+    expect(preview.headers.get('location')).toBe('/?section=compensation&page=planner&council=1');
 
     const councilHtml = await (await worker.fetch(new Request('https://finance.test/?section=compensation&page=council'), env)).text();
     expect(councilHtml).toContain('Council review snapshot');
@@ -1573,26 +1564,6 @@ describe('Finance alpha staging shell', () => {
       const benefitsHtml = await (await worker.fetch(req('https://finance.test/?section=compensation&page=benefits'), roleEnv)).text();
       expect(benefitsHtml).not.toContain('No personal identities are included');
       expect(benefitsHtml).toContain('built from the saved compensation plan, which could not be read');
-    });
-
-    it('admin sees every worker verbatim on the Plan page, including one flagged hideFromCouncil', async () => {
-      const html = await (await worker.fetch(req('https://finance.test/?section=compensation&page=plan'), liveCompensationEnv('admin'))).text();
-      expect(html).toContain('Worker A');
-      expect(html).toContain('Worker B (hidden from council)');
-      expect(html).toContain('>2<');
-      expect(html).toContain('$140,000');
-    });
-
-    it('a council viewer never sees a worker flagged hideFromCouncil on the Plan page -- same rule the Council page enforces', async () => {
-      const html = await (await worker.fetch(req('https://finance.test/?section=compensation&page=plan'), liveCompensationEnv('council'))).text();
-      expect(html).toContain('Worker A');
-      expect(html).not.toContain('Worker B (hidden from council)');
-      // KPI totals are recomputed from the filtered roster too, so the hidden worker's $90,000
-      // never leaks into "Entered current pay total" even in aggregate.
-      expect(html).toContain('>1<');
-      expect(html).toContain('$50,000');
-      expect(html).not.toContain('$140,000');
-      expect(html).toContain('Excludes any worker not shown to council');
     });
   });
 

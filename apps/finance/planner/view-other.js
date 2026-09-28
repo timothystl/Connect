@@ -407,6 +407,7 @@ function benefitBreakdown(m, computed, totals) {
     health: ['Health plan', () => 'group premium, opt-out cash and hand-entered employee-only premiums combined'],
     disability: ['Disability &amp; survivor', (r) => pct(r.rate) + ' of cash salary, ' + pct(r.rateWithDependents) + ' with dependents'],
     fica: ['Employer FICA', (r) => pct(r.rate) + ' of cash salary; a minister pays their own SECA instead'],
+    mileage: ['Mileage', () => 'annual mileage reimbursement or car allowance; not wages, so no pension, disability or FICA on it'],
   };
   const rows = bd.rows.map((r) => {
     const share = bd.totalCents ? Math.round(r.cents / bd.totalCents * 100) : 0;
@@ -425,7 +426,7 @@ function benefitBreakdown(m, computed, totals) {
     : '';
   return '<div style="margin-top:22px;">'
     + '<div style="font-weight:700;font-size:1rem;color:var(--color-navy);margin-bottom:2px;">What makes up ' + money(totals.benefitsCents) + ' of benefits &amp; taxes</div>'
-    + '<div style="font-size:.74rem;color:var(--warm-gray);margin-bottom:8px;">Every employer cost on top of cash salary, across the ' + bd.countedCount + ' worker' + (bd.countedCount === 1 ? '' : 's') + ' this budget carries. These four lines are the whole of it &mdash; they add to the Benefits &amp; taxes figure above.</div>'
+    + '<div style="font-size:.74rem;color:var(--warm-gray);margin-bottom:8px;">Every employer cost on top of cash salary, across the ' + bd.countedCount + ' worker' + (bd.countedCount === 1 ? '' : 's') + ' this budget carries. These ' + (bd.rows.length === 5 ? 'five' : 'four') + ' lines are the whole of it &mdash; they add to the Benefits &amp; taxes figure above.</div>'
     + '<div class="fin-comp-scroll"><table class="fin-comp-table" style="min-width:620px;font-size:.86rem;">'
     + '<thead><tr><th class="fin-comp-th">Cost</th><th class="fin-comp-th num">Workers</th><th class="fin-comp-th num">FY' + targetYear() + '</th><th class="fin-comp-th num">Share</th></tr></thead>'
     + '<tbody>' + rows

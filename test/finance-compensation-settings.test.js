@@ -90,7 +90,9 @@ describe('Compensation plan settings forms', () => {
   it('sends a save back to the page it came from', () => {
     expect(planFormReturnLocation(form({ return_page: 'rates', plan_year: '2028', ref_year: '2029' }), { status: 'ok' }))
       .toBe('/?section=compensation&page=rates&plan_year=2028&ref_year=2029&status=ok');
-    expect(planFormReturnLocation(form({ return_page: 'elsewhere' }))).toBe('/?section=compensation&page=plan');
+    expect(planFormReturnLocation(form({ return_page: 'elsewhere' }))).toBe('/?section=compensation&page=planner');
+    // The retired Plan (new view) page is not a return target; the Planner is.
+    expect(planFormReturnLocation(form({ return_page: 'plan' }))).toBe('/?section=compensation&page=planner');
   });
 });
 
@@ -114,14 +116,8 @@ function roleEnv(role, { onWrite } = {}) {
 const page = (env, q) => worker.fetch(new Request(`https://finance.test/?section=compensation&${q}`, { headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }), env);
 
 describe('Compensation settings pages and relay', () => {
-  it('gives admin the raise-method grid on Plan and every editor on Rates & ranges', async () => {
+  it('gives admin every editor on Rates & ranges (raise methods live on the Planner)', async () => {
     const env = roleEnv('admin');
-    const plan = await (await page(env, 'page=plan&plan_year=2027')).text();
-    expect(plan).toContain('Raise methods');
-    expect(plan).toContain('name="worker_method_1"');
-    expect(plan).toContain('name="worker_override_0"');
-    expect(plan).toContain('value="64000"');
-    expect(plan).toContain('name="ftePct"');
     const rates = await (await page(env, 'page=rates&plan_year=2027')).text();
     expect(rates).toContain('<h1 class="page-title">Rates &amp; ranges</h1>');
     expect(rates).toContain('value="reference"');
@@ -138,15 +134,15 @@ describe('Compensation settings pages and relay', () => {
     expect(rates).not.toContain('/api/v1/connect-compensation-plan-write');
   });
 
-  it('relays a raise-method save as the complete plan and returns to the Plan page', async () => {
+  it('still relays a raise-method save as the complete plan, returning to the Planner', async () => {
     let sent;
     const env = roleEnv('admin', { onWrite: (body) => { sent = body; } });
     const res = await worker.fetch(new Request('https://finance.test/api/v1/connect-compensation-plan-write', {
       method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'jwt', 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: form({ action: 'methods', return_page: 'plan', plan_year: '2027', comp_method: 'worksheet', worker_method_0: 'none', worker_override_0: '' }).toString(),
+      body: form({ action: 'methods', return_page: 'planner', plan_year: '2027', comp_method: 'worksheet', worker_method_0: 'none', worker_override_0: '' }).toString(),
     }), env);
     expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toBe('/?section=compensation&page=plan&plan_year=2027&status=ok');
+    expect(res.headers.get('location')).toBe('/?section=compensation&page=planner&plan_year=2027&status=ok');
     expect(sent.compMethod).toBe('worksheet');
     expect(sent.compPerWorkerMethod).toEqual({ 0: 'none', 1: 'none' });
     expect(sent.compOverrides).toEqual({});

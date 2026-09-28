@@ -56,40 +56,16 @@ describe('Finance Compensation Plan — roster editor and relay route', () => {
     expect(res.headers.get('allow')).toBe('POST');
   });
 
-  it('does not show the roster editor when the viewer role is not verified', async () => {
-    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan'), baseEnv);
-    expect(res.status).toBe(200);
-    const html = await res.text();
-    expect(html).not.toContain('/api/v1/connect-compensation-plan-write');
-  });
-
-  it('does not show the roster editor for a council viewer -- council keeps its own narrower overlay, not this route', async () => {
-    const env = roleEnv('council', async () => new Response('not found', { status: 404 }));
-    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan', {
-      headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
-    }), env);
-    const html = await res.text();
-    expect(html).not.toContain('/api/v1/connect-compensation-plan-write');
-  });
-
-  it('shows the roster editor for a verified admin viewer, with the current worker listed', async () => {
-    const env = roleEnv('admin', async () => new Response('not found', { status: 404 }));
-    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan', {
-      headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
-    }), env);
-    const html = await res.text();
-    expect(html).toContain('<form method="POST" action="/api/v1/connect-compensation-plan-write">');
-    expect(html).toContain('Test Worker A');
-    expect(html).toContain('name="name"');
-  });
-
-  it('shows the roster editor for a verified compensation-role viewer too', async () => {
-    const env = roleEnv('compensation', async () => new Response('not found', { status: 404 }));
-    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan', {
-      headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
-    }), env);
-    const html = await res.text();
-    expect(html).toContain('<form method="POST" action="/api/v1/connect-compensation-plan-write">');
+  // The roster editor page (Plan (new view)) is retired: its old address opens the Planner, and
+  // no page renders a form for this route's add/edit/remove actions any more.
+  it('sends every role from the retired roster editor page to the Planner', async () => {
+    for (const env of [baseEnv, roleEnv('admin', async () => new Response('not found', { status: 404 })), roleEnv('council', async () => new Response('not found', { status: 404 }))]) {
+      const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan&edit=0', {
+        headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
+      }), env);
+      expect(res.status).toBe(303);
+      expect(res.headers.get('location')).toBe('/?section=compensation&page=planner');
+    }
   });
 
   it('redirects to a not_configured error when the service binding and shared secret are not set', async () => {
@@ -201,7 +177,7 @@ describe('Finance Compensation Plan — roster editor and relay route', () => {
     expect(location.searchParams.get('reason')).toBe('http_error');
   });
 
-  it('redirects with the refusal reason when Connect declines the write, and shows it back on the page', async () => {
+  it('redirects with the refusal reason when Connect declines the write', async () => {
     const env = liveEnv(async (req) => {
       const url = new URL(req.url);
       if (url.pathname === '/api/contracts/finance-compensation-plan-v1') return new Response(JSON.stringify({ data: RAW_PLAN }), { status: 200 });
@@ -216,12 +192,7 @@ describe('Finance Compensation Plan — roster editor and relay route', () => {
     expect(location.searchParams.get('reason')).toBe('http_error');
     expect(location.searchParams.get('message')).toBe('Access denied: editing the salary planner requires admin access');
 
-    const shownEnv = roleEnv('admin', async () => new Response('not found', { status: 404 }));
-    const shown = await worker.fetch(new Request(location.toString(), {
-      headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
-    }), shownEnv);
-    const html = await shown.text();
-    expect(html).toContain('Not saved: Access denied: editing the salary planner requires admin access');
+    expect(location.searchParams.get('page')).toBe('planner');
   });
 
   it('redirects with a network_error reason when the write relay call itself fails, never throwing', async () => {

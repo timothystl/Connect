@@ -815,7 +815,7 @@ function describeCompensationEntryError(reason, message) {
   }
 }
 
-// Builds a raw roster worker record from the edit/add form's fields (compensation-editor-pages.js),
+// Builds a raw roster worker record from the relay's add/edit form fields,
 // matching the exact raw field names api-finance.js's SALARY_PLANNER_KEY plan stores (see
 // api-contracts.js's buildFinanceCompensationV1 comment on the raw roster shape) -- `existing` is
 // spread first so an edit only overwrites the fields this form actually collects, never dropping
@@ -1063,7 +1063,7 @@ function renderSectionBody(ctx) {
     propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, accountsReport, dataStatus, classification, compensationReport,
     compensationReportLive, compensationBenchmarks, compensationBenefits, cashRunway, canManageCashPolicy, cashPolicyStatus, cashPolicyMessage, givingEntryStatus, givingEntryMessage,
     budgetEntryStatus, budgetEntryMessage, payrollBundle,
-    compensationPlanRaw, canEditCompensation, compensationEditIndex, compensationEntryStatus, compensationEntryMessage,
+    compensationPlanRaw, canEditCompensation, compensationEntryStatus, compensationEntryMessage,
     compensationProjection,
     canManageBudgetPlan, planOpStatus, planOpMessage, planOpKind,
     baseProjectionEntryStatus, baseProjectionEntryMessage,
@@ -1542,9 +1542,8 @@ function renderSectionBody(ctx) {
     return renderCompensationPage(page.id, {
       compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits,
       viewerRole: roleResult && roleResult.ok ? roleResult.role : null,
-      compensationPlanRaw, canEditCompensation, editIndex: compensationEditIndex,
+      compensationPlanRaw, canEditCompensation,
       entryStatus: compensationEntryStatus, entryMessage: compensationEntryMessage,
-      canEditCouncilOverlay: roleResult.ok && roleResult.role === 'council' && roleResult.permissions?.compensation === 'edit',
       compensationProjection,
       planYear: /^\d{4}$/.test(ctx.searchParams?.get('plan_year') || '') ? ctx.searchParams.get('plan_year') : null,
       refYear: /^\d{4}$/.test(ctx.searchParams?.get('ref_year') || '') ? Number(ctx.searchParams.get('ref_year')) : null,
@@ -3130,21 +3129,23 @@ export default {
       return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
     }
 
-    // Compensation Plan roster editor's own fetch-edit-resubmit save: fetch the CURRENT complete
-    // plan from Connect (never trust a stale copy the browser may have rendered from), apply one
-    // add/edit/remove, and resubmit the whole merged plan -- see finance-compensation-client.js's
-    // own comment on why a partial body would wipe the rest of a real plan.
+    // Compensation plan fetch-edit-resubmit save: fetch the CURRENT complete plan from Connect
+    // (never trust a stale copy the browser may have rendered from), apply one form's change, and
+    // resubmit the whole merged plan -- see finance-compensation-client.js's own comment on why a
+    // partial body would wipe the rest of a real plan. Rates & ranges and Benchmarks post their
+    // settings forms here; the add/edit/remove and 'methods' actions served the retired Plan
+    // (new view) page and remain only as this relay's API.
     if (route.id === 'compensation-plan-write-v1') {
       const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
       let form;
       try {
         form = await request.formData();
       } catch {
-        return response(null, { status: 303, headers: { Location: '/?section=compensation&page=plan&status=error&reason=invalid_json' } });
+        return response(null, { status: 303, headers: { Location: '/?section=compensation&page=planner&status=error&reason=invalid_json' } });
       }
       const current = await fetchConnectSalaryPlannerState(env, accessJwt);
       if (!current.ok) {
-        const params = new URLSearchParams({ section: 'compensation', page: 'plan', status: 'error', reason: current.reason || 'unknown' });
+        const params = new URLSearchParams({ section: 'compensation', page: 'planner', status: 'error', reason: current.reason || 'unknown' });
         if (current.message) params.set('message', String(current.message).slice(0, 200));
         return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
       }
@@ -3174,7 +3175,7 @@ export default {
 
       if (action === 'remove' || action === 'edit') {
         if (index == null || !Number.isInteger(index) || !roster[index]) {
-          return response(null, { status: 303, headers: { Location: '/?section=compensation&page=plan&status=error&reason=invalid_index' } });
+          return response(null, { status: 303, headers: { Location: '/?section=compensation&page=planner&status=error&reason=invalid_index' } });
         }
       }
       if (action === 'remove') {
@@ -3190,9 +3191,9 @@ export default {
 
       const result = await postConnectFinanceCompensationWrite(env, accessJwt, data);
       if (result.ok) {
-        return response(null, { status: 303, headers: { Location: '/?section=compensation&page=plan&status=ok' } });
+        return response(null, { status: 303, headers: { Location: '/?section=compensation&page=planner&status=ok' } });
       }
-      const params = new URLSearchParams({ section: 'compensation', page: 'plan', status: 'error', reason: result.reason || 'unknown' });
+      const params = new URLSearchParams({ section: 'compensation', page: 'planner', status: 'error', reason: result.reason || 'unknown' });
       if (result.message) params.set('message', String(result.message).slice(0, 200));
       return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
     }
@@ -3477,7 +3478,7 @@ export default {
     // reads, so a per-worker index can only name a staff member council can actually see.
     if (route.id === 'compensation-council-overlay-save-v1') {
       const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
-      const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'compensation', page: 'plan', ...params }).toString()}` } });
+      const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'compensation', page: 'planner', ...params }).toString()}` } });
       const roleResult = await fetchVerifiedRole(env, accessJwt);
       if (!roleResult.ok || roleResult.role !== 'council' || roleResult.permissions?.compensation !== 'edit' || !roleResult.username) {
         return back({ status: 'error', reason: 'access_denied', message: 'Only council members with compensation edit access can save a raise-plan draft' });
@@ -3706,14 +3707,21 @@ export default {
         const pageId = url.searchParams.get('page')
           || (section.id === 'payroll' ? legacyPayrollPage(url.searchParams.get('view')) : null);
         // The 'page' query param is optional -- resolveFinancePage() is what actually defaults a
-        // missing/unknown one to the section's first page (e.g. Compensation's 'plan'), the same
+        // missing/unknown one to the section's first page (e.g. Compensation's 'planner'), the same
         // resolution renderCompensationPage's own pageId argument (page.id, not this raw pageId)
         // already goes through in renderSectionBody below. Needed here, before that render happens,
-        // to gate the Compensation Plan roster editor's own live fetch on the right page.
+        // to gate the Compensation pages' own live plan fetch on the right page.
         const effectivePageId = resolveFinancePage(section, pageId).id;
         // The Planner is an interactive page; its printable form is the Council report.
         if (section.id === 'compensation' && effectivePageId === 'planner' && url.searchParams.get('print') === '1') {
           return response(null, { status: 303, headers: { Location: '/?section=compensation&page=council&print=1' } });
+        }
+        // Plan (new view) is retired (Andrew, 2026-09-28): its hand-set salary column moved into the
+        // Planner's Set pay table, so its old address opens the Planner (council preview kept).
+        if (section.id === 'compensation' && pageId === 'plan') {
+          const next = new URLSearchParams({ section: 'compensation', page: 'planner' });
+          if (url.searchParams.get('council') === '1') next.set('council', '1');
+          return response(null, { status: 303, headers: { Location: `/?${next.toString()}` } });
         }
         const councilPreview = url.searchParams.get('council') === '1';
         const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
@@ -4015,7 +4023,7 @@ export default {
           ? describeFlowExpenseMapEntryError(url.searchParams.get('reason'), url.searchParams.get('message')) : null;
         let compensationReport = section.id === 'compensation'
           ? safeSyntheticRead(() => readSyntheticCompensationReport(env.FINANCE_DB)) : null;
-        // The 'plan' page of the compensation section tries the real connect.finance-compensation.v1
+        // The compensation section's Council fallback tries the real connect.finance-compensation.v1
         // endpoint and falls back to the same synthetic fixture, labeled, via resolveCompensationReport
         // -- same live-first pattern as every resolver above, with one deliberate difference: the live
         // fetch is only ever attempted when roleResult independently confirms the viewer is
@@ -4030,21 +4038,18 @@ export default {
           ? safeSyntheticRead(() => readSyntheticCompensationBenchmarks(env.FINANCE_DB)) : null;
         let compensationBenefits = section.id === 'compensation'
           ? safeSyntheticRead(() => readSyntheticCompensationBenefits(env.FINANCE_DB)) : null;
-        // The roster editor (compensation-editor-pages.js) is admin/compensation only -- council's
-        // real editing surface stays the separate, narrower raise-plan-field overlay
-        // (COUNCIL_EDITABLE_FIELDS, api-finance.js), not this whole-roster editor. Only fetched on
-        // the Plan page itself, and only via the same fetchConnectSalaryPlannerState() relay the
-        // save route resubmits against -- it never throws, so no safeSyntheticRead wrapper is
-        // needed here (unlike the resolvers above, which can).
+        // Rates & ranges and Benchmarks give admin/compensation their settings forms; everyone else
+        // allowed into the section sees the figures. The plan is read via the same
+        // fetchConnectSalaryPlannerState() relay the save route resubmits against -- it never
+        // throws, so no safeSyntheticRead wrapper is needed here (unlike the resolvers above).
         const canEditCompensation = roleResult.ok && (roleResult.role === 'admin' || roleResult.role === 'compensation');
-        const canEditCouncilOverlay = roleResult.ok && roleResult.role === 'council' && roleResult.permissions?.compensation === 'edit';
-        // Plan and Council also show the raise projection (compensation-projection.js), so every
-        // role allowed into this section reads the saved plan there; Connect's contract applies the
+        // Council, Benefits, Benchmarks and Rates show the raise projection (compensation-projection.js),
+        // so every role allowed into this section reads the saved plan there; Connect's contract applies the
         // same role check and hides hideFromCouncil workers from council logins.
         // Chart of Accounts' Resources by Purpose also reads the plan (legacy counts each tagged
         // worker's church cost there), under the same role check as the Compensation pages.
         const accountsChartPayroll = section.id === 'accounts' && effectivePageId === 'chart' && compensationRoleVerified;
-        let compensationPlanRaw = ((section.id === 'compensation' && ['plan', 'council', 'benefits', 'benchmarks', 'rates'].includes(effectivePageId) && compensationRoleVerified) || accountsChartPayroll)
+        let compensationPlanRaw = ((section.id === 'compensation' && ['council', 'benefits', 'benchmarks', 'rates'].includes(effectivePageId) && compensationRoleVerified) || accountsChartPayroll)
           ? fetchConnectSalaryPlannerState(env, request.headers.get('Cf-Access-Jwt-Assertion') || '') : null;
         let compensationProjection = after(compensationPlanRaw, (plan) => (plan && plan.ok && plan.data
           ? buildCompensationProjection(env, plan.data, {
@@ -4053,12 +4058,6 @@ export default {
             councilView: effectivePageId === 'council' || roleResult.role === 'council',
           })
           : null));
-        const compensationEditIndex = (section.id === 'compensation' && effectivePageId === 'plan') ? (() => {
-          const raw = url.searchParams.get('edit');
-          if (raw === null) return null;
-          const n = Number(raw);
-          return Number.isInteger(n) && n >= 0 ? n : null;
-        })() : null;
         const compensationEntryStatus = section.id === 'compensation' ? url.searchParams.get('status') : null;
         const compensationEntryMessage = compensationEntryStatus === 'error'
           ? describeCompensationEntryError(url.searchParams.get('reason'), url.searchParams.get('message'))
@@ -4344,7 +4343,7 @@ export default {
           dataStatus, classification, classificationRevenueStatus, classificationRevenueMessage, classificationExpenseStatus, classificationExpenseMessage,
           importStatus, quickbooksSnapshot, daycarePreviewYear, daycarePreview, dataDaycareImportStatus, dataDaycareImportMessage, quickbooksEnabled: qbEnabled(env),
           quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, cashRunway, canManageCashPolicy, cashPolicyStatus, cashPolicyMessage,
-          compensationPlanRaw, canEditCompensation, compensationEditIndex, compensationEntryStatus, compensationEntryMessage,
+          compensationPlanRaw, canEditCompensation, compensationEntryStatus, compensationEntryMessage,
     compensationProjection,
           givingEntryStatus, givingEntryMessage, budgetEntryStatus, budgetEntryMessage, payrollBundle,
           planOpKind, planOpStatus, planOpMessage, baseProjectionEntryStatus, baseProjectionEntryMessage,

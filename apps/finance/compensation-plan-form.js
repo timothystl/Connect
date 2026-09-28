@@ -4,8 +4,9 @@
 // with hand-set figures), each year's reference figures, the health plan quote, and each worker's
 // Concordia Plans market ranges. Every function here takes the CURRENT full plan fetched from
 // Connect and returns a new full plan with one form's changes applied; shell.js resubmits it through
-// the same compensation-plan-write-v1 relay the roster editor uses, so nothing else in the plan is
-// lost. Stored shapes match legacy exactly: percentages as fractions, money as cents, per-worker
+// the compensation-plan-write-v1 relay, so nothing else in the plan is lost. Rates & ranges and
+// Benchmarks post these forms; the raise-methods and worker-field parsers served the retired
+// Plan (new view) page and remain for that relay's API. Stored shapes match legacy exactly: percentages as fractions, money as cents, per-worker
 // maps keyed by roster index, overrides as the typed dollar string.
 import { COMP_METHOD_KEYS, FIN_COMP_PLAN_KEYS, FIN_CONCORDIA_RANGE_KEYS } from './compensation-projection.js';
 import { FIN_HEALTH_TIERS } from './compensation-calc.js';
@@ -214,7 +215,7 @@ export function applyWorkerBenefitFields(w, form) {
 
 // Where a settings save sends the viewer back to.
 export function planFormReturnLocation(form, extra = {}) {
-  const page = ['plan', 'rates', 'benchmarks', 'benefits', 'council'].includes(text(form, 'return_page')) ? text(form, 'return_page') : 'plan';
+  const page = ['planner', 'rates', 'benchmarks', 'benefits', 'council'].includes(text(form, 'return_page')) ? text(form, 'return_page') : 'planner';
   const params = { section: 'compensation', page };
   const planYear = text(form, 'plan_year');
   if (/^\d{4}$/.test(planYear)) params.plan_year = planYear;

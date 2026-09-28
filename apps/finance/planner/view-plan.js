@@ -1,6 +1,8 @@
 // Header strip, tabs, and view 1 · Set pay (the method table, the base-year comparison note and
-// the selected-worker panel), ported from legacy js-finance.js finCompHeaderHtml,
-// finCompRenderPlan, finCompRender*BaselineNote and finCompRenderDrawer. Same figures, same words.
+// the selected worker's editor), ported from legacy js-finance.js finCompHeaderHtml,
+// finCompRenderPlan, finCompRender*BaselineNote and finCompRenderDrawer. Same figures, same words;
+// the editor opens full width beneath the worker's row rather than beside the table (Andrew,
+// 2026-09-28), and the table carries a Hand-set column and each worker's mileage.
 import { S, model, baseYear, targetYear, isAdmin, canEdit, canEditPlanControls, isCouncil } from './state.js';
 import { esc, money, moneySigned, pct, dollars, vsScaleText } from './format.js';
 import { act, onInput, onChange, readOnly, readOnlyUnless, option } from './ui.js';
@@ -80,7 +82,7 @@ export function headerHtml(m, totals) {
   return '<div class="fin-comp-shell">'
     + councilNote
     + '<div class="fin-comp-titlebar">'
-    + '<div><div class="fin-comp-title">Compensation Planner &mdash; FY' + targetYear() + '</div>'
+    + '<div><h2 class="fin-comp-title">FY' + targetYear() + ' compensation plan</h2>'
     + '<div class="fin-comp-subtitle">' + methodSummary(m) + '</div></div>'
     + '<div class="fin-comp-actions">' + saveStatus()
     + '<a class="btn-secondary" href="/?section=compensation&amp;page=council&amp;print=1" target="_blank" rel="noopener"' + act('printCouncil') + '>Print for Council</a>'
@@ -114,6 +116,7 @@ export function renderPlan(m, computed, totals) {
   const overrideCount = Object.keys(p.overrides).filter((k) => p.overrides[k] != null && p.overrides[k] !== '').length;
   const chips = COMP_METHOD_KEYS.map((k) => '<span class="fin-comp-chip' + (p.method === k ? ' active' : '') + '"' + act('methodAll', { k }) + '>' + esc(m.methodLabel(k)) + '</span>').join('');
   const heads = COMP_METHOD_KEYS.map((k) => '<th class="fin-comp-th num' + (p.method === k ? ' active' : '') + '"' + act('methodAll', { k }) + ' title="Apply to everyone">' + esc(m.methodLabel(k)) + '</th>').join('');
+  const columns = COMP_METHOD_KEYS.length + 4;
   const rows = roster.map((w, i) => {
     const c = computed[i];
     const cells = COMP_METHOD_KEYS.map((k) => {
@@ -124,19 +127,23 @@ export function renderPlan(m, computed, totals) {
         + (v == null ? '&mdash;' : (isEdited ? money(c.salaryCents) + ' &#9998;' : money(v))) + '</td>';
     }).join('');
     const vs = vsScaleText(c.salaryCents, c.worksheetCents);
-    const selected = i === S.selected && S.drawerOpen;
+    const open = i === S.selected && S.drawerOpen;
     const part = isPartTime(m, w);
-    return '<tr class="fin-comp-row' + (selected ? ' selected' : '') + '">'
-      + '<td class="fin-comp-td fin-comp-who"' + act('select', { i }) + '>'
-      + '<div style="font-weight:700;color:var(--color-navy);">' + esc(w.name || '(unnamed)') + '</div>'
-      + '<div style="font-size:.72rem;color:var(--warm-gray);">' + esc(w.position || 'Role not set') + ' &middot; acct ' + (w.accountCode ? esc(w.accountCode) : '&mdash;')
-      + (part ? ' &middot; <span style="color:var(--deep-amber);font-weight:700;">' + m.ftePct(w) + '% time</span>' : '')
-      + (m.isCashOnly(w) ? ' &middot; <span style="color:var(--warm-meta);">cash only</span>' : '')
-      + (m.isExternallyFunded(w) ? ' &middot; <span style="color:var(--deep-amber);font-weight:700;">paid from another budget</span>' : '') + '</div></td>'
+    const row = '<tr class="fin-comp-row' + (open ? ' selected' : '') + '">'
+      + '<td class="fin-comp-td fin-comp-who"' + act('select', { i }) + ' aria-expanded="' + open + '" title="' + (open ? 'Close' : 'Open') + ' this worker&#39;s details">'
+      + '<div class="fin-comp-who-name"><span class="fin-comp-caret" aria-hidden="true">' + (open ? '&#9662;' : '&#9656;') + '</span>' + esc(w.name || '(unnamed)') + '</div>'
+      + '<div class="fin-comp-who-meta">' + esc(w.position || 'Role not set') + ' &middot; acct ' + (w.accountCode ? esc(w.accountCode) : '&mdash;')
+      + (part ? ' &middot; <span class="fin-comp-flag">' + m.ftePct(w) + '% time</span>' : '')
+      + (m.isCashOnly(w) ? ' &middot; cash only' : '')
+      + (m.isExternallyFunded(w) ? ' &middot; <span class="fin-comp-flag">paid from another budget</span>' : '') + '</div></td>'
       + cells
-      + '<td class="fin-comp-td" style="font-size:.76rem;font-weight:600;color:' + TONE[vs.tone] + ';" title="District scale ' + (c.worksheetCents ? money(c.worksheetCents) : 'not available') + (part ? ' (pro-rated to ' + m.ftePct(w) + '% time)' : '') + '">' + vs.text + (part ? '<br><span style="font-weight:400;color:var(--warm-gray);">at ' + m.ftePct(w) + '% time</span>' : '') + '</td>'
-      + '<td class="fin-comp-td num" style="font-weight:700;">' + money(c.churchCostCents) + '</td>'
+      + handSetCell(i, c)
+      + '<td class="fin-comp-td fin-comp-vs" style="color:' + TONE[vs.tone] + ';" title="District scale ' + (c.worksheetCents ? money(c.worksheetCents) : 'not available') + (part ? ' (pro-rated to ' + m.ftePct(w) + '% time)' : '') + '">' + vs.text + (part ? '<br><span class="fin-comp-muted">at ' + m.ftePct(w) + '% time</span>' : '') + '</td>'
+      + '<td class="fin-comp-td num fin-comp-strong">' + money(c.churchCostCents) + '</td>'
       + '</tr>';
+    // The selected worker's editor opens as a full-width row beneath theirs, so the list of names
+    // never shares its width with the editor.
+    return row + (open ? '<tr class="fin-comp-editor-row"><td colspan="' + columns + '">' + drawer(m, computed) + '</td></tr>' : '');
   }).join('');
   const methodTotals = COMP_METHOD_KEYS.map((k) => {
     const t = m.countedEntries().reduce((s, e) => s + (m.methodSalaryCents(e.w, k) || 0), 0);
@@ -144,37 +151,49 @@ export function renderPlan(m, computed, totals) {
   }).join('');
   const scaleTotal = vsScaleText(totals.salaryCents, totals.worksheetCents);
   const base = m.baseSalary(targetYear());
-  const table = '<div class="fin-comp-scroll"><table class="fin-comp-table" style="min-width:760px;">'
+  const table = '<div class="fin-comp-scroll"><table class="fin-comp-table fin-comp-settable">'
     + '<thead><tr><th class="fin-comp-th">Worker</th>' + heads
+    + '<th class="fin-comp-th num" title="Type an exact FY' + targetYear() + ' salary; it wins over the method">Hand-set</th>'
     + '<th class="fin-comp-th">Vs. district scale</th><th class="fin-comp-th num">Total comp.</th></tr></thead>'
     + '<tbody>' + rows
-    + (canEdit() ? '<tr><td colspan="' + (COMP_METHOD_KEYS.length + 3) + '" style="padding:9px 6px;"><span class="fin-comp-add"' + act('addWorker') + '><span class="fin-comp-add-plus">+</span> Add a staff member</span></td></tr>' : '')
+    + (canEdit() ? '<tr class="fin-comp-addrow"><td colspan="' + columns + '"><span class="fin-comp-add"' + act('addWorker') + '><span class="fin-comp-add-plus">+</span> Add a staff member</span></td></tr>' : '')
     + '<tr class="fin-comp-total-row"><td class="fin-comp-td">Total</td>' + methodTotals
-    + '<td class="fin-comp-td" style="font-size:.76rem;font-weight:600;color:' + TONE[scaleTotal.tone] + ';" title="District scale ' + money(totals.worksheetCents) + '">' + scaleTotal.text + '</td>'
+    + '<td class="fin-comp-td num fin-comp-muted">' + (overrideCount ? overrideCount + ' hand-set' : '') + '</td>'
+    + '<td class="fin-comp-td fin-comp-vs" style="color:' + TONE[scaleTotal.tone] + ';" title="District scale ' + money(totals.worksheetCents) + '">' + scaleTotal.text + '</td>'
     + '<td class="fin-comp-td num">' + money(totals.totalCents) + '</td></tr>'
     + '</tbody></table></div>';
   // Negative values are allowed in the custom box: a pay cut.
-  const customBox = '<label class="fin-comp-inline">custom '
-    + '<input type="text" inputmode="decimal" id="cp-custom-pct" value="' + (Number(p.customPct) || 0) + '"' + onInput('customPct', {}, 'decimal') + ' style="width:52px;text-align:right;">%</label>'
-    + '<label class="fin-comp-inline">of scale '
-    + '<input type="text" inputmode="decimal" id="cp-scale-pct" value="' + (Number(p.scalePct) || 0) + '"' + onInput('scalePct', {}, 'decimal') + ' style="width:52px;text-align:right;">%</label>';
-  return '<div class="fin-comp-plan-grid' + (S.drawerOpen ? '' : ' closed') + '">'
-    + '<div class="fin-card" style="min-width:0;">'
+  const customBox = '<label class="fin-comp-inline">Custom '
+    + '<input type="text" inputmode="decimal" id="cp-custom-pct" value="' + (Number(p.customPct) || 0) + '"' + onInput('customPct', {}, 'decimal') + ' class="fin-comp-pctbox">%</label>'
+    + '<label class="fin-comp-inline">Share of scale '
+    + '<input type="text" inputmode="decimal" id="cp-scale-pct" value="' + (Number(p.scalePct) || 0) + '"' + onInput('scalePct', {}, 'decimal') + ' class="fin-comp-pctbox">%</label>';
+  return '<div class="fin-card fin-comp-plancard-main">'
     + '<div class="fin-comp-chiprow">'
     + '<span class="fin-comp-chiprow-lbl">Applied to everyone</span>'
-    + '<span style="display:flex;gap:6px;flex-wrap:wrap;">' + chips + '</span>'
+    + '<span class="fin-comp-chips">' + chips + '</span>'
     + readOnlyUnless(customBox, canEditPlanControls())
-    + '<span style="font-size:.74rem;color:var(--warm-gray);">Click a column for everyone, a cell for one person, or type an exact figure in the panel. A negative custom % is a pay cut.</span>'
-    + (overrideCount ? '<span class="fin-comp-link"' + act('clearOverrides') + '>&#8634; clear ' + overrideCount + ' hand-set figure(s)</span>' : '')
     + '</div>'
+    + '<p class="fin-comp-help">Click a column heading for everyone, a cell for one person, or type an exact figure under Hand-set. Click a name to open that worker&#39;s details. A negative custom % is a pay cut.'
+    + (overrideCount ? ' <span class="fin-comp-link"' + act('clearOverrides') + '>&#8634; Clear ' + overrideCount + ' hand-set figure' + (overrideCount === 1 ? '' : 's') + '</span>' : '')
+    + '</p>'
     + table
     + baselineNote(m, totals)
     + '<div class="fin-comp-cardfoot">'
-    + '<span style="font-size:.74rem;color:var(--warm-gray);">District Scale = the District Compensation Worksheet &mdash; base $' + dollars(base.dollars) + ' &times; each worker&#39;s role/experience multiplier. <span class="fin-comp-link"' + act('view', { v: 'rates' }) + '>Rates for this year</span></span>'
+    + '<span class="fin-comp-muted">District Scale = the District Compensation Worksheet &mdash; base $' + dollars(base.dollars) + ' &times; each worker&#39;s role/experience multiplier. <span class="fin-comp-link"' + act('view', { v: 'rates' }) + '>Rates for this year</span></span>'
     + '<button type="button" class="btn-primary"' + act('view', { v: 'fairness' }) + '>Next: check fairness &rarr;</button>'
-    + '</div></div>'
-    + (S.drawerOpen && roster[S.selected] ? drawer(m, computed) : '')
-    + '</div>';
+    + '</div></div>';
+}
+
+// The Set pay table's Hand-set column (the retired Plan (new view)'s "Hand-set salary"): an exact
+// FY salary for one worker, which wins over their method, and a one-click way back to the method.
+function handSetCell(i, c) {
+  const typed = S.plan.overrides[i];
+  const set = c.overridden;
+  const box = '<input type="text" inputmode="numeric" id="cp-handset-' + i + '" value="' + esc(set ? typed : '') + '" placeholder="&mdash;"'
+    + onInput('override', { i }, 'whole') + ' class="fin-comp-handset' + (set ? ' set' : '') + '" aria-label="Hand-set FY' + targetYear() + ' salary for ' + esc(S.plan.roster[i].name || 'this worker') + '">';
+  return '<td class="fin-comp-td num fin-comp-handset-cell' + (set ? ' edited' : '') + '"><span class="fin-comp-dollarbox"><span>$</span>' + readOnly(box)
+    + (set && canEdit() ? '<span class="fin-comp-link fin-comp-clear"' + act('clearOverride', { i }) + ' title="Back to the method figure" aria-label="Clear the hand-set salary">&#8634;</span>' : '')
+    + '</span></td>';
 }
 
 function basisPicker() {
@@ -315,8 +334,9 @@ function accountOptions(selectedCode) {
 
 const payRow = (label, value) => '<div class="fin-comp-payrow"><span>' + label + '</span><b>' + value + '</b></div>';
 
-// The worker panel. Rebuilt wholesale on every render so every select and checkbox follows the
-// selected worker.
+// The worker's editor, opened full width beneath their row in the Set pay table: who they are
+// and how they are paid for, the District Compensation Worksheet inputs, and what the church pays.
+// Rebuilt wholesale on every render so every select and checkbox follows the selected worker.
 function drawer(m, computed) {
   const i = S.selected;
   const w = S.plan.roster[i];
@@ -358,13 +378,16 @@ function drawer(m, computed) {
   const overridden = c.overridden;
   const part = isPartTime(m, w);
   const cashOnly = m.isCashOnly(w);
+  const external = m.isExternallyFunded(w);
   const salaryBox = '<input type="text" inputmode="decimal" id="cp-salary-' + i + '" value="' + esc(overridden ? S.plan.overrides[i] : Math.round(c.salaryCents / 100)) + '"' + onInput('override', d, 'whole') + ' class="fin-comp-salary' + (overridden ? ' set' : '') + '">';
+  const mileageSet = Number(w.mileageCents) > 0;
+  const mileageBox = '<input type="text" inputmode="numeric" id="cp-mileage-' + i + '" value="' + (mileageSet ? Math.round(w.mileageCents / 100) : '') + '" placeholder="0"' + onInput('mileage', d, 'whole') + ' class="fin-comp-salary' + (mileageSet ? ' set' : '') + '" aria-label="Mileage, dollars a year">';
   // Each part escaped on its own, then joined with separator markup.
   const meta = [w.position, (Number(w.yearsExperience) || 0) + ' yrs', educationLabel(w), trackSet && trackSet[w.trackKey] ? trackSet[w.trackKey].label : '', w.accountCode ? 'budget line ' + w.accountCode : 'no budget line']
     .filter(Boolean).map((part2) => esc(String(part2).replace(/&#39;/g, "'"))).join(' &middot; ');
   const base = m.baseSalary(targetYear());
   const tier = m.healthTier(w);
-  const fields = '<div class="fin-comp-fieldgrid">'
+  const who = '<div class="fin-comp-fieldgrid">'
     + '<label class="fin-comp-field">Name<input type="text" id="cp-name-' + i + '" value="' + esc(w.name || '') + '"' + onInput('field', { i, f: 'name' }) + '></label>'
     + '<label class="fin-comp-field">Position<input type="text" id="cp-position-' + i + '" value="' + esc(w.position || '') + '"' + onInput('field', { i, f: 'position' }) + '></label>'
     + '<label class="fin-comp-field wide">Budget line<select' + onChange('field', { i, f: 'accountCode' }) + '>' + acctOptions + '</select></label>'
@@ -375,7 +398,7 @@ function drawer(m, computed) {
         + '</select></label>'
       : '')
     + '<label class="fin-comp-field wide">FY' + baseYear() + ' current pay'
-    + '<span style="display:inline-flex;align-items:center;gap:8px;">'
+    + '<span class="fin-comp-inputrow">'
     + '<input type="text" inputmode="decimal" id="cp-curpay-' + i + '" value="' + (payEntered ? Math.round(w.actualSalaryCents / 100) : '') + '" placeholder="' + (acctPayCents != null ? Math.round(acctPayCents / 100) : 'not set') + '"' + onInput('currentPay', d, 'whole') + ' class="fin-comp-curpay' + (payEntered ? ' set' : '') + '">'
     + (payEntered ? '<span class="fin-comp-link"' + act('clearCurrentPay', d) + '>&#8634; use the budget line</span>' : '')
     + '</span></label>'
@@ -387,59 +410,63 @@ function drawer(m, computed) {
         ? 'FY' + baseYear() + ' current pay reads the whole Budget figure on ' + esc(w.accountCode) + '. If other staff are paid from that same line, type this worker&#39;s own wage above instead.'
         : 'Not linked and nothing entered &mdash; current pay reads as $0, so &ldquo;no raise&rdquo; and every % growth will too. Link a budget line or type the wage above.')
     + '</div>'
-    + '<div class="fin-comp-drawer-h">District Compensation Worksheet inputs</div>'
-    + '<div class="fin-comp-fieldgrid">'
+    + '<label class="fin-comp-inline-check block"><input type="checkbox"' + onChange('toggle', { i, f: 'cashOnly' }) + (cashOnly ? ' checked' : '') + '> Cash salary only &mdash; no pension, disability or health</label>'
+    + '<label class="fin-comp-inline-check block"><input type="checkbox"' + onChange('toggle', { i, f: 'externallyFunded' }) + (external ? ' checked' : '') + '> Paid from another budget &mdash; keep on the roster but leave out of every church figure</label>'
+    + (external ? '<div class="fin-comp-note warn">Costed elsewhere: this worker is in no total on this tab or in the Council report. The FY' + baseYear() + ' comparison figure still comes from the church payroll accounts as they stand.</div>' : '')
+    + '<label class="fin-comp-inline-check block"><input type="checkbox"' + onChange('toggle', { i, f: 'hideFromCouncil' }) + (w.hideFromCouncil ? ' checked' : '') + '> Hide entirely from the council view &mdash; not shown, not on the Council report, not to a council login</label>'
+    + (w.hideFromCouncil ? '<div class="fin-comp-note warn">Hidden from council: this worker never appears in any Compensation Planner view or report a council member or the Council summary/print shows, and a council-role login never receives this row at all.</div>' : '')
+    + (cashOnly
+      ? '<div class="fin-comp-note">Concordia&rsquo;s plans have an hours floor, so a very part-time worker draws none of them. Employer FICA still applies &mdash; it is owed on any wage however few the hours.</div>'
+      : (part ? '<div class="fin-comp-note">At ' + m.ftePct(w) + '% of full time this worker is still shown as benefits-eligible. Tick the box above if they are not.</div>' : ''));
+  const worksheet = '<div class="fin-comp-fieldgrid">'
     + '<label class="fin-comp-field">Role<select' + onChange('role', d) + '>'
     + option('pastor', 'Pastor', w.role === 'pastor') + option('commissioned', 'Commissioned', w.role === 'commissioned') + option('other', 'Other worker', w.role === 'other')
     + '</select></label>'
     + eduField + trackField
     + '<label class="fin-comp-field">Years of service<input type="text" inputmode="numeric" id="cp-years-' + i + '" value="' + (Number(w.yearsExperience) || 0) + '"' + onInput('years', d, 'whole') + '></label>'
     + attendanceField + stipendField + stipendPctField
-    + '<label class="fin-comp-field">Time worked<span style="display:inline-flex;align-items:center;gap:4px;"><input type="text" inputmode="decimal" id="cp-fte-' + i + '" value="' + m.ftePct(w) + '"' + onInput('fte', d, 'decimal') + '><span style="color:var(--warm-gray);white-space:nowrap;">% of full time</span></span></label>'
+    + '<label class="fin-comp-field">Time worked<span class="fin-comp-inputrow"><input type="text" inputmode="decimal" id="cp-fte-' + i + '" value="' + m.ftePct(w) + '"' + onInput('fte', d, 'decimal') + '><span class="fin-comp-muted">% of full time</span></span></label>'
     + '<label class="fin-comp-field">Health coverage<select' + onChange('healthTier', d) + (cashOnly ? ' disabled' : '') + '>'
     + FIN_HEALTH_TIERS.map((t) => option(t.key, esc(t.label), tier === t.key)).join('')
     + option('optout', 'Opts out (cash)', tier === 'optout')
     + '</select></label>'
     + '</div>'
-    + '<label class="fin-comp-inline-check block"><input type="checkbox"' + onChange('toggle', { i, f: 'cashOnly' }) + (cashOnly ? ' checked' : '') + '> Cash salary only &mdash; no pension, disability or health</label>'
-    + '<label class="fin-comp-inline-check block"><input type="checkbox"' + onChange('toggle', { i, f: 'externallyFunded' }) + (m.isExternallyFunded(w) ? ' checked' : '') + '> Paid from another budget &mdash; keep on the roster but leave out of every church figure</label>'
-    + (m.isExternallyFunded(w) ? '<div style="font-size:.72rem;color:var(--deep-amber);margin-top:4px;">Costed elsewhere: this worker is in no total on this tab or in the Council report. The FY' + baseYear() + ' comparison figure still comes from the church payroll accounts as they stand.</div>' : '')
-    + '<label class="fin-comp-inline-check block"><input type="checkbox"' + onChange('toggle', { i, f: 'hideFromCouncil' }) + (w.hideFromCouncil ? ' checked' : '') + '> Hide entirely from the council view &mdash; not shown, not on the Council report, not to a council login</label>'
-    + (w.hideFromCouncil ? '<div style="font-size:.72rem;color:var(--deep-amber);margin-top:4px;">Hidden from council: this worker never appears in any Compensation Planner view or report a council member or the Council summary/print shows, and a council-role login never receives this row at all.</div>' : '')
-    + (cashOnly
-      ? '<div class="fin-comp-note">Concordia&rsquo;s plans have an hours floor, so a very part-time worker draws none of them. Employer FICA still applies &mdash; it is owed on any wage however few the hours.</div>'
-      : (part ? '<div class="fin-comp-note">At ' + m.ftePct(w) + '% of full time this worker is still shown as benefits-eligible. Tick the box above if they are not.</div>' : ''))
     + '<div class="fin-comp-note">' + roleNote + '</div>' + stipendNote;
-  const notEligible = '<span style="color:var(--warm-gray);font-weight:400;">not eligible</span>';
-  return '<div class="fin-card fin-comp-drawer">'
+  const notEligible = '<span class="fin-comp-muted">not eligible</span>';
+  const pays = '<div class="fin-comp-bar page"><span>FY' + targetYear() + ' salary' + (overridden ? ' <span class="fin-comp-badge">hand-set</span>' : '') + '</span><span class="fin-comp-inputrow"><span class="fin-comp-muted">$</span>'
+    + readOnly(salaryBox)
+    + (overridden && canEdit() ? '<span class="fin-comp-link"' + act('clearOverride', d) + ' title="Back to the method figure">&#8634;</span>' : '') + '</span></div>'
+    + '<div class="fin-comp-bar page"><span>Mileage ($/yr)</span><span class="fin-comp-inputrow"><span class="fin-comp-muted">$</span>' + readOnly(mileageBox) + '</span></div>'
+    + '<div class="fin-comp-note">Annual mileage reimbursement or car allowance. A church cost, but not wages: no pension, disability or FICA is figured on it.' + (external ? ' Left out here while this worker is paid from another budget.' : '') + '</div>'
+    + '<div class="fin-comp-paylist">'
+    + payRow('Cash salary', money(c.salaryCents))
+    + payRow('Pension ' + (b.cashOnly ? '' : pct(m.pensionRate(targetYear()).rate)), b.cashOnly ? notEligible : money(b.pensionCents))
+    + payRow('Health', b.cashOnly ? notEligible : money(b.healthCents))
+    + payRow('Disability' + (b.cashOnly ? '' : ' <label class="fin-comp-inline-check">' + readOnly('<input type="checkbox"' + onChange('toggle', { i, f: 'hasDependents' }) + (w.hasDependents ? ' checked' : '') + '>') + ' dependents</label>'), b.cashOnly ? notEligible : money(b.disabilityCents))
+    + payRow('Employer FICA <label class="fin-comp-inline-check">' + readOnly('<input type="checkbox"' + onChange('toggle', { i, f: 'selfEmployedFica' }) + (w.selfEmployedFica ? ' checked' : '') + '>') + ' minister</label>', money(b.ficaCents))
+    + (b.mileageCents ? payRow('Mileage', money(b.mileageCents)) : '')
+    + (w.selfEmployedFica ? '<div class="fin-comp-seca"><span>Employer half the worker covers themselves &mdash; ' + pct(m.ficaRate()) + ' of ' + money(c.salaryCents) + '<br><span class="fin-comp-muted">As a minister they pay SECA, so this employer share comes out of their own pay. It is in no total below. The employee half is not shown; everyone pays that.</span></span><b style="color:var(--deep-amber);">&minus;' + money(b.secaSelfCents) + '</b></div>' : '')
+    + '<div class="fin-comp-payrow total"><span>Total</span><b>' + money(c.churchCostCents) + '</b></div>'
+    + '</div>'
+    + (canEdit() ? '<button type="button" class="btn-secondary fin-comp-remove"' + act('removeWorker', d) + '>Remove this worker</button>' : '');
+  return '<div class="fin-comp-drawer">'
     + '<div class="fin-comp-drawer-hd">'
     + '<div><div class="fin-comp-chiprow-lbl">Selected worker</div>'
     + '<div class="fin-comp-drawer-name">' + esc(w.name || '(unnamed)') + '</div>'
     + '<div class="fin-comp-note">' + meta + '</div></div>'
-    + '<span class="fin-comp-close"' + act('closeDrawer') + ' aria-label="Close panel">&times;</span></div>'
     + '<div class="fin-comp-tiles">'
     + '<div class="fin-comp-tile"><span class="fin-comp-tile-lbl">FY' + baseYear() + '</span><span class="fin-comp-tile-val">' + money(c.currentCents) + '</span></div>'
     + '<div class="fin-comp-tile teal"><span class="fin-comp-tile-lbl">FY' + targetYear() + '</span><span class="fin-comp-tile-val">' + money(c.salaryCents) + '</span></div>'
     + '<div class="fin-comp-tile"><span class="fin-comp-tile-lbl">Per paycheck</span><span class="fin-comp-tile-val">' + money(c.salaryCents / FIN_SALARY_PAY_PERIODS) + '</span></div>'
     + '<div class="fin-comp-tile"><span class="fin-comp-tile-lbl">Church cost</span><span class="fin-comp-tile-val">' + money(c.churchCostCents) + '</span></div>'
     + '</div>'
-    + readOnly(fields)
-    + '<div class="fin-comp-bar cream"><span>District Compensation Worksheet result' + (part ? ' <span style="font-size:.72rem;">at ' + m.ftePct(w) + '% time</span>' : '') + '</span><b>$' + dollars(base.dollars) + ' &times; ' + multiplier(w).toFixed(3) + (part ? ' &times; ' + m.ftePct(w) + '%' : '') + ' = ' + (c.worksheetCents == null ? '&mdash;' : money(c.worksheetCents)) + '</b></div>'
-    + '<div class="fin-comp-bar page"><span>FY' + targetYear() + ' salary</span><span style="display:inline-flex;align-items:center;gap:8px;"><span style="color:var(--warm-gray);">$</span>'
-    + readOnly(salaryBox)
-    + (overridden ? '<span class="fin-comp-link"' + act('clearOverride', d) + ' title="Back to the method figure">&#8634;</span>' : '') + '</span></div>'
-    + '<div class="fin-comp-paylist">'
-    + '<div class="fin-comp-drawer-h" style="border-top:1px solid var(--warm-row-divider);padding-top:12px;">What the church pays</div>'
-    + payRow('Cash salary', money(c.salaryCents))
-    + payRow('Pension ' + (b.cashOnly ? '' : pct(m.pensionRate(targetYear()).rate)), b.cashOnly ? notEligible : money(b.pensionCents))
-    + payRow('Health', b.cashOnly ? notEligible : money(b.healthCents))
-    + payRow('Disability' + (b.cashOnly ? '' : ' <label class="fin-comp-inline-check">' + readOnly('<input type="checkbox"' + onChange('toggle', { i, f: 'hasDependents' }) + (w.hasDependents ? ' checked' : '') + '>') + ' dependents</label>'), b.cashOnly ? notEligible : money(b.disabilityCents))
-    + payRow('Employer FICA <label class="fin-comp-inline-check">' + readOnly('<input type="checkbox"' + onChange('toggle', { i, f: 'selfEmployedFica' }) + (w.selfEmployedFica ? ' checked' : '') + '>') + ' minister</label>', money(b.ficaCents))
-    + (w.selfEmployedFica ? '<div class="fin-comp-seca"><span>Employer half the worker covers themselves &mdash; ' + pct(m.ficaRate()) + ' of ' + money(c.salaryCents) + '<br><span style="font-size:.7rem;color:var(--warm-meta);">As a minister they pay SECA, so this employer share comes out of their own pay. It is in no total below. The employee half is not shown; everyone pays that.</span></span><b style="color:var(--deep-amber);">&minus;' + money(b.secaSelfCents) + '</b></div>' : '')
-    + '<div class="fin-comp-payrow total"><span>Total</span><b>' + money(c.churchCostCents) + '</b></div>'
-    + '</div>'
-    + (canEdit() ? '<button type="button" class="btn-secondary fin-comp-remove"' + act('removeWorker', d) + '>Remove this worker</button>' : '')
-    + '</div>';
+    + '<span class="fin-comp-close"' + act('closeDrawer') + ' aria-label="Close panel" title="Close">&times;</span></div>'
+    + '<div class="fin-comp-drawer-cols">'
+    + '<section><div class="fin-comp-drawer-h">Worker &amp; budget line</div>' + readOnly(who) + '</section>'
+    + '<section><div class="fin-comp-drawer-h">District Compensation Worksheet inputs</div>' + readOnly(worksheet)
+    + '<div class="fin-comp-bar cream"><span>Worksheet result' + (part ? ' <span class="fin-comp-muted">at ' + m.ftePct(w) + '% time</span>' : '') + '</span><b>$' + dollars(base.dollars) + ' &times; ' + multiplier(w).toFixed(3) + (part ? ' &times; ' + m.ftePct(w) + '%' : '') + ' = ' + (c.worksheetCents == null ? '&mdash;' : money(c.worksheetCents)) + '</b></div></section>'
+    + '<section><div class="fin-comp-drawer-h">What the church pays</div>' + pays + '</section>'
+    + '</div></div>';
 }
 
 export { healthTierLabel };

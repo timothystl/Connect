@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import worker from '../apps/finance/shell.js';
 
 // Council raise projections in Finance (Andrew, 2026-09-25): the Council page renders legacy's full
-// Council report from the saved plan and the base year's church ledger, and the Plan page shows the
-// projection under the editor or council draft. Synthetic people and figures only.
+// Council report from the saved plan and the base year's church ledger. Synthetic people and
+// figures only.
 
 const PLAN = {
   roster: [
@@ -126,20 +126,28 @@ describe('Council page: the full council report', () => {
   });
 });
 
-describe('Plan page projection', () => {
-  it('shows admins the projection under the roster editor, noting hidden workers', async () => {
-    const { html } = await get('/?section=compensation&page=plan&plan_year=2027', env());
-    expect(html).toContain('Projected salaries');
-    expect(html).toContain('Hidden B');
-    expect(html).toContain('Includes 1 worker hidden from council');
+describe('Mileage on the Council report and Benefits & taxes', () => {
+  const withMileage = { ...PLAN, roster: PLAN.roster.map((w, i) => (i === 0 ? { ...w, mileageCents: 180000 } : w)) };
+
+  it('lists a Mileage line and the worker’s mileage in the Council report', async () => {
+    const { html } = await get('/?section=compensation&page=council&plan_year=2027', env({ plan: withMileage }));
+    expect(html).toContain('<td>Mileage<br><small>annual mileage reimbursement or car allowance');
+    expect(html).toContain('<tr><td>Mileage</td><td class="num">$1,800</td></tr>');
+    const without = await get('/?section=compensation&page=council&plan_year=2027', env());
+    expect(without.html).not.toContain('Mileage');
   });
 
-  it('shows a council member the projection under their draft', async () => {
-    const councilPlan = { ...PLAN, roster: PLAN.roster.filter((w) => !w.hideFromCouncil), compPerWorkerMethod: { 1: 'custom' } };
-    const { html } = await get('/?section=compensation&page=plan&plan_year=2027', env({ role: 'council', plan: councilPlan }));
-    expect(html).toContain('Your raise-plan draft');
-    expect(html).toContain('Projected salaries under your draft');
-    expect(html).not.toContain('hidden from council');
+  it('adds a Mileage column to Benefits & taxes only when someone has mileage', async () => {
+    const { html } = await get('/?section=compensation&page=benefits&plan_year=2027', env({ plan: withMileage }));
+    expect(html).toContain('<th class="num">Mileage</th>');
+    const without = await get('/?section=compensation&page=benefits&plan_year=2027', env());
+    expect(without.html).not.toContain('<th class="num">Mileage</th>');
+  });
+
+  it('sends the retired Plan page to the Planner', async () => {
+    const res = await worker.fetch(new Request('https://finance.test/?section=compensation&page=plan&plan_year=2027', { headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt' } }), env());
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe('/?section=compensation&page=planner');
   });
 });
 

@@ -167,7 +167,7 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
       { id: 'compensation-link', label: 'Compensation', status: 'live' },
     ],
   },
-  // 'plan', 'council', 'benefits' and 'benchmarks' are built from the saved compensation plan
+  // 'planner', 'council', 'benefits', 'benchmarks' and 'rates' are built from the saved compensation plan
   // (LCMS Missouri District tables, Concordia Plans rates and health quote, each worker's Concordia
   // Compensation Decision Support ranges) for the roles allowed to read it (admin/council/
   // compensation -- see COMPENSATION_LIVE_ALLOWED_ROLES); other roles keep the synthetic fixture.
@@ -176,7 +176,6 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     capabilities: ['salary planning', 'benefits', 'district comparisons', 'council report'],
     pages: [
       { id: 'planner', label: 'Planner', status: 'live' },
-      { id: 'plan', label: 'Plan (new view)', status: 'live' },
       { id: 'benefits', label: 'Benefits & taxes', status: 'live' },
       { id: 'benchmarks', label: 'Benchmarks', status: 'live' },
       { id: 'rates', label: 'Rates & ranges', status: 'live' },

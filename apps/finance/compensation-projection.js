@@ -24,6 +24,10 @@
 //     viewer's browser clock.
 //   - FIN_CONCORDIA_SEED_BY_NAME is not applied (see compensation-calc.js's header); Concordia
 //     ranges come only from what is saved on each roster row.
+//   - Mileage is Finance's own addition (legacy had none): each worker's annual mileageCents is a
+//     church cost in benefits().totalCents and a "mileage" benefitBreakdown row, never a base for
+//     pension, disability or FICA, and mileage/auto/travel allowance accounts count on the ledger
+//     basis. With no mileage entered, every figure is legacy's.
 import {
   finLcmsBaseSalaryCents, finHealthOptOutCentsFor, finComputeLcmsSalary, finRoundSalaryCents,
   finConcordiaPensionRateFor, finConcordiaDisabilityRateFor, finHealthTierMonthlyCents,
@@ -42,8 +46,13 @@ export const FIN_CONCORDIA_RANGE_KEYS = [
 const FIN_REVENUE_CLASSES = { 'Income': true, 'Other Income': true };
 const FIN_CHURCH_CLASS_ORDER = { 'Income': 0, 'Other Income': 1, 'Cost of Goods Sold': 2, 'Expenses': 3, 'Other Expenses': 4 };
 // Legacy FIN_COMP_BASELINE_RE / FIN_COMP_POOLED_RE, verbatim (see their comments there).
+// Finance adds mileage: an account named for mileage, a car/auto/vehicle allowance or travel
+// reimbursement is counted with the pooled costs, where the plan's mileage line sits.
+const FIN_COMP_MILEAGE_RE = /mileage|\b(auto|car|vehicle)\b.*\b(allowance|reimb)|\btravel\b.*\b(allowance|reimb)/i;
 const FIN_COMP_BASELINE_RE = /salar|payroll|compensation|wages|health|medical|dental|vision|disabilit|pension|retirement|\bfica\b|social security/i;
 const FIN_COMP_POOLED_RE = /health|medical|dental|vision|disabilit|pension|retirement|\bfica\b|social security|tax/i;
+const isCompBaselineAccount = (label) => FIN_COMP_BASELINE_RE.test(label) || FIN_COMP_MILEAGE_RE.test(label);
+const isPooledAccount = (label) => FIN_COMP_POOLED_RE.test(label) || FIN_COMP_MILEAGE_RE.test(label);
 
 function clone(value) { return value == null ? value : JSON.parse(JSON.stringify(value)); }
 function isObject(value) { return value != null && typeof value === 'object' && !Array.isArray(value); }
@@ -345,6 +354,14 @@ export function createCompensationModel({ plan, targetYear, baseYear = targetYea
     if (ov != null) return ov;
     return methodSalaryCents(w, methodFor(i));
   }
+  // Mileage (Andrew, 2026-09-28): an annual mileage reimbursement or car allowance typed per
+  // worker, in dollars a year. A church cost on top of pay, but not wages, so no pension,
+  // disability or FICA is figured on it; a worker paid from another budget carries none here.
+  function mileageCents(w) {
+    if (isExternallyFunded(w)) return 0;
+    const n = Number(w && w.mileageCents);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+  }
   function benefits(w, salary, opts) {
     const year = (opts && opts.year != null) ? opts.year : targetYear;
     const planOption = (opts && opts.planOption) || selectedOption;
@@ -356,9 +373,10 @@ export function createCompensationModel({ plan, targetYear, baseYear = targetYea
     const pensionCents = cashOnly ? 0 : Math.round(salary * pRate);
     const disabilityCents = cashOnly ? 0 : Math.round(salary * dRate);
     const ficaCents = w.selfEmployedFica ? 0 : Math.round(salary * fRate);
+    const mileage = mileageCents(w);
     return {
-      pensionCents, disabilityCents, healthCents, ficaCents, secaSelfCents: Math.round(salary * fRate), cashOnly,
-      totalCents: pensionCents + disabilityCents + healthCents + ficaCents,
+      pensionCents, disabilityCents, healthCents, ficaCents, mileageCents: mileage, secaSelfCents: Math.round(salary * fRate), cashOnly,
+      totalCents: pensionCents + disabilityCents + healthCents + ficaCents + mileage,
     };
   }
   function computeAll() {
@@ -392,12 +410,12 @@ export function createCompensationModel({ plan, targetYear, baseYear = targetYea
       if (!code) return;
       (rosterByCode[code] = rosterByCode[code] || []).push(e.w.name || '(unnamed)');
     });
-    const rows = leaves.filter((n) => FIN_COMP_BASELINE_RE.test(n.label || '')).map((n) => {
+    const rows = leaves.filter((n) => isCompBaselineAccount(n.label || '')).map((n) => {
       const label = n.label || '';
       const actual = n.totalActualCents || 0;
       const codeMatch = String(label).match(/^\s*(\d{3,8})/);
       const code = codeMatch ? codeMatch[1] : '';
-      const row = { label, code, kind: FIN_COMP_POOLED_RE.test(label) ? 'benefit' : 'salary', rosterNames: rosterByCode[code] || [] };
+      const row = { label, code, kind: isPooledAccount(label) ? 'benefit' : 'salary', rosterNames: rosterByCode[code] || [] };
       if (n.hasBudgetInfo && n.totalBudgetCents) { row.cents = n.totalBudgetCents; row.basis = 'budget'; }
       else if (actual && prorated) { row.cents = Math.round(actual * (52 / weeks)); row.basis = 'annualized'; }
       else { row.cents = actual; row.basis = 'actual'; }
@@ -450,6 +468,7 @@ export function createCompensationModel({ plan, targetYear, baseYear = targetYea
       currentCents: counted.reduce((s, c) => s + c.currentCents, 0),
       worksheetCents: counted.reduce((s, c) => s + (c.worksheetCents || 0), 0),
       healthCents: counted.reduce((s, c) => s + c.benefits.healthCents, 0),
+      mileageCents: counted.reduce((s, c) => s + c.benefits.mileageCents, 0),
     };
   }
 
@@ -521,6 +540,9 @@ export function createCompensationModel({ plan, targetYear, baseYear = targetYea
         rate: disabilityRate(targetYear, false).rate, rateWithDependents: disabilityRate(targetYear, true).rate },
       { key: 'fica', cents: sum((b) => b.ficaCents), people: count((b) => b.ficaCents > 0), rate: ficaRate() },
     ];
+    // Listed only when someone has mileage, so a plan without any reads as it always has.
+    const mileage = sum((b) => b.mileageCents);
+    if (mileage) rows.push({ key: 'mileage', cents: mileage, people: count((b) => b.mileageCents > 0) });
     return {
       rows,
       totalCents: rows.reduce((t, r) => t + r.cents, 0),
@@ -547,7 +569,7 @@ export function createCompensationModel({ plan, targetYear, baseYear = targetYea
     healthTier, isExternallyFunded, isCashOnly, countedEntries, externallyFundedWorkers,
     enrollmentCounts, enrolledCount, workerHealthCents, fte, ftePct,
     accountBudgetCentsForCode, currentPayCents, worksheetCents, methodSalaryCents, methodLabel, methodLongLabel,
-    methodFor, overrideCents, salaryCents, benefits, computeAll, ledgerBaselineDetail, rosterBaselineDetail,
+    methodFor, overrideCents, salaryCents, mileageCents, benefits, computeAll, ledgerBaselineDetail, rosterBaselineDetail,
     activeBaseline, totals, usableRanges, lcmsRange, vsScale, verdict, medianTotal, fullScaleGap,
     benefitBreakdown, planQuoteField, perHouseholdDiffCents, healthPlanTotal, tierMonthlyCents,
   };

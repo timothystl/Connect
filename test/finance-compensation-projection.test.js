@@ -132,16 +132,26 @@ function runLegacy(saved, { basis, councilView = false } = {}) {
   return JSON.parse(JSON.stringify(councilView ? ctx.finCompWithCouncilRoster(run) : run()));
 }
 
+// Mileage is Finance's own addition, which legacy never had; with none entered it is $0 everywhere,
+// so it is set aside before comparing shapes.
+function withoutMileage(value) {
+  if (Array.isArray(value)) return value.map(withoutMileage);
+  if (!value || typeof value !== 'object') return value;
+  const out = {};
+  for (const [k, v] of Object.entries(value)) if (!(k === 'mileageCents' && v === 0)) out[k] = withoutMileage(v);
+  return out;
+}
+
 function runPort(saved, { basis, councilView = false } = {}) {
   const { model, computed, totals } = projectCompensation({
     saved: { ...saved, compBaseYearBasis: basis }, targetYear: TARGET, baseYear: BASE, baseAccounts: BASE_ACCOUNTS, councilView,
   });
-  const t = JSON.parse(JSON.stringify(totals));
+  const t = withoutMileage(JSON.parse(JSON.stringify(totals)));
   delete t.baseline.available;
   if (t.baseline.basis === 'ledger') delete t.baseline.basis;
   const bd = model.benefitBreakdown(computed);
   return {
-    computed: JSON.parse(JSON.stringify(computed)), totals: t, gap: model.fullScaleGap(computed),
+    computed: withoutMileage(JSON.parse(JSON.stringify(computed))), totals: t, gap: model.fullScaleGap(computed),
     breakdown: { cents: bd.rows.map((r) => [r.cents, r.people]), totalCents: bd.totalCents, secaSelfCents: bd.secaSelfCents, countedCount: bd.countedCount },
     enrolled: model.enrolledCount(),
     perHousehold: ['option1', 'option2', 'option3'].map((k) => model.perHouseholdDiffCents('renewal', k)),
@@ -259,5 +269,57 @@ describe('model helpers', () => {
     const model = createCompensationModel({ plan: normalizeCompensationPlan({ roster: [] }, TARGET), targetYear: TARGET });
     const computed = model.computeAll();
     expect(model.totals(computed).totalCents).toBe(0);
+  });
+});
+
+// Mileage (Finance only): an annual allowance per worker that the church pays but that is not
+// wages, so it adds to church cost and benefits without moving pension, disability or FICA.
+describe('mileage', () => {
+  const worker = { name: 'Test Driver', role: 'other', trackKey: 'secretary', yearsExperience: 2, actualSalaryCents: 4000000, hasDependents: false, healthTier: 'optout', healthMode: 'optout', healthEnrolled: false };
+  const project = (roster) => projectCompensation({ saved: { roster, compMethod: 'none' }, targetYear: TARGET, baseYear: BASE, baseAccounts: null });
+
+  it('adds to church cost and totals but is no base for FICA, pension or disability', () => {
+    const without = project([worker]);
+    const withMileage = project([{ ...worker, mileageCents: 240000 }]);
+    const a = without.computed[0], b = withMileage.computed[0];
+    expect(b.salaryCents).toBe(a.salaryCents);
+    expect(b.benefits.ficaCents).toBe(a.benefits.ficaCents);
+    expect(b.benefits.pensionCents).toBe(a.benefits.pensionCents);
+    expect(b.benefits.disabilityCents).toBe(a.benefits.disabilityCents);
+    expect(b.benefits.mileageCents).toBe(240000);
+    expect(b.benefits.totalCents).toBe(a.benefits.totalCents + 240000);
+    expect(b.churchCostCents).toBe(a.churchCostCents + 240000);
+    expect(withMileage.totals.mileageCents).toBe(240000);
+    expect(withMileage.totals.totalCents).toBe(without.totals.totalCents + 240000);
+    // The same allowance both years, so "no raise" still lands at no change on the roster basis.
+    expect(withMileage.totals.deltaCents).toBe(without.totals.deltaCents);
+  });
+
+  it('counts for a cash-only worker, not for one paid from another budget', () => {
+    expect(project([{ ...worker, cashOnly: true, mileageCents: 100000 }]).computed[0].benefits.mileageCents).toBe(100000);
+    const external = project([{ ...worker, externallyFunded: true, mileageCents: 100000 }]);
+    expect(external.computed[0].benefits.mileageCents).toBe(0);
+    expect(external.totals.totalCents).toBe(0);
+  });
+
+  it('adds a Mileage breakdown row only when someone has mileage', () => {
+    const none = project([worker]);
+    expect(none.model.benefitBreakdown(none.computed).rows.map((r) => r.key)).toEqual(['pension', 'health', 'disability', 'fica']);
+    const some = project([worker, { ...worker, name: 'Test Rider', mileageCents: 150000 }]);
+    const bd = some.model.benefitBreakdown(some.computed);
+    expect(bd.rows.at(-1)).toEqual({ key: 'mileage', cents: 150000, people: 1 });
+    expect(bd.totalCents).toBe(some.totals.benefitsCents);
+  });
+
+  it('counts a mileage or car allowance account with the pooled costs on the ledger basis', () => {
+    const account = (code, name, budgetCents) => ({ classification: 'Expenses', categoryPath: `Expenses:${code} ${name}`, accountName: `${code} ${name}`, depth: 0, hasChildren: false, actualCents: 0, budgetCents, source: 'import' });
+    const accounts = [
+      account('58001', 'Staff Salary', 4000000), account('58050', 'Mileage Reimbursement', 240000),
+      account('58051', 'Pastor Car Allowance', 100000), account('61000', 'Youth Trip Buses', 500000),
+    ];
+    const { totals } = projectCompensation({ saved: { roster: [{ ...worker, accountCode: '58001' }], compBaseYearBasis: 'ledger' }, targetYear: TARGET, baseYear: BASE, baseAccounts: accounts });
+    const kinds = Object.fromEntries(totals.baseline.rows.map((r) => [r.code, r.kind]));
+    expect(kinds).toEqual({ 58001: 'salary', 58050: 'benefit', 58051: 'benefit' });
+    expect(totals.baseline.benefitCents).toBe(340000);
   });
 });

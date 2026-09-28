@@ -110,6 +110,7 @@ const BREAKDOWN_LABELS = {
   health: () => ['Health plan', 'group premium, opt-out cash and hand-entered employee-only premiums combined'],
   disability: (r) => ['Disability &amp; survivor', `${pctFmt(r.rate)} of cash salary, ${pctFmt(r.rateWithDependents)} with dependents`],
   fica: (r) => ['Employer FICA', `${pctFmt(r.rate)} of cash salary; a minister pays their own SECA instead`],
+  mileage: () => ['Mileage', 'annual mileage reimbursement or car allowance; not wages, so no pension, disability or FICA on it'],
 };
 
 function renderSalaryRows(model, computed) {
@@ -151,17 +152,6 @@ function headlineCards(model, totals) {
 
 function ledgerWarning(model) {
   return model.hasBaseLedger ? '' : `<p class="status status-pending">The FY${model.baseYear} church ledger could not be read, so any worker whose current pay comes from a linked account shows $0 current pay. Figures for workers with a typed current pay are unaffected.</p>`;
-}
-
-// Plan page: the projection behind the draft or roster being edited, without the full report.
-export function renderProjectionSummary({ model, computed, totals }, { heading = 'Projected salaries', badge = 'Computed from the saved plan', note = '' } = {}) {
-  return `<section class="report" aria-label="Raise projection">
-    ${renderSectionHeading({ eyebrow: `FY${model.targetYear} projection`, heading: escapeHtml(heading), badge: escapeHtml(badge) })}
-    ${ledgerWarning(model)}
-    ${headlineCards(model, totals)}
-    ${salaryTable(model, computed, totals)}
-    ${note ? `<p><small>${note}</small></p>` : ''}
-  </section>`;
 }
 
 // Council page and its print: legacy's full Council report.
@@ -232,6 +222,7 @@ export function renderCouncilReport({ model, computed, totals }) {
       rows.push(`<tr><td>Disability &amp; survivor${w.hasDependents ? ' (with dependents)' : ''}</td>${n(money(b.disabilityCents))}</tr>`);
     }
     rows.push(`<tr><td>Employer FICA${w.selfEmployedFica ? ' &mdash; none; a minister pays their own SECA' : ''}</td>${n(money(b.ficaCents))}</tr>`);
+    if (b.mileageCents) rows.push(`<tr><td>Mileage</td>${n(money(b.mileageCents))}</tr>`);
     rows.push(`<tr class="total"><td><b>Total church cost</b></td>${n(`<b>${money(c.churchCostCents)}</b>`)}</tr>`);
     return `<section class="report print-newpage" aria-label="${name}">
       ${renderSectionHeading({ eyebrow: escapeHtml(w.position || 'Worker'), heading: name, badge: escapeHtml(verdictText(v)) })}
@@ -316,12 +307,14 @@ function benefitBreakdownTable(model, computed) {
 export function renderBenefitsTaxesPage({ model, computed, totals }) {
   if (!model.roster.length) return '<p>No compensation roster has been saved yet.</p>';
   const bd = model.benefitBreakdown(computed);
+  const sum = (key) => model.countedEntries().reduce((t, e) => t + computed[e.i].benefits[key], 0);
+  // A Mileage column only when someone has mileage, so the columns always add to the total.
+  const mileageCol = sum('mileageCents') > 0;
   const rows = model.roster.map((w, i) => {
     if (model.isExternallyFunded(w)) return '';
     const c = computed[i], b = c.benefits;
-    return `<tr><td><b>${escapeHtml(w.name || '(unnamed)')}</b><br><small>${escapeHtml(w.position || '')}${b.cashOnly ? ` &middot; cash only, ${model.ftePct(w)}% time` : ''}</small></td>${n(money(c.salaryCents))}${n(money(b.pensionCents))}${n(money(b.healthCents))}${n(money(b.disabilityCents))}${n(money(b.ficaCents))}${n(`<b>${money(b.totalCents)}</b>`)}${n(money(c.churchCostCents))}</tr>`;
+    return `<tr><td><b>${escapeHtml(w.name || '(unnamed)')}</b><br><small>${escapeHtml(w.position || '')}${b.cashOnly ? ` &middot; cash only, ${model.ftePct(w)}% time` : ''}</small></td>${n(money(c.salaryCents))}${n(money(b.pensionCents))}${n(money(b.healthCents))}${n(money(b.disabilityCents))}${n(money(b.ficaCents))}${mileageCol ? n(money(b.mileageCents)) : ''}${n(`<b>${money(b.totalCents)}</b>`)}${n(money(c.churchCostCents))}</tr>`;
   }).join('');
-  const sum = (key) => model.countedEntries().reduce((t, e) => t + computed[e.i].benefits[key], 0);
   const secaNote = bd.secaSelfCents ? `<p><small>Ministers pay the employer half of FICA themselves as SECA (${money(bd.secaSelfCents)} in total at these salaries). That is not a church cost and is in no total here.</small></p>` : '';
   return `<section class="report" aria-label="Benefits and taxes">
     ${renderSectionHeading({ eyebrow: `FY${model.targetYear} · from the saved plan`, heading: 'Benefits &amp; taxes by worker', badge: 'LCMS Missouri District · Concordia Plans' })}
@@ -332,8 +325,8 @@ export function renderBenefitsTaxesPage({ model, computed, totals }) {
       { label: 'Health plan', value: money(totals.healthCents), hint: escapeHtml((model.healthPlanTotal(model.plan.healthPlanOption) || {}).label || 'No option selected') },
     ])}
     ${benefitBreakdownTable(model, computed)}
-    <div class="table-wrap"><table><thead><tr><th style="min-width:11rem">Worker</th><th class="num">Cash salary</th><th class="num">Pension</th><th class="num">Health</th><th class="num">Disability</th><th class="num">Employer FICA</th><th class="num">Benefits &amp; taxes</th><th class="num">Church cost</th></tr></thead><tbody>${rows}
-      <tr class="total"><td><b>Total</b></td>${n(money(totals.salaryCents))}${n(money(sum('pensionCents')))}${n(money(sum('healthCents')))}${n(money(sum('disabilityCents')))}${n(money(sum('ficaCents')))}${n(money(totals.benefitsCents))}${n(money(totals.totalCents))}</tr></tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th style="min-width:11rem">Worker</th><th class="num">Cash salary</th><th class="num">Pension</th><th class="num">Health</th><th class="num">Disability</th><th class="num">Employer FICA</th>${mileageCol ? '<th class="num">Mileage</th>' : ''}<th class="num">Benefits &amp; taxes</th><th class="num">Church cost</th></tr></thead><tbody>${rows}
+      <tr class="total"><td><b>Total</b></td>${n(money(totals.salaryCents))}${n(money(sum('pensionCents')))}${n(money(sum('healthCents')))}${n(money(sum('disabilityCents')))}${n(money(sum('ficaCents')))}${mileageCol ? n(money(sum('mileageCents'))) : ''}${n(money(totals.benefitsCents))}${n(money(totals.totalCents))}</tr></tbody></table></div>
     ${secaNote}
   </section>
   ${renderHealthPlanSection({ model, computed, totals })}
