@@ -2,7 +2,7 @@
 //
 // This is the first capability in the new Finance app that writes to Finance's OWN database
 // (FINANCE_DB) rather than relaying a write to Connect/Website (see route-manifest.js's
-// `giving-quick-entry-v1`/`budget-plan-write-v1`/payroll relays) or reading a synthetic fixture.
+// `budget-plan-write-v1`/payroll relays) or reading a synthetic fixture.
 // It is a deliberate, narrow port of four of legacy Connect's real import write paths
 // (`src/api-finance.js`'s `finance/church/import`, `finance/church/balances/import`,
 // `finance/daycare/bulk`, and the AHRA `finance/property/:key/budget-import`/

@@ -1,7 +1,7 @@
 // ── Real transport for connect.staff-role-v1 ────────────────────────────────
 // Asks Connect (src/api-contracts-service.js) who the caller really is, via the same
 // CONNECT_SERVICE service binding + Cf-Access-Jwt-Assertion forwarding already used by
-// connect-giving-client.js for the Giving quick-entry write. Connect independently verifies the
+// Finance's other Connect relays (connect-giving-client.js and the rest). Connect independently verifies the
 // Access JWT signature against Access's own published keys and looks up the role itself; this
 // call only carries the answer back to Finance's own section gating (see parity-manifest.js's
 // `permission` field) -- it never decides who is authorized.

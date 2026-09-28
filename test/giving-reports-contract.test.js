@@ -162,6 +162,32 @@ describe('Giving analysis reports for Finance (giving-reports-v1, giving-impact-
     expect(plateaus).not.toHaveProperty('givers');
   });
 
+  it('compares the current year to date with last year to the same day, and projects each year-end', async () => {
+    const { db, general } = setup();
+    const raw = db._raw;
+    raw.prepare("INSERT INTO people (first_name, last_name) VALUES ('Dana','Example')").run();
+    const dana = raw.prepare("SELECT id FROM people WHERE first_name='Dana'").get().id;
+    raw.prepare("INSERT INTO giving_batches (batch_date) VALUES ('2026-03-05')").run();
+    const add = (person, cents, date) => raw.prepare(
+      'INSERT INTO giving_entries (batch_id, person_id, fund_id, amount, method, contribution_date) VALUES (4,?,?,?,?,?)'
+    ).run(person, general, cents, 'check', date);
+    add(3, 30000, '2026-03-05'); // Cara: $900 by March 2 last year, $300 so far this year
+    add(dana, 10000, '2025-02-01'); add(dana, 30000, '2025-11-01'); add(dana, 20000, '2026-02-01');
+    const yoy = await (await report(db, 'yoy', '&year=2026&as_of=2026-03-05')).json();
+    expect(yoy).toMatchObject({ partial: true, as_of: '2026-03-05', prior_as_of: '2025-03-05' });
+    expect(yoy.year_elapsed).toBeCloseTo(64 / 365);
+    const who = (name) => yoy.people.find((p) => p.first_name === name);
+    // Dana: $100 by March 5 last year, $200 this year; last year's $400 doubles to $800.
+    expect(who('Dana')).toMatchObject({ prior_total: 40000, prior_ytd: 10000, curr_ytd: 20000, ytd_change_cents: 10000, ytd_change_pct: 100, projected_cents: 80000, projected_change_cents: 40000, projected_change_pct: 100 });
+    expect(who('Cara')).toMatchObject({ prior_ytd: 90000, curr_ytd: 30000, ytd_change_cents: -60000, projected_cents: 30000 });
+    // Ada gave nothing last year, so her projection is this year's pace over the whole year.
+    // (Her March 8 gift is after as_of and so not in the year to date.)
+    expect(who('Ada')).toMatchObject({ prior_total: 0, prior_ytd: 0, curr_ytd: 100000, curr_total: 120000, projected_cents: Math.round(100000 * 365 / 64) });
+    const past = await (await report(db, 'yoy', '&year=2025&as_of=2026-03-05')).json();
+    expect(past).toMatchObject({ partial: false, as_of: null, year_elapsed: 1 });
+    expect(past.people[0]).not.toHaveProperty('curr_ytd');
+  });
+
   it('passes on only each report’s own parameters', async () => {
     const { db, general } = setup();
     const bands = await (await report(db, 'bands', `&year=2025&freq=monthly&uplift_cents=2500&fund_id=${general}&seg=reports/giving-insights`)).json();

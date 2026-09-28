@@ -12,11 +12,6 @@ const ROUTES = [
   // it as a download. Read-only; gated to viewers who may open Data & Imports.
   { id: 'board-packet-export-v1', paths: ['/api/v1/board-packet-export'], dataSource: 'live-relay-read', contract: 'connect.finance-board-packet.v1' },
   { id: 'giving-transport-evidence-v1', paths: ['/api/v1/connect-giving-transport-evidence'], dataSource: 'synthetic-static', contract: 'finance.connect-giving-transport-evidence.v1' },
-  // The one deliberate exception to "Finance is read-only": relays a gift entry to Connect's own
-  // giving-quick-entry-v1 contract endpoint (never writes to Finance's own database). `writer: true`
-  // and a `methods` override are both explicit here so the exception is visible in this one file,
-  // not buried in a conditional elsewhere -- see test/finance-route-manifest.test.js's invariant.
-  { id: 'giving-quick-entry-v1', paths: ['/api/v1/connect-giving-quick-entry'], methods: WRITE_METHODS, dataSource: 'live-relay', writer: true, contract: 'connect.giving-quick-entry-relay.v1' },
   // ── The Budget builder's real edit/save write, ported from legacy's
   // finance/planning/church/override-bulk (src/api-finance.js) onto Finance's OWN
   // finance_budget_plan table via FINANCE_DB -- NOT a relay, unlike every other write route in
@@ -27,9 +22,12 @@ const ROUTES = [
   // by shell.js before this route does anything else) -- the route exists and is fully tested, but
   // does not go live until a later, separately approved cutover stage flips that flag on.
   { id: 'budget-plan-save-v1', paths: ['/api/v1/budget-plan-save'], methods: WRITE_METHODS, dataSource: 'finance-d1-write', writer: true, contract: 'finance.budget-plan-save.v1' },
-  // Same deliberate exception as the Giving relay above, for Budget Planner's manual edit/save:
+  // A deliberate exception to "Finance is read-only", for Budget Planner's manual edit/save:
   // relays a hand-typed planned-amount row to Connect's own finance-budget-write-v1 contract
-  // endpoint (never writes to Finance's own database). Gated admin/council only, on Connect's
+  // endpoint (never writes to Finance's own database). `writer: true` and a `methods` override
+  // are both explicit so the exception is visible in this one file, not buried in a conditional
+  // elsewhere -- see test/finance-route-manifest.test.js's invariant. (Finance's single-gift
+  // quick entry was removed September 28, 2026: every gift is entered in a batch.) Gated admin/council only, on Connect's
   // side, matching the legacy in-Connect Budget Planner's own override-bulk route exactly.
   { id: 'budget-plan-write-v1', paths: ['/api/v1/connect-budget-plan-write'], methods: WRITE_METHODS, dataSource: 'live-relay', writer: true, contract: 'connect.finance-budget-write-relay.v1' },
   // Same deliberate exception as the Giving/Budget relays above, for the Compensation Plan roster

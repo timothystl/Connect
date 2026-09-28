@@ -518,7 +518,7 @@ function renderAppeal(h, state) {
         <div class="eyebrow">Read against real giving bands</div>
         ${bands[0] ? `<p class="hp-sub">${bands[0].households} households already give above $2,000 a year — the top tier asks ${ladder.tiers[0].households} of them for one extra gift, not a new habit.</p>` : ''}
         <div class="hp-stack">${bandHtml}</div>
-        <a class="hp-link" href="/?section=giving-analytics&amp;page=household-bands">Open giving bands →</a>
+        <a class="hp-link" href="/?section=giving-reports&amp;page=bands">Open giving bands →</a>
       </div>
     </div>`, { id: 'hp-appeal' });
 }

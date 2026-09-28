@@ -6,7 +6,7 @@ import { FINANCE_RELEASE_CHANNEL, FINANCE_VERSION } from './version.js';
 import givingFixture from '../../contracts/examples/giving-summary-v1.synthetic.json';
 import { acceptConnectGivingSummaryV1 } from '../../contracts/validators/connect-giving-consumer.js';
 import { reconcileSyntheticGivingDelivery } from './connect-giving-transport.js';
-import { fetchLiveConnectGivingSummary, defaultLiveGivingPeriod, postConnectGivingQuickEntry } from './connect-giving-client.js';
+import { fetchLiveConnectGivingSummary, defaultLiveGivingPeriod } from './connect-giving-client.js';
 import { fetchVerifiedRole, roleCanAccessSection } from './connect-role-client.js';
 import { callPayrollProxy } from './payroll-proxy-client.js';
 import {
@@ -45,7 +45,7 @@ import { readQuickbooksSnapshot } from './quickbooks-snapshot-service.js';
 import { fetchDaycareChurchBudgetPreview, fetchFinanceBoardPacket, fetchFinanceImportStatus } from './finance-data-imports-client.js';
 import { ACCESS_STYLES, renderAccessPage } from './access-pages.js';
 import {
-  GIVING_ANALYTICS_STYLES, renderConcentrationPage, renderHouseholdBandsPage, renderNudgesPage, renderPledgesPage, renderStatementsPage, renderTrendsPage,
+  GIVING_ANALYTICS_STYLES, givingPaceParams, renderConcentrationPage, renderGivingPacePage, renderPledgesPage, renderStatementsPage, renderTrendsPage,
   renderWhatIfPage, renderYearOverYearPage,
 } from './giving-analytics-pages.js';
 import { describeFormStatus, handleFinanceFormWrite, isSameOriginPost } from './form-post.js';
@@ -216,10 +216,9 @@ const SYNTHETIC_GIVING_TRANSPORT = Object.freeze({
 
 const SECURITY_HEADERS = Object.freeze({
   'Cache-Control': 'no-store',
-  // form-action is 'self', not 'none', for exactly one reason: the Giving quick-entry form
-  // (see the 'giving' section below) has to submit somewhere. It still can't target any other
-  // origin. Nothing else here changed -- still no script-src of any kind, so no inline or
-  // external JS can run on this page regardless.
+  // form-action is 'self', not 'none', because Finance's own forms (gift batches, corrections,
+  // budget edits and the rest) have to submit somewhere. It still can't target any other
+  // origin. Still no script-src of any kind, so no inline or external JS can run on this page.
   // img-src/font-src 'self' only admit the logo and fonts served by this Worker itself
   // (brand-assets.js) -- still no third-party origins and no script of any kind.
   'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'",
@@ -255,20 +254,8 @@ function releaseMetadata(env) {
   };
 }
 
-// Maps a postConnectGivingQuickEntry() failure (or Connect's own refusal message) to something
+// Maps a postConnectFinanceBudgetWrite() failure (or Connect's own refusal message) to something
 // a bookkeeper can act on, without leaking wire-level detail (network error text, status codes).
-function describeGivingEntryError(reason, message) {
-  switch (reason) {
-    case 'not_configured': return 'Giving entry is not connected yet. Nothing was recorded.';
-    case 'no_access_identity': return 'Your sign-in was not recognized by Connect. Try reloading the page.';
-    case 'network_error': return 'Could not reach Connect. Nothing was recorded — please try again.';
-    case 'invalid_json': return 'Connect returned an unexpected response. Nothing was confirmed as recorded.';
-    case 'http_error': return message ? String(message) : 'Connect refused the entry.';
-    default: return 'The gift was not recorded.';
-  }
-}
-
-// Same shape as describeGivingEntryError above, for postConnectFinanceBudgetWrite() failures.
 function describeBudgetEntryError(reason, message) {
   switch (reason) {
     case 'not_configured': return 'Budget Plan editing is not connected yet. Nothing was saved.';
@@ -977,13 +964,28 @@ async function handleGivingOnlineSettingsWrite(request, env, url) {
   return back({ status: 'ok', msg: op === 'fee' ? `Fee percentage saved: ${result.result.fee_percent}%.` : 'Funds on the form saved.' });
 }
 
+// Pages that moved into Giving reports (Sept 28 2026), with the query parameters worth keeping.
+const MOVED_GIVING_PAGES = {
+  'giving-analytics:nudges': { page: 'plateaus', keep: ['kind', 'status', 'msg', 'message', 'council'] },
+  'giving-analytics:household-bands': { page: 'bands', keep: ['fund', 'council'], add: { view: 'annual' } },
+};
+
+function movedGivingPage(sectionId, pageId, searchParams) {
+  const moved = MOVED_GIVING_PAGES[`${sectionId}:${pageId}`];
+  if (!moved) return null;
+  const q = new URLSearchParams({ section: 'giving-reports', page: moved.page, ...(moved.add || {}) });
+  for (const key of moved.keep) if (searchParams.get(key)) q.set(key, searchParams.get(key).slice(0, 200));
+  return `/?${q.toString()}`;
+}
+
 const GIVING_FOLLOWUP_OPS = new Set(['assign', 'done', 'reopen']);
 const GIVING_FOLLOWUP_MESSAGES = { assign: 'Nudge assigned.', done: 'Marked done.', reopen: 'Nudge reopened.' };
 
-// Giving nudges: assign one to a staff member or mark it done. Connect records the follow-up
-// (giving-followup-write-v1) and re-checks Giving edit access for the signed-in person.
+// Giving nudges (Giving reports › Nudges and next steps): assign one to a staff member or mark
+// it done. Connect records the follow-up (giving-followup-write-v1) and re-checks Giving edit
+// access for the signed-in person.
 async function handleGivingFollowupWrite(request, env, url) {
-  const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving-analytics', page: 'nudges', ...params }).toString()}` } });
+  const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving-reports', page: 'plateaus', ...params }).toString()}` } });
   if (!isSameOriginPost(request, url)) return back({ status: 'error', message: 'That form did not come from Timothy Finance.' });
   let form;
   try { form = await request.formData(); } catch { return back({ status: 'error', message: 'The form could not be read.' }); }
@@ -1061,7 +1063,7 @@ function renderSectionBody(ctx) {
     daycareReport, daycareReportLive, daycareEntries, daycareEditId, propertyReport, propertyReportLive, propertyReserves, propertyReservesLive,
     propertyLedgers, propertyLedgersLive, propertyValuation, propertyPolicy, propertyDebt,
     propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, accountsReport, dataStatus, classification, compensationReport,
-    compensationReportLive, compensationBenchmarks, compensationBenefits, cashRunway, canManageCashPolicy, cashPolicyStatus, cashPolicyMessage, givingEntryStatus, givingEntryMessage,
+    compensationReportLive, compensationBenchmarks, compensationBenefits, cashRunway, canManageCashPolicy, cashPolicyStatus, cashPolicyMessage,
     budgetEntryStatus, budgetEntryMessage, payrollBundle,
     compensationPlanRaw, canEditCompensation, compensationEntryStatus, compensationEntryMessage,
     compensationProjection,
@@ -1289,7 +1291,7 @@ function renderSectionBody(ctx) {
       if (page.id === 'reports') return renderBatchReportsPage({ result: batchResult, today });
       return renderBatchPage({ result: batchResult, params: ctx.searchParams, status: batchStatus, today });
     }
-    return renderGiftEntryPage(page.id, { giving, givingSource, givingEntryStatus, givingEntryMessage });
+    return renderGiftEntryPage(page.id, { giving, givingSource });
   }
   if (section.id === 'tuition') {
     // Finance's own planner (tuition-planner/): the page carries its settings and script; every
@@ -1318,11 +1320,9 @@ function renderSectionBody(ctx) {
         canEmail: canEditNudges, print: ctx.searchParams.get('print') === '1', council: councilPreview,
       });
       case 'year-over-year': return renderYearOverYearPage({ result: totals, keep });
-      case 'household-bands': return renderHouseholdBandsPage({ result: totals, keep });
       case 'pledges': return renderPledgesPage({ result: totals, keep });
       case 'what-if': return renderWhatIfPage({ result: totals, params: ctx.searchParams, keep });
       case 'statements': return renderStatementsPage({ result: asResult(ctx.givingAnalyticsPeople), councilPreview: namedHidden });
-      case 'nudges': return renderNudgesPage({ result: asResult(ctx.givingAnalyticsPeople), totals, params: ctx.searchParams, canEdit: canEditNudges, councilPreview: namedHidden, status });
       default: return renderTrendsPage({ result: totals, keep, mdoBooks: ctx.givingMdoBooks });
     }
   }
@@ -1331,9 +1331,22 @@ function renderSectionBody(ctx) {
     const results = (ctx.givingReports || []).map((r) => (r?.ok ? { ok: true, data: r.result } : { ok: false, message: describeGivingBatchFailure(r), data: null }));
     const status = ctx.searchParams.get('status') === 'ok' ? { ok: true, message: ctx.searchParams.get('msg') || 'Saved in Connect.' }
       : ctx.searchParams.get('status') === 'error' ? { ok: false, message: `Not saved: ${ctx.searchParams.get('message') || 'the request did not complete.'}` } : null;
+    // Nudges and next steps and the Annual Giving bands also read Giving's own contracts (loaded
+    // with the other Giving pages below); the follow-up forms need Giving edit, as before.
+    const asResult = (r) => (r?.ok ? { ok: true, data: r.result } : { ok: false, message: describeGivingBatchFailure(r) });
+    const canEditNudges = !councilPreview && roleResult.ok && (roleResult.role === 'admin' || roleResult.permissions?.giving === 'edit');
     return renderGivingReportPage(page.id, {
       results: results.length ? results : [{ ok: false, message: 'not requested' }],
       params: givingReportParams(ctx.searchParams, isoDay(new Date())), keep: councilPreview ? { council: '1' } : {}, namedHidden, status,
+      searchParams: ctx.searchParams,
+      nudges: { result: asResult(ctx.givingAnalyticsPeople), totals: asResult(ctx.givingAnalytics), canEdit: canEditNudges },
+      annual: asResult(ctx.givingAnalytics),
+    });
+  }
+  if (section.id === 'charts' && page.id === 'giving-pace') {
+    return renderGivingPacePage({
+      result: ctx.givingAnalytics?.ok ? { ok: true, data: ctx.givingAnalytics.result } : { ok: false, message: describeGivingBatchFailure(ctx.givingAnalytics) },
+      pace: givingPaceParams(ctx.searchParams, isoDay(new Date())), keep: councilPreview ? { council: '1' } : {},
     });
   }
   if (section.id === 'charts' && page.id === 'concentration') {
@@ -1343,7 +1356,7 @@ function renderSectionBody(ctx) {
     return renderAccessPage({ result: ctx.accessRoles?.ok ? { ok: true, data: ctx.accessRoles.result } : { ok: false, message: describeGivingBatchFailure(ctx.accessRoles) } });
   }
   if (section.id === 'charts') {
-    return renderChartsPage(page.id, { churchReport, churchReportLive, cashRunway, propertyReserves, propertyReservesLive, giving, givingSource, canManageCashPolicy, cashPolicyStatus, cashPolicyMessage });
+    return renderChartsPage(page.id, { churchReport, churchReportLive, cashRunway, propertyReserves, propertyReservesLive, canManageCashPolicy, cashPolicyStatus, cashPolicyMessage });
   }
   if (section.id === 'church') {
     // Same admin-only gate as the legacy in-Connect Church Report's own actual-override route --
@@ -1927,32 +1940,6 @@ export default {
     if (route.id === 'giving-impact-write-v1') return handleGivingImpactWrite(request, env, url);
     if (route.id === 'giving-board-email-v1') {
       return handleGivingBoardEmail(request, env, url);
-    }
-
-    if (route.id === 'giving-quick-entry-v1') {
-      const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
-      let form;
-      try {
-        form = await request.formData();
-      } catch {
-        return response(null, { status: 303, headers: { Location: '/?section=giving&page=quick-entry&status=error&reason=invalid_json' } });
-      }
-      const entry = {
-        date: form.get('date') || '',
-        fund_id: form.get('fund_id') || '',
-        amount: form.get('amount') || '',
-        method: form.get('method') || '',
-        check_number: form.get('check_number') || '',
-        person_id: form.get('person_id') || '',
-        notes: form.get('notes') || '',
-      };
-      const result = await postConnectGivingQuickEntry(env, accessJwt, entry);
-      if (result.ok) {
-        return response(null, { status: 303, headers: { Location: '/?section=giving&page=quick-entry&status=ok' } });
-      }
-      const params = new URLSearchParams({ section: 'giving', page: 'quick-entry', status: 'error', reason: result.reason || 'unknown' });
-      if (result.message) params.set('message', String(result.message).slice(0, 200));
-      return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
     }
 
     // ── Budget builder edit/save -- Finance's own genuine write to FINANCE_DB's finance_budget_plan
@@ -3215,7 +3202,7 @@ export default {
     // proxy is the real, authoritative gate (payroll_manage on the resolved contract-relay
     // identity, plus the period-lock check on payroll_save_hours) -- these handlers only
     // orchestrate the calls and redirect back to the page with a status message, the same
-    // 303-redirect-after-POST shape giving-quick-entry-v1 above already uses.
+    // 303-redirect-after-POST shape the Giving and Budget relays above already use.
     if (route.id === 'payroll-hours-save-v1') {
       const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
       let form;
@@ -3712,6 +3699,10 @@ export default {
         // already goes through in renderSectionBody below. Needed here, before that render happens,
         // to gate the Compensation pages' own live plan fetch on the right page.
         const effectivePageId = resolveFinancePage(section, pageId).id;
+        // Giving › Giving nudges and Household bands were folded into Giving reports' Nudges and
+        // next steps and Giving bands pages; old links and bookmarks land there.
+        const movedTo = movedGivingPage(section.id, pageId, url.searchParams);
+        if (movedTo) return response(null, { status: 303, headers: { Location: movedTo } });
         // The Planner is an interactive page; its printable form is the Council report.
         if (section.id === 'compensation' && effectivePageId === 'planner' && url.searchParams.get('print') === '1') {
           return response(null, { status: 303, headers: { Location: '/?section=compensation&page=council&print=1' } });
@@ -4075,14 +4066,10 @@ export default {
           ? url.searchParams.get('status') : null;
         const cashPolicyMessage = cashPolicyStatus === 'error'
           ? describeCashPolicyEntryError(url.searchParams.get('reason'), url.searchParams.get('message')) : null;
-        const givingSummary = ['health', 'giving', 'charts', 'packet'].includes(section.id)
+        const givingSummary = ['health', 'giving', 'packet'].includes(section.id)
           ? resolveGivingSummary(env) : { giving: SYNTHETIC_GIVING, source: 'synthetic-fallback' };
         let giving = after(givingSummary, (result) => result.giving);
         let givingSource = after(givingSummary, (result) => result.source);
-        const givingEntryStatus = section.id === 'giving' ? url.searchParams.get('status') : null;
-        const givingEntryMessage = givingEntryStatus === 'error'
-          ? describeGivingEntryError(url.searchParams.get('reason'), url.searchParams.get('message'))
-          : null;
         // 'op' distinguishes a generate/generate-all/commit/remove redirect (planOp* below) from a
         // plain manual-edit redirect (budgetEntryStatus, unchanged) -- both land back on
         // ?section=planning with the same status/reason/message shape, so the presence of 'op' is
@@ -4285,14 +4272,26 @@ export default {
                 : givingPageId === 'online-form' ? fetchGivingOnlineSettings(env, accessJwt) : null;
         // Giving pages read Connect live too; the named pages (statements, nudges) use their own
         // contract, never requested for council preview or a totals-only (council) Giving role.
+        // Giving reports' Nudges and next steps reads the nudge queue (and this year's first-time
+        // givers) like the old Giving nudges page did, and its Annual Giving bands read the totals.
+        const reportsNamedHiddenEarly = councilPreview || (roleResult.ok && roleResult.role !== 'admin' && roleResult.permissions?.giving === 'anon');
+        const reportsPage = section.id === 'giving-reports' ? resolveFinancePage(section, pageId).id : null;
+        const chartsPage = section.id === 'charts' ? resolveFinancePage(section, pageId).id : null;
         const analyticsPageId = section.id === 'giving-analytics' ? resolveFinancePage(section, pageId).id
-          : section.id === 'charts' && resolveFinancePage(section, pageId).id === 'concentration' ? 'concentration' : null;
+          : ['concentration', 'giving-pace'].includes(chartsPage) ? chartsPage
+            : reportsPage === 'plateaus' && !reportsNamedHiddenEarly ? 'nudges'
+              : reportsPage === 'bands' && givingReportParams(url.searchParams, isoDay(new Date())).bandsView === 'annual' ? 'household-bands' : null;
         let accessRoles = section.id === 'accounts' && resolveFinancePage(section, pageId).id === 'access'
           ? fetchAccessRoles(env, accessJwt) : null;
         const givingAnalyticsLoads = analyticsPageId ? Promise.all([
           analyticsPageId === 'statements' ? null
             : analyticsPageId === 'council' ? fetchGivingBoard(env, accessJwt, { period: councilParams(url.searchParams, isoDay(new Date())).period })
-              : fetchGivingAnalytics(env, accessJwt, { fund: url.searchParams.get('fund') || 'general' }),
+              // Charts › Giving vs. pace: one period for one fund scope (totals only).
+              : analyticsPageId === 'giving-pace' ? (() => {
+                const pace = givingPaceParams(url.searchParams, isoDay(new Date()));
+                return fetchGivingAnalytics(env, accessJwt, { fund: pace.fund, from: pace.from, to: pace.to });
+              })()
+              : fetchGivingAnalytics(env, accessJwt, { fund: (analyticsPageId === 'household-bands' ? givingReportParams(url.searchParams, isoDay(new Date())).scopeFund : url.searchParams.get('fund')) || 'general' }),
           ['statements', 'nudges'].includes(analyticsPageId) && !councilPreview
             && !(roleResult.ok && roleResult.role !== 'admin' && roleResult.permissions?.giving === 'anon')
             ? fetchGivingAnalyticsPeople(env, accessJwt) : null,
@@ -4309,7 +4308,7 @@ export default {
         // Giving › Reports: each page's own Connect reports, read together; Connect decides access
         // per report, and the named ones are not asked for in council preview.
         const reportsPageId = section.id === 'giving-reports' ? resolveFinancePage(section, pageId).id : null;
-        const reportsNamedHidden = councilPreview || (roleResult.ok && roleResult.role !== 'admin' && roleResult.permissions?.giving === 'anon');
+        const reportsNamedHidden = reportsNamedHiddenEarly;
         const givingReportsLoad = reportsPageId && !(reportsNamedHidden && ['insights', 'giver-trends', 'plateaus', 'bands'].includes(reportsPageId))
           ? Promise.all(givingReportRequests(reportsPageId, givingReportParams(url.searchParams, isoDay(new Date())))
             .map(([report, query]) => fetchGivingReport(env, accessJwt, report, query))) : null;
@@ -4345,7 +4344,7 @@ export default {
           quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, cashRunway, canManageCashPolicy, cashPolicyStatus, cashPolicyMessage,
           compensationPlanRaw, canEditCompensation, compensationEntryStatus, compensationEntryMessage,
     compensationProjection,
-          givingEntryStatus, givingEntryMessage, budgetEntryStatus, budgetEntryMessage, payrollBundle,
+          budgetEntryStatus, budgetEntryMessage, payrollBundle,
           planOpKind, planOpStatus, planOpMessage, baseProjectionEntryStatus, baseProjectionEntryMessage,
           churchOverrideStatus, churchOverrideMessage,
           churchBudgetXlsxImportStatus, churchBudgetXlsxImportMessage,

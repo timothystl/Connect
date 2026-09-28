@@ -6,10 +6,13 @@ import { callConnectContract } from './connect-giving-batch-client.js';
 
 // fund: 'general', 'donor', 'revenue' (all but MDO), 'all', or a Connect fund id. Connect validates it; anything it does not
 // recognize comes back as all funds. Finance's pages ask for 'general' unless told otherwise.
-export function fetchGivingAnalytics(env, accessJwt, { asOf, fund } = {}) {
+// from/to (YYYY-MM-DD) ask for one period instead: its total, the same days last year, and the
+// matching budget spread over it (Charts › Giving vs. pace).
+export function fetchGivingAnalytics(env, accessJwt, { asOf, fund, from, to } = {}) {
   const query = {};
   if (asOf) query.as_of = asOf;
   if (fund) query.fund = String(fund).slice(0, 20);
+  if (from && to) { query.from = String(from).slice(0, 10); query.to = String(to).slice(0, 10); }
   return callConnectContract(env, accessJwt, 'giving-analytics-v1', Object.keys(query).length ? { query } : {});
 }
 

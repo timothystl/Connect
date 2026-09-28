@@ -78,6 +78,25 @@ describe('Gift Entry › Transactions and Online giving (Finance)', () => {
     expect(html).toContain('1 anonymous · 1 voided');
   });
 
+  it('sorts by clicking a column heading and keeps the main filters on one row', async () => {
+    const { env, calls } = makeEnv();
+    let html = await (await get(env, '&page=transactions&from=2026-01-01&to=2026-09-30&q=212&offset=200')).text();
+    // Newest first by default: Date is marked, and clicking it again reverses it from page one.
+    expect(html).toContain('<th aria-sort="descending"><a class="tx-sort" href="/?section=giving&amp;page=transactions&amp;from=2026-01-01&amp;to=2026-09-30&amp;q=212&amp;sort=date_asc" title="Sort by date">Date ▼</a></th>');
+    expect(html).toContain('sort=name_asc" title="Sort by name">Name</a>');
+    expect(html).toContain('sort=amount_desc" title="Sort by amount">Amount</a>');
+    for (const key of ['batch', 'envelope', 'fund', 'method', 'check']) expect(html).toContain(`sort=${key}_asc`);
+    expect(html).not.toContain('name="sort"');
+    expect(html).toContain('<details class="tx-more"><summary>More filters</summary>');
+    html = await (await get(env, '&page=transactions&sort=name_asc&fund=2&min=5')).text();
+    expect(calls.at(-1).query).toMatchObject({ sort: 'name_asc', funds: '2' });
+    expect(html).toContain('<details class="tx-more" open><summary>More filters <span class="tx-more-count">2 in use</span></summary>');
+    expect(html).toContain('<input type="hidden" name="sort" value="name_asc">');
+    html = await (await get(env, '&page=transactions&view=givers&gsort=total_desc')).text();
+    expect(html).toContain('gsort=total_asc');
+    expect(html).toContain('gsort=name_asc');
+  });
+
   it('opens one gift with its correction, giver, void forms and history', async () => {
     const { env } = makeEnv({ detail: true });
     const html = await (await get(env, '&page=transactions&entry_id=55&giver_q=schreiber')).text();

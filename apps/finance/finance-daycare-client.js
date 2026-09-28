@@ -52,8 +52,8 @@ export function defaultLiveDaycareReportFiscalYear(now = new Date()) {
 // incoming request; Connect independently verifies that signature and checks the real Connect
 // permissions (edit on finance, budget, or compensation -- same as the legacy in-Connect Daycare
 // Report) -- this call carries it through, it does not decide who is authorized. Same
-// never-throws, always-{ok,reason}-labeled shape as postConnectGivingQuickEntry in
-// connect-giving-client.js.
+// never-throws, always-{ok,reason}-labeled shape as postConnectFinanceBudgetWrite in
+// finance-budget-client.js.
 const WRITE_REQUEST_TIMEOUT_MS = 4000;
 
 export async function postConnectFinanceDaycareEntry(env, accessJwt, body) {

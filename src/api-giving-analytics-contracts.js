@@ -5,6 +5,9 @@
 //                               baselines. Totals, counts and bands only: no name, no person id,
 //                               no envelope. Council's anonymous Giving access ('anon') may read it,
 //                               exactly like the anon-safe giving reports (isAnonSafeGivingSeg).
+//                               With ?from=&to= it answers one period instead (Charts › Giving vs.
+//                               pace): the scope's total, the same days last year, and the matching
+//                               income budget spread over the period. Still totals only.
 //   giving-analytics-people-v1  Giving statements and nudges. Names households and people, so it
 //                               needs Giving view or edit (or admin); 'anon' is refused.
 //   giving-followup-write-v1    Assigns a nudge or marks it done (giving_followups). Needs Giving
@@ -17,7 +20,11 @@ import { json } from './auth.js';
 import { computeGivingBoard } from './api-reports.js';
 import { sendBrevoTransactionalEmail } from './api-emails.js';
 import { verifyAccessJwt } from './access-jwt.js';
-import { getRolePermissions, permissionsForRole, resolveGeneralFundIds, normalizeFundCategory, fundCategoryLabel } from './api-utils.js';
+import {
+  getRolePermissions, permissionsForRole, resolveGeneralFundIds, normalizeFundCategory, fundCategoryLabel, sameDayLastYear, yearElapsedShare,
+  resolveGeneralFundBudget, accountRowMatchesFundCode, fundNumericPrefix,
+} from './api-utils.js';
+import { resolveChurchYearPrecedence, computeYearSummary, readCashPolicy } from './api-finance.js';
 
 const ONLINE_METHODS = "('online','card','ach')";
 const HOUSEHOLD_KEY = `CASE WHEN p.household_id IS NOT NULL AND p.household_id != 0
@@ -71,12 +78,6 @@ function isDay(value) {
 // Connect's giving reports bucket a gift.
 function shiftDay(day, days) {
   return new Date(Date.parse(`${day}T00:00:00Z`) + days * 864e5).toISOString().slice(0, 10);
-}
-
-function sameDayLastYear(day) {
-  const [y, m, d] = day.split('-').map(Number);
-  const last = new Date(Date.UTC(y - 1, m, 0)).getUTCDate();
-  return `${y - 1}-${String(m).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
 }
 
 export function resolveAsOf(url, now = new Date()) {
@@ -230,13 +231,131 @@ export function concentrationOf(t12Cents, lastYearCents) {
   };
 }
 
+// ── One period against last year and the budget (Charts › Giving vs. pace) ────────────────────
+export const PERIOD_MAX_DAYS = 400;
+
+// A valid ?from=&to= pair, in order, no longer than PERIOD_MAX_DAYS; otherwise null.
+export function resolvePeriod(url) {
+  const from = url.searchParams.get('from');
+  const to = url.searchParams.get('to');
+  if (!isDay(from) || !isDay(to)) return null;
+  const [a, b] = from <= to ? [from, to] : [to, from];
+  const days = Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 864e5) + 1;
+  return days <= PERIOD_MAX_DAYS ? { from: a, to: b, days } : null;
+}
+
+function daysInYear(year) {
+  return (Date.UTC(year + 1, 0, 1) - Date.UTC(year, 0, 1)) / 864e5;
+}
+
+// The income budget that matches a fund scope, for one fiscal year, off the church ledger's
+// annual rows (the same precedence the Church Report uses). null, never 0, when nothing matches:
+//   all funds, all revenue  the church's whole Income budget (the Church Report's total)
+//   General Fund            the General Fund's own budget lines (resolveGeneralFundBudget, the
+//                           rule the Health page's pace line and the board report use)
+//   donor giving, one fund  every Income line sharing a leading account code with a fund in the
+//                           scope ("50010 Missions" matches "50010 Missions Offering")
+export function matchScopeBudget(rows, scope, fundRows, generalCode) {
+  const income = rows.filter((r) => r.classification === 'Income');
+  if (scope.key === 'all' || scope.key === 'revenue') {
+    const withBudget = income.filter((r) => r.own_budget_cents != null);
+    return withBudget.length
+      ? { cents: computeYearSummary(rows).classificationTotals.Income?.budgetCents || 0, basis: 'church_income', codes: [], accounts: [] }
+      : null;
+  }
+  if (scope.key === 'general') {
+    const { prefix } = resolveGeneralFundIds(fundRows);
+    const found = resolveGeneralFundBudget(rows, { prefix, overrideCode: generalCode });
+    return found.cents == null ? null : { cents: found.cents, basis: 'general_fund', codes: [found.code], accounts: found.accounts };
+  }
+  const inScope = new Set(scope.ids || []);
+  const codes = [...new Set(fundRows.filter((f) => inScope.has(f.id)).map((f) => fundNumericPrefix(f.name)).filter(Boolean))];
+  if (scope.key === 'donor' && generalCode && !codes.includes(generalCode)) codes.push(generalCode);
+  const matched = income.filter((r) => r.own_budget_cents != null && codes.some((code) => accountRowMatchesFundCode(r, code)));
+  return matched.length
+    ? { cents: matched.reduce((sum, r) => sum + r.own_budget_cents, 0), basis: 'fund_codes', codes, accounts: matched.map((r) => String(r.account_name || '').trim()).filter(Boolean) }
+    : null;
+}
+
+// The scope's budget spread evenly by day over the period, one fiscal year at a time. A period
+// that reaches into a year with no matching budget gets no budget at all (a half-covered pace
+// would read as a shortfall), and `missing_years` says which year it was.
+async function periodBudget(db, scope, fundRows, period) {
+  const firstYear = Number(period.from.slice(0, 4));
+  const lastYear = Number(period.to.slice(0, 4));
+  const years = [];
+  for (let y = firstYear; y <= lastYear; y += 1) years.push(y);
+  const [entries, policy] = await Promise.all([
+    db.prepare(`SELECT * FROM finance_church_entries WHERE period_month = 0 AND fiscal_year BETWEEN ? AND ?`).bind(firstYear, lastYear).all(),
+    readCashPolicy(db),
+  ]);
+  const resolved = resolveChurchYearPrecedence(entries.results || []);
+  const out = [];
+  const missing = [];
+  for (const year of years) {
+    const found = matchScopeBudget(resolved.filter((r) => Number(r.fiscal_year) === year), scope, fundRows, policy.general_fund_budget_code);
+    const start = period.from > `${year}-01-01` ? period.from : `${year}-01-01`;
+    const end = period.to < `${year}-12-31` ? period.to : `${year}-12-31`;
+    const days = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 864e5) + 1;
+    if (!found) { missing.push(year); continue; }
+    out.push({ year, annual_cents: found.cents, days, days_in_year: daysInYear(year), cents: Math.round(found.cents * days / daysInYear(year)), basis: found.basis, codes: found.codes, accounts: found.accounts });
+  }
+  if (missing.length) return { budget: null, missing_years: missing };
+  return {
+    budget: {
+      cents: out.reduce((sum, y) => sum + y.cents, 0),
+      basis: out[0].basis,
+      codes: [...new Set(out.flatMap((y) => y.codes))],
+      accounts: [...new Set(out.flatMap((y) => y.accounts))],
+      years: out.map(({ year, annual_cents, days, days_in_year, cents }) => ({ year, annual_cents, days, days_in_year, cents })),
+    },
+    missing_years: [],
+  };
+}
+
+async function respondWithGivingPeriod(db, { asOf, period, scope, fundRows }) {
+  const filter = fundFilter(scope);
+  const priorFrom = sameDayLastYear(period.from);
+  const priorTo = sameDayLastYear(period.to);
+  const year = Number(asOf.slice(0, 4));
+  const [totals, usedFunds, budget] = await Promise.all([
+    db.prepare(
+      `SELECT COALESCE(SUM(CASE WHEN contribution_date BETWEEN ? AND ? THEN amount END),0) AS cents,
+              COUNT(CASE WHEN contribution_date BETWEEN ? AND ? THEN 1 END) AS gifts,
+              COALESCE(SUM(CASE WHEN contribution_date BETWEEN ? AND ? THEN amount END),0) AS prior_cents,
+              COUNT(CASE WHEN contribution_date BETWEEN ? AND ? THEN 1 END) AS prior_gifts
+         FROM giving_entries WHERE (contribution_date BETWEEN ? AND ? OR contribution_date BETWEEN ? AND ?)${filter.sql}`
+    ).bind(period.from, period.to, period.from, period.to, priorFrom, priorTo, priorFrom, priorTo, period.from, period.to, priorFrom, priorTo).first(),
+    db.prepare(
+      `SELECT DISTINCT fund_id FROM giving_monthly_fund_totals WHERE month BETWEEN ? AND ? AND gift_count > 0`
+    ).bind(`${year - 2}-01`, `${year}-12`).all(),
+    periodBudget(db, scope, fundRows, period),
+  ]);
+  return json({
+    contract: 'connect.giving-analytics.v1',
+    as_of: asOf,
+    year,
+    fund: { key: scope.key, label: scope.label, fund_count: scope.ids ? scope.ids.length : fundRows.length },
+    fund_options: fundOptions(fundRows, new Set((usedFunds.results || []).map((r) => r.fund_id)), scope),
+    period: {
+      from: period.from, to: period.to, days: period.days,
+      cents: totals?.cents || 0, gifts: totals?.gifts || 0,
+      prior_from: priorFrom, prior_to: priorTo, prior_cents: totals?.prior_cents || 0, prior_gifts: totals?.prior_gifts || 0,
+      budget: budget.budget, budget_missing_years: budget.missing_years,
+    },
+  });
+}
+
 // GET giving-analytics-v1?as_of=YYYY-MM-DD&fund=all|general|<fund id> — aggregate only. The fund
 // scope applies to every total, month, week, household figure and pledge receipt; the by-fund
-// breakdown and first-time givers always cover all funds.
+// breakdown and first-time givers always cover all funds. With a valid ?from=&to= (at most
+// PERIOD_MAX_DAYS) it answers that one period instead (respondWithGivingPeriod above).
 export async function respondWithGivingAnalyticsV1(url, db) {
   const asOf = resolveAsOf(url);
   const fundRows = (await db.prepare(`SELECT id, name, category FROM funds ORDER BY name`).all()).results || [];
   const scope = resolveFundScope(url.searchParams.get('fund'), fundRows);
+  const period = resolvePeriod(url);
+  if (period) return respondWithGivingPeriod(db, { asOf, period, scope, fundRows });
   const plain = fundFilter(scope);
   const aliased = fundFilter(scope, 'ge.fund_id');
   const year = Number(asOf.slice(0, 4));
@@ -373,12 +492,7 @@ function fundOptions(fundRows, usedIds, scope) {
   ];
 }
 
-export function yearElapsedShare(asOf) {
-  const year = Number(asOf.slice(0, 4));
-  const start = Date.UTC(year, 0, 1);
-  const end = Date.UTC(year + 1, 0, 1);
-  return Math.min(1, Math.max(0, (Date.parse(`${asOf}T00:00:00Z`) + 864e5 - start) / (end - start)));
-}
+export { yearElapsedShare };
 
 // ── Named detail: statements and nudges ──────────────────────────────────────────────────────
 

@@ -343,13 +343,12 @@ describe('Finance alpha staging shell', () => {
   });
 
   it('offers a clearly-labeled, non-authoritative council-view preview that hides write forms', async () => {
-    const off = await (await worker.fetch(new Request('https://finance.test/?section=giving&page=quick-entry'), env)).text();
+    const off = await (await worker.fetch(new Request('https://finance.test/?section=giving&page=funds'), env)).text();
     expect(off).not.toContain('class="council-preview"');
     expect(off).toContain('title="Preview council view: hides editing controls without changing permissions">Council</a>');
-    expect(off).toContain('href="/?section=giving&amp;page=quick-entry&amp;council=1"');
-    expect(off).toContain('<form method="POST" action="/api/v1/connect-giving-quick-entry">');
+    expect(off).toContain('href="/?section=giving&amp;page=funds&amp;council=1"');
 
-    const on = await (await worker.fetch(new Request('https://finance.test/?section=giving&page=quick-entry&council=1'), env)).text();
+    const on = await (await worker.fetch(new Request('https://finance.test/?section=giving&page=funds&council=1'), env)).text();
     expect(on).toContain('<body class="council-preview">');
     expect(on).toContain('Your actual verified permissions still apply');
     expect(on).toContain('Editing controls are hidden');
@@ -1263,11 +1262,11 @@ describe('Finance alpha staging shell', () => {
       expect(cashReserveHtml).toContain('synthetic fixture');
       expect(cashReserveHtml).not.toContain('$35,000');
 
+      // Giving vs. pace reads Connect's giving-analytics-v1 period (test/finance-giving-pace.test.js);
+      // it never falls back to the church report's actual income or a synthetic figure.
       const pacingHtml = await (await worker.fetch(chartsRequest('giving-pace'), liveEnv)).text();
-      expect(pacingHtml).toContain('Naive monthly pace');
-      expect(pacingHtml).toContain('$20,000');
-      expect(pacingHtml).toContain(`1/12 of FY${liveFiscalYear} church income budget · live from Connect`);
-      expect(pacingHtml).not.toContain('$10,000');
+      expect(pacingHtml).toContain('Giving vs. pace could not be read from Connect');
+      expect(pacingHtml).not.toContain('Naive monthly pace');
     });
 
     it('renders each Charts page from the synthetic fixtures alone when no CONNECT_SERVICE is configured (unchanged regression baseline)', async () => {
@@ -1283,8 +1282,8 @@ describe('Finance alpha staging shell', () => {
       expect(cashReserveHtml).not.toContain('live from Connect');
 
       const pacingHtml = await (await worker.fetch(new Request('https://finance.test/?section=charts&page=giving-pace'), env)).text();
-      expect(pacingHtml).toContain('$10,000');
-      expect(pacingHtml).toContain('church income budget · synthetic fixture');
+      expect(pacingHtml).toContain('Giving vs. pace could not be read from Connect');
+      expect(pacingHtml).toContain('<select name="period">');
     });
 
     it('labels each KPI by its own independent source when only one live resolver answers (partial availability)', async () => {

@@ -1,5 +1,6 @@
-// Giving, v3 design: Trends, Year over year, Household bands, Pledges, Giving what-if, Giving
-// statements and Giving nudges. Every figure comes live from Connect (giving-analytics-v1 for
+// Giving, v3 design: Trends, Year over year, Pledges, Giving what-if and Giving statements, plus
+// the household bands and the nudge queue that Giving reports shows on its combined Giving bands
+// and Nudges and next steps pages. Every figure comes live from Connect (giving-analytics-v1 for
 // totals, giving-analytics-people-v1 for the named pages); Finance keeps no copy. The totals pages
 // name nobody, so council may read them. Statements and nudges name households, so Connect only
 // returns them for Giving view access, and council preview here shows the same refusal.
@@ -9,7 +10,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const CONNECT_GIVING = 'https://connect.timothystl.org/';
 const LETTER_LABELS = { year_end: 'Year-end statement', midyear: 'Mid-year update', quarterly: 'Quarterly statement' };
-export const WHAT_IF_FIELDS = Object.freeze(['households', 'average', 'retention', 'new_households']);
+export const WHAT_IF_FIELDS = Object.freeze(['households', 'average', 'retention', 'new_households', 'new_ratio', 'gift_change']);
 
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 function money(cents) {
@@ -123,10 +124,6 @@ function kpis(items) {
 
 function unavailable(what, message) {
   return `<p class="status status-error">${e(what)} could not be read from Connect: ${e(message)} Nothing here is a real $0.</p>`;
-}
-
-function statusBanner(status) {
-  return status ? `<p class="status${status.ok ? '' : ' status-error'}">${e(status.message)}</p>` : '';
 }
 
 function asOfLine(data) {
@@ -288,8 +285,9 @@ export function renderYearOverYearPage({ result, keep = {} }) {
 }
 
 // ── Household bands ───────────────────────────────────────────────────────────────────────────
+// The Annual view of Giving reports › Giving bands; `at` is where the fund picker points.
 
-export function renderHouseholdBandsPage({ result, keep = {} }) {
+export function renderHouseholdBandsPage({ result, keep = {}, at = { section: 'giving-reports', page: 'bands', hidden: { view: 'annual' } } }) {
   if (!result.ok) return unavailable('Household bands', result.message);
   const a = result.data;
   const h = a.households;
@@ -299,7 +297,7 @@ export function renderHouseholdBandsPage({ result, keep = {} }) {
   const topTwo = [...h.bands].reverse().slice(0, 2);
   const topShare = total ? topTwo.reduce((s, b) => s + b.cents, 0) / total : 0;
   const topHouseholds = topTwo.reduce((s, b) => s + b.households, 0);
-  return `${fundPicker(a, { page: 'household-bands', hidden: keep })}
+  return `${fundPicker(a, { section: at.section, page: at.page, hidden: { ...at.hidden, ...keep } })}
     <p class="lede">Households grouped by what they gave in the last 12 months. ${e(scopeShort(a))}No names are shown on this page. Gifts from organizations and anonymous plate cash are not part of any household.</p>
     ${kpis([
       ['Giving households', String(h.t12_households), 'Gave at least once in the last 12 months'],
@@ -341,6 +339,122 @@ export function renderConcentrationPage({ result, keep = {} }) {
     </tbody></table></div></div>`;
 }
 
+// ── Giving vs. pace (Charts) ──────────────────────────────────────────────────────────────────
+// One period of giving for one fund scope, against the same days last year and against the
+// matching income budget spread over the period (Connect's giving-analytics-v1 period read).
+// Totals only. The period is picked here and sent to Connect as plain from/to dates.
+
+const PACE_PERIODS = [['this-month', 'This month'], ['last-month', 'Last month'], ['qtd', 'Quarter to date'], ['ytd', 'Year to date'], ['custom', 'Custom dates']];
+const PACE_MAX_DAYS = 400; // Connect's own limit (PERIOD_MAX_DAYS)
+
+function isoDay(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) ? value : null;
+}
+
+function lastDayOf(year, month) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function longDate(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${MONTHS[m - 1]} ${d}, ${y}`;
+}
+
+// ?period= and, for Custom, ?from=&to=; ?fund= as on the other Giving pages (General Fund unless
+// told otherwise). Anything unusable falls back to year to date and says why.
+export function givingPaceParams(params, today) {
+  const y = Number(today.slice(0, 4));
+  const m = Number(today.slice(5, 7));
+  const pad = (n) => String(n).padStart(2, '0');
+  const requested = params.get('period');
+  let period = PACE_PERIODS.some(([key]) => key === requested) ? requested : 'ytd';
+  let from; let to; let error = '';
+  if (period === 'custom') {
+    const a = isoDay(params.get('from'));
+    const b = isoDay(params.get('to'));
+    const days = a && b ? Math.abs(Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 864e5 + 1 : 0;
+    if (a && b && days <= PACE_MAX_DAYS) [from, to] = a <= b ? [a, b] : [b, a];
+    else {
+      error = a && b ? `Choose a range of ${PACE_MAX_DAYS} days or fewer; showing year to date.` : 'Choose both a From and a To date; showing year to date.';
+      period = 'ytd';
+    }
+  }
+  if (period === 'this-month') { from = `${y}-${pad(m)}-01`; to = today; }
+  if (period === 'last-month') {
+    const [ly, lm] = m === 1 ? [y - 1, 12] : [y, m - 1];
+    from = `${ly}-${pad(lm)}-01`; to = `${ly}-${pad(lm)}-${pad(lastDayOf(ly, lm))}`;
+  }
+  if (period === 'qtd') { from = `${y}-${pad(Math.floor((m - 1) / 3) * 3 + 1)}-01`; to = today; }
+  if (period === 'ytd') { from = `${y}-01-01`; to = today; }
+  const fund = /^[a-z0-9]{1,20}$/.test(params.get('fund') || '') ? params.get('fund') : 'general';
+  const label = {
+    'this-month': `${MONTH_NAMES[m - 1]} ${y} to date`,
+    'last-month': `${MONTH_NAMES[Number(from.slice(5, 7)) - 1]} ${from.slice(0, 4)}`,
+    qtd: `Q${Math.floor((m - 1) / 3) + 1} ${y} to date`,
+    ytd: `${y} to date`,
+    custom: `${longDate(from)} – ${longDate(to)}`,
+  }[period];
+  return { period, from, to, fund, label, error };
+}
+
+function paceMeter(label, cents, max, note, cls = '') {
+  return `<li><span>${e(label)}</span><span class="ga-meter${cls ? ` ${cls}` : ''}"><span style="width:${Math.max(0, Math.min(100, max ? cents / max * 100 : 0)).toFixed(1)}%"></span></span><b>${money(cents)}</b><small>${note}</small></li>`;
+}
+
+export function renderGivingPacePage({ result, pace, keep = {} }) {
+  const hiddenKeep = Object.entries(keep).map(([k, v]) => `<input type="hidden" name="${e(k)}" value="${e(v)}">`).join('');
+  const form = `<form method="GET" action="/" class="panel ga-pace-form">
+      <input type="hidden" name="section" value="charts"><input type="hidden" name="page" value="giving-pace">${pace.fund === 'general' ? '' : `<input type="hidden" name="fund" value="${e(pace.fund)}">`}${hiddenKeep}
+      <label class="field"><span>Period</span><select name="period">${PACE_PERIODS.map(([key, label]) => `<option value="${key}"${key === pace.period ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
+      <label class="field"><span>From <small>(custom)</small></span><input type="date" name="from" value="${e(pace.from)}"></label>
+      <label class="field"><span>To <small>(custom)</small></span><input type="date" name="to" value="${e(pace.to)}"></label>
+      <div class="form-actions"><button type="submit">Show</button></div>
+      <p class="muted-line">The dates are used when the period is Custom dates; the other periods set them for you.</p>
+    </form>`;
+  const errorNote = pace.error ? `<p class="status status-error">${e(pace.error)}</p>` : '';
+  if (!result.ok) return `${errorNote}${form}${unavailable('Giving vs. pace', result.message)}`;
+  const a = result.data;
+  const p = a.period;
+  if (!p) return `${errorNote}${form}${unavailable('Giving vs. pace', 'Connect did not answer for a period (it may need updating).')}`;
+  const hidden = { ...keep, ...(pace.period === 'ytd' ? {} : { period: pace.period }), ...(pace.period === 'custom' ? { from: pace.from, to: pace.to } : {}) };
+  const scope = fundKey(a) === 'all' ? 'all funds' : scopePhrase(a);
+  const b = p.budget;
+  const vsLast = changeNote(p.cents, p.prior_cents, 'the same days last year');
+  const paceShare = b && b.cents ? p.cents / b.cents : null;
+  const paceDiff = b ? p.cents - b.cents : null;
+  const cards = kpis([
+    [`Giving, ${pace.label}`, money(p.cents), `${p.gifts.toLocaleString('en-US')} gift${p.gifts === 1 ? '' : 's'} · ${e(shortDate(p.from))} – ${e(shortDate(p.to))}`],
+    ['Same days last year', money(p.prior_cents), vsLast.text, vsLast.tone],
+    b ? ['Budgeted pace', money(b.cents), `${paceShare === null ? '—' : pct(paceShare)} of pace · ${paceDiff >= 0 ? 'ahead by' : 'behind by'} ${money(Math.abs(paceDiff))}`, paceDiff >= 0 ? 'good' : 'warn']
+      : ['Budgeted pace', '—', 'No budget line matches this scope', ''],
+  ]);
+  const max = Math.max(p.cents, p.prior_cents, b?.cents || 0, 1);
+  const bars = `<ul class="ga-meters ga-pace">
+      ${paceMeter(`${pace.label}`, p.cents, max, `${e(shortDate(p.from))} – ${e(shortDate(p.to))}, ${p.to.slice(0, 4)}`)}
+      ${paceMeter('Same days last year', p.prior_cents, max, `${e(shortDate(p.prior_from))} – ${e(shortDate(p.prior_to))}, ${p.prior_to.slice(0, 4)}`, 'is-prior')}
+      ${b ? paceMeter('Budgeted pace', b.cents, max, 'Budget spread evenly by day', 'is-budget') : ''}
+    </ul>`;
+  const budgetWhat = !b ? '' : b.basis === 'church_income'
+    ? 'the church’s whole Income budget (the Church Report’s total, which also includes income Giving does not record, such as rentals and interest)'
+    : b.basis === 'general_fund'
+      ? `the General Fund’s budget line${b.accounts.length === 1 ? '' : 's'} on the church ledger (${e(b.accounts.join(', ') || `accounts starting ${b.codes.join(', ')}`)})`
+      : `the Income budget line${b.accounts.length === 1 ? '' : 's'} sharing an account code with these funds (${e(b.accounts.join(', '))})`;
+  const yearsText = b ? b.years.map((y) => `${money(y.annual_cents)} for ${y.year} × ${y.days} of ${y.days_in_year} days = ${money(y.cents)}`).join('; ') : '';
+  const noBudget = !b
+    ? `<p class="muted-line"><b>No budget comparison.</b> ${(p.budget_missing_years || []).length ? `No income budget line matches ${e(scope)} for ${e(p.budget_missing_years.join(' and '))}` : `No income budget line matches ${e(scope)}`}, so only last year is compared. A fund’s budget is found by the account code at the start of its name (for example 50010) on the church ledger’s Income lines.</p>`
+    : '';
+  return `${fundPicker(a, { section: 'charts', page: 'giving-pace', hidden })}
+    ${errorNote}${form}
+    <p class="lede">Giving to ${e(scope)} for ${e(pace.label)}, against the same days last year${b ? ' and the budget' : ''}. Totals only.</p>
+    ${cards}
+    <div class="panel panel-spaced"><h2>${e(pace.label)}</h2>${bars}${noBudget}</div>
+    <div class="panel panel-spaced ga-method"><h2>How this is figured</h2><ul>
+      <li><div><b>This period</b><p>Every gift to ${e(scope)} dated ${e(longDate(p.from))} through ${e(longDate(p.to))} (${p.days} day${p.days === 1 ? '' : 's'}), after voids and refunds. ${e(scopeShort(a).trim()) || 'Every fund counts.'}</p></div></li>
+      <li><div><b>Same days last year</b><p>The same calendar dates a year earlier, ${e(longDate(p.prior_from))} through ${e(longDate(p.prior_to))}. Holidays that move (Easter) can land in one year’s period and not the other’s.</p></div></li>
+      ${b ? `<li><div><b>Budgeted pace</b><p>The annual budget is ${budgetWhat}, spread evenly across the year by day: ${e(yearsText)}. Giving is seasonal (Christmas and Easter run high), so a straight-line pace runs behind early in a quarter or year and catches up later.</p></div></li>` : ''}
+    </ul></div>`;
+}
+
 // ── Pledges ───────────────────────────────────────────────────────────────────────────────────
 
 export function renderPledgesPage({ result, keep = {} }) {
@@ -372,40 +486,80 @@ export function renderPledgesPage({ result, keep = {} }) {
       <p class="muted-line">The marker shows how much of the year has gone by.</p>
       <div class="table-scroll"><table class="pm-table ga-num"><thead><tr><th>Status</th><th>Pledgers</th><th>What it means</th></tr></thead>
         <tbody>${rows.map(([label, n, note, tone]) => `<tr><td class="${n ? `tone-${tone}` : ''}">${label}</td><td>${n}</td><td class="ga-note">${e(note)}</td></tr>`).join('')}</tbody></table></div>
-      <p class="muted-line">Individual pledges, and who is behind, are on the <a href="${href('nudges', { kind: 'pledge_behind' })}">Giving nudges</a> page for people with Giving view access.</p></div>`;
+      <p class="muted-line">Individual pledges, and who is behind, are on the <a href="${href('plateaus', { kind: 'pledge_behind' }, 'giving-reports')}">Nudges and next steps</a> page for people with Giving view access.</p></div>`;
 }
 
 // ── Giving what-if ────────────────────────────────────────────────────────────────────────────
 
+// The starting values, each from Connect's household totals. Retention and the new-household
+// ratio fall back to fixed guesses (90%, 45%) only when there is no earlier year to measure;
+// `retentionMeasured`/`newRatioMeasured` say which happened, so the page can say so too.
 export function whatIfBaseline(h) {
   const households = h.t12_households || 0;
+  const retentionMeasured = !!h.two_years_ago_households;
+  const newRatioMeasured = !!h.last_year_avg_cents;
   return {
     households,
     average: households ? Math.round(h.t12_cents / households / 100) : 0,
-    retention: h.two_years_ago_households ? Math.round(h.retained_households / h.two_years_ago_households * 100) : 90,
+    retention: retentionMeasured ? Math.round(h.retained_households / h.two_years_ago_households * 100) : 90,
     new_households: h.new_last_year_households || 0,
-    newRatio: h.last_year_avg_cents ? Math.min(1.5, h.new_last_year_avg_cents / h.last_year_avg_cents) : 0.45,
+    newRatio: newRatioMeasured ? Math.min(1.5, h.new_last_year_avg_cents / h.last_year_avg_cents) : 0.45,
+    retentionMeasured,
+    newRatioMeasured,
   };
 }
 
-function readAssumption(params, key, fallback, { min, max }) {
+function readAssumption(params, key, fallback, { min, max, digits = 0 }) {
   const raw = params?.get(key);
   if (raw === null || raw === undefined || raw === '') return fallback;
   const n = Number(String(raw).replace(/[$,%\s]/g, ''));
-  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback;
+  const scale = 10 ** digits;
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n * scale) / scale)) : fallback;
 }
 
+// Returning households give the average gift, changed by `gift_change` percent (0 unless the
+// reader sets it: no growth or inflation is assumed). A new household gives `new_ratio` percent
+// of that same average in its first year.
 export function projectWhatIf(base, params) {
   const inputs = {
     households: readAssumption(params, 'households', base.households, { min: 0, max: 100000 }),
     average: readAssumption(params, 'average', base.average, { min: 0, max: 10000000 }),
     retention: readAssumption(params, 'retention', base.retention, { min: 0, max: 100 }),
     new_households: readAssumption(params, 'new_households', base.new_households, { min: 0, max: 100000 }),
+    new_ratio: readAssumption(params, 'new_ratio', Math.round(base.newRatio * 100), { min: 0, max: 150 }),
+    gift_change: readAssumption(params, 'gift_change', 0, { min: -100, max: 200, digits: 1 }),
   };
+  const averageCents = Math.round(inputs.average * (1 + inputs.gift_change / 100) * 100);
   const returning = Math.round(inputs.households * inputs.retention / 100);
-  const returningCents = returning * inputs.average * 100;
-  const newCents = Math.round(inputs.new_households * inputs.average * base.newRatio) * 100;
-  return { inputs, returning, returningCents, newCents, totalCents: returningCents + newCents };
+  const returningCents = returning * averageCents;
+  const newCents = Math.round(inputs.new_households * averageCents * inputs.new_ratio / 100);
+  return { inputs, averageCents, returning, returningCents, newCents, totalCents: returningCents + newCents };
+}
+
+// "How this is figured": every assumption in plain language, with the value Connect's records
+// gave for it, so a reader can see where each starting number came from.
+function whatIfMethod(a, base) {
+  const h = a.households;
+  const y1 = a.year - 1;
+  const y2 = a.year - 2;
+  const [, m, d] = a.as_of.split('-').map(Number);
+  const item = (title, text, value) => `<li><div><b>${e(title)}</b><p>${text}</p></div>${value ? `<span class="ga-method-value">${value}</span>` : ''}</li>`;
+  const fundText = fundKey(a) === 'all' ? 'Gifts to every fund count.' : e(scopeShort(a).trim());
+  return `<div class="panel panel-spaced ga-method"><h2>How this is figured</h2>
+    <p class="muted-line">Every starting value comes from Connect’s giving records; nothing on this page is saved or changes the budget.</p>
+    <ul>
+      ${item('Who counts', `A household is a Connect household, or one person with no household. Gifts from organizations (such as donor-advised funds) and anonymous gifts, like loose plate cash, are left out. ${fundText}`, '')}
+      ${item('Starting point', `The 12 months ending ${e(MONTH_NAMES[m - 1])} ${d}, ${a.year}: every household that gave at least once, and their average total for those 12 months.`, `${h.t12_households} households · ${money(base.average * 100)} average`)}
+      ${item('Households who keep giving', base.retentionMeasured
+    ? `Households that gave in both ${y2} and ${y1}, divided by households that gave in ${y2} (${h.retained_households} of ${h.two_years_ago_households}). Whole calendar years, so this year’s unfinished months do not skew it.`
+    : `There was no ${y2} giving to measure against, so 90% is assumed.`, `${base.retention}%`)}
+      ${item('New households', `Households that gave in ${y1} but not in ${y2}, used as the expected number of new households next year.`, String(base.new_households))}
+      ${item('New household’s first-year gift', base.newRatioMeasured
+    ? `The average ${y1} total of those new households (${money(h.new_last_year_avg_cents)}) divided by the average ${y1} total of every giving household (${money(h.last_year_avg_cents)}), capped at 150%.`
+    : `There was no ${y1} giving to measure, so 45% of the average gift is assumed.`, pct(base.newRatio))}
+      ${item('No growth built in', 'Returning households are assumed to give the same average as the last 12 months: no raise, no inflation. Use “Average gift change” to try one; it applies to new households’ gifts too.', '0% unless changed')}
+      ${item('The projection', `For calendar ${a.year + 1}: giving households × households who keep giving × average gift, plus new households × average gift × the new household’s share.`, '')}
+    </ul></div>`;
 }
 
 export function renderWhatIfPage({ result, params, keep = {} }) {
@@ -417,18 +571,20 @@ export function renderWhatIfPage({ result, params, keep = {} }) {
   const vsLast = p.totalCents - a.households.t12_cents;
   const fund = fundKey(a);
   const scope = fund === 'all' ? '' : ` for ${scopePhrase(a)}`;
-  const field = (key, label, note, suffix = '') => `<label class="ga-assume"><span><b>${label}</b><small>${note}</small></span>
-      <span class="ga-input">${suffix === '$' ? '<i>$</i>' : ''}<input type="number" name="${key}" value="${p.inputs[key]}" min="0"${key === 'retention' ? ' max="100"' : ''} step="1" inputmode="numeric">${suffix === '%' ? '<i>%</i>' : ''}</span></label>`;
+  const field = (key, label, note, suffix = '', { min = 0, max, step = 1 } = {}) => `<label class="ga-assume"><span><b>${label}</b><small>${note}</small></span>
+      <span class="ga-input">${suffix === '$' ? '<i>$</i>' : ''}<input type="number" name="${key}" value="${p.inputs[key]}" min="${min}"${max !== undefined ? ` max="${max}"` : ''} step="${step}" inputmode="${step === 1 && min >= 0 ? 'numeric' : 'decimal'}">${suffix === '%' ? '<i>%</i>' : ''}</span></label>`;
   return `${fundPicker(a, { page: 'what-if', hidden: keep })}
-    <p class="lede">Change the assumptions to see what ${nextYear} household giving${e(scope)} could look like. Nothing here changes the budget; the starting values come from Connect’s giving records. Organizations and anonymous plate cash are left out.</p>
+    <p class="lede">Change the assumptions to see what ${nextYear} household giving${e(scope)} could look like. Nothing here changes the budget; the starting values come from Connect’s giving records. Organizations and anonymous plate cash are left out. How each one is figured is below.</p>
     <div class="ga-two">
       <form method="GET" action="/" class="panel ga-assumptions">
         <input type="hidden" name="section" value="giving-analytics"><input type="hidden" name="page" value="what-if">${fund === 'general' ? '' : `<input type="hidden" name="fund" value="${e(fund)}">`}${keep.council ? '<input type="hidden" name="council" value="1">' : ''}
         <h2>Assumptions for ${nextYear}</h2>
         ${field('households', 'Giving households', `${base.households} gave in the last 12 months`)}
         ${field('average', 'Average annual gift', `${money(base.average * 100)} per household in the last 12 months`, '$')}
-        ${field('retention', 'Households who keep giving', `${base.retention}% of ${a.year - 2}’s households gave again in ${a.year - 1}`, '%')}
-        ${field('new_households', 'New giving households', `${base.new_households} in ${a.year - 1}; a new household gives about ${pct(base.newRatio)} of the average in its first year`)}
+        ${field('gift_change', 'Average gift change', 'Raise or lower every household’s gift; 0% assumes no growth or inflation', '%', { min: -100, max: 200, step: 0.1 })}
+        ${field('retention', 'Households who keep giving', base.retentionMeasured ? `${base.retention}% of ${a.year - 2}’s households gave again in ${a.year - 1}` : `No ${a.year - 2} giving to measure; 90% assumed`, '%', { max: 100 })}
+        ${field('new_households', 'New giving households', `${base.new_households} in ${a.year - 1}`)}
+        ${field('new_ratio', 'New household’s first-year gift', `As a share of the average gift; ${base.newRatioMeasured ? `${pct(base.newRatio)} in ${a.year - 1}` : '45% assumed'}`, '%', { max: 150 })}
         <div class="form-actions"><button type="submit">Recalculate</button><a class="ga-link-button is-outline" href="${href('what-if', { ...keep, fund })}">Reset to actual</a></div>
       </form>
       <div class="ga-projection">
@@ -437,18 +593,20 @@ export function renderWhatIfPage({ result, params, keep = {} }) {
         <p>${signedMoney(vsLast)} vs. the last 12 months (${money(a.households.t12_cents)})</p>
         <dl>
           <div><dt>Returning households</dt><dd>${p.returning}</dd></div>
+          <div><dt>Average gift used</dt><dd>${money(p.averageCents)}</dd></div>
           <div><dt>Giving from returning households</dt><dd>${money(p.returningCents)}</dd></div>
           <div><dt>Giving from new households</dt><dd>${money(p.newCents)}</dd></div>
           <div><dt>Change vs. last 12 months</dt><dd>${a.households.t12_cents ? `${vsLast >= 0 ? '+' : '−'}${Math.abs(vsLast / a.households.t12_cents * 100).toFixed(1)}%` : '—'}</dd></div>
         </dl>
       </div>
-    </div>`;
+    </div>
+    ${whatIfMethod(a, base)}`;
 }
 
 // ── Giving statements ─────────────────────────────────────────────────────────────────────────
 
 function namedRefusal(what) {
-  return `<div class="panel"><h2>${e(what)} name each household</h2><p class="muted-line">They are available to people with Giving view access. Council access to Giving is totals only, so the Trends, Year over year, Household bands, Pledges and What-if pages are the council’s view of giving.</p></div>`;
+  return `<div class="panel"><h2>${e(what)} name each household</h2><p class="muted-line">They are available to people with Giving view access. Council access to Giving is totals only, so the Trends, Year over year, Pledges and What-if pages, and the annual Giving bands, are the council’s view of giving.</p></div>`;
 }
 
 export function renderStatementsPage({ result, councilPreview }) {
@@ -476,9 +634,12 @@ const NUDGE_HINTS = {
   stepped_up: 'The last six months are at least half again the six before',
 };
 
-export function renderNudgesPage({ result, totals, params, canEdit, councilPreview, status }) {
-  if (councilPreview) return namedRefusal('Giving nudges');
-  if (!result.ok) return `${statusBanner(status)}${unavailable('Giving nudges', result.message)}`;
+// The follow-up queue: one tab per kind of nudge, each household with assign and mark-done forms
+// for Giving edit (Connect re-checks that on every write). Giving reports › Nudges and next steps
+// shows it above the plateau ladder; `kindHref(kind)` keeps that page's own choices in each tab.
+// The caller refuses first for totals-only access, since every row names a household.
+export function renderNudgeQueue({ result, totals, params, canEdit, kindHref }) {
+  if (!result.ok) return unavailable('Giving nudges', result.message);
   const { nudges, staff } = result.data;
   const kinds = nudges.kinds;
   const requested = params?.get('kind');
@@ -496,14 +657,12 @@ export function renderNudgesPage({ result, totals, params, canEdit, councilPrevi
     const thank = current.key === 'first_time' ? `<a class="ga-link-button" href="${CONNECT_GIVING}?pane=receipts#giving">Thank in Connect</a>` : '';
     return `<li><div><b>${e(n.name)}</b><small>${e(n.detail)}</small></div><div class="ga-amount">${money(n.cents)}</div><div class="right ga-actions">${thank}${actions}</div></li>`;
   }).join('');
-  return `${statusBanner(status)}
-    <p class="lede">Households worth a personal touch, found from giving patterns. Nothing is sent automatically; each nudge is a prompt for a pastor or staff member.</p>
-    ${kpis([
+  return `${kpis([
       ['Open nudges', String(openTotal), `Across ${kinds.filter((k) => k.open_count).length} kind${kinds.filter((k) => k.open_count).length === 1 ? '' : 's'}`],
       ['Done this month', String(nudges.done_this_month), 'Thank-yous, calls and notes', nudges.done_this_month ? 'good' : ''],
       [`First-time givers, ${result.data.year}`, firstTime === null ? '—' : String(firstTime), 'Every one thanked within two weeks is the goal'],
     ])}
-    <div class="ga-tabs" role="navigation" aria-label="Kinds of nudge">${kinds.map((k) => `<a href="${href('nudges', { kind: k.key })}"${k.key === current.key ? ' class="is-on" aria-current="page"' : ''}><b>${e(k.label)}</b><small>${k.open_count} open</small></a>`).join('')}</div>
+    <div class="ga-tabs" role="navigation" aria-label="Kinds of nudge">${kinds.map((k) => `<a href="${kindHref(k.key)}"${k.key === current.key ? ' class="is-on" aria-current="page"' : ''}><b>${e(k.label)}</b><small>${k.open_count} open</small></a>`).join('')}</div>
     <div class="panel panel-spaced"><div class="panel-head"><div><h2>${e(current.label)}</h2><span class="muted">${e(NUDGE_HINTS[current.key] || '')}</span></div><span class="muted">${current.items.length < current.open_count ? `${current.items.length} of ${current.open_count} open` : `${current.open_count} open`}</span></div>
       ${items ? `<ul class="row-list ga-nudges">${items}</ul>` : '<div class="empty-note">Nothing open here.</div>'}
       ${current.key === 'first_time' ? '<p class="muted-line">A thank-you sent from Connect’s receipt queue marks the gift done here too.</p>' : ''}</div>`;
@@ -556,6 +715,18 @@ export const GIVING_ANALYTICS_STYLES = `
     .ga-projection dl div { display:flex; justify-content:space-between; padding:8px 0; }
     .ga-projection dt { color:#DCE3EE; }
     .ga-projection dd { margin:0; font-weight:600; }
+    .ga-method ul { list-style:none; margin:10px 0 0; padding:0; }
+    .ga-method li { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:10px 0; border-bottom:1px solid #EEF0F4; }
+    .ga-method li p { margin:2px 0 0; color:#4B5563; font-size:13.5px; }
+    .ga-method-value { flex:none; font-weight:700; color:var(--navy); white-space:nowrap; text-align:right; }
+    .ga-pace-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px 14px; align-items:end; margin-top:0; }
+    .ga-pace-form .muted-line { grid-column:1 / -1; margin:0; }
+    .ga-pace-form .form-actions button { margin-top:0; }
+    .ga-pace li { grid-template-columns:minmax(0,1.2fr) minmax(80px,2fr) auto; }
+    .ga-pace li small { grid-column:1 / -1; color:#6B7280; font-size:12px; margin-top:-6px; }
+    .ga-pace .ga-meter { height:12px; }
+    .ga-pace .is-prior span { background:#C3CDDD; }
+    .ga-pace .is-budget span { background:#C9962E; }
     .ga-link-button { display:inline-block; padding:9px 16px; border-radius:8px; background:var(--navy); color:#fff; font-size:14px; font-weight:600; text-decoration:none; white-space:nowrap; }
     .ga-link-button.is-outline { background:#fff; color:var(--navy); border:1px solid var(--navy); }
     .ga-assumptions .form-actions { align-items:center; }

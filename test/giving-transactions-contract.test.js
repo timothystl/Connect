@@ -141,6 +141,30 @@ describe('Transactions page contract and gift corrections (giving-transactions-v
     expect((await search(db, '?from=2026-01-01&to=2026-12-31&sort=amount_asc')).rows.map((x) => x.amount)).toEqual([1250, 4000, 10000]);
   });
 
+  it('sorts by any column, both ways, from an allowlist only', async () => {
+    const { db } = await setup();
+    const order = async (sort, key = 'person_name') => (await search(db, `?from=2026-01-01&to=2026-12-31&sort=${sort}`)).rows.map((x) => x[key]);
+    // Named givers A to Z (or Z to A); anonymous gifts always last.
+    expect(await order('name_asc')).toEqual(['Walter Krause', 'Anna Schreiber', '']);
+    expect(await order('name_desc')).toEqual(['Anna Schreiber', 'Walter Krause', '']);
+    expect(await order('name')).toEqual(['Walter Krause', 'Anna Schreiber', '']);
+    expect(await order('fund_desc', 'fund_name')).toEqual(['Missions', 'General Fund', 'General Fund']);
+    expect(await order('method_asc', 'method')).toEqual(['cash', 'cash', 'check']);
+    expect((await order('check_desc', 'check_number'))[0]).toBe('2207');
+    expect((await order('envelope_asc', 'envelope_number'))).toEqual(['212', '', '']);
+    expect(await order('batch_desc', 'id')).toEqual([...(await order('batch_asc', 'id'))].reverse());
+    // Anything not on the list reads as newest first, and never reaches the SQL.
+    const injected = await search(db, `?from=2026-01-01&to=2026-12-31&sort=${encodeURIComponent('gift_date; DROP TABLE funds')}`);
+    expect(injected.filters.sort).toBe('date_desc');
+    expect(injected.rows[0].gift_date).toBe('2026-09-27');
+    // The By giver view sorts on its own columns.
+    const givers = async (gsort) => (await search(db, `?from=2026-01-01&to=2026-12-31&gsort=${gsort}`)).by_giver.map((g) => g.person_name);
+    expect(await givers('total_desc')).toEqual(['Walter Krause', 'Anna Schreiber', '']);
+    expect(await givers('total_asc')).toEqual(['', 'Anna Schreiber', 'Walter Krause']);
+    expect(await givers('name_desc')).toEqual(['Anna Schreiber', 'Walter Krause', '']);
+    expect((await search(db, '?gsort=evil')).filters.giver_sort).toBe('total_desc');
+  });
+
   it('finds a giver by an old envelope number in Gift Entry too', async () => {
     const { db } = await setup();
     const ws = await (await call(db, '/api/contracts/giving-batch-workspace-v1', { query: '?q=88' })).json();

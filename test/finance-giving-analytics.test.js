@@ -65,6 +65,8 @@ const post = (env, fields, headers = {}) => worker.fetch(new Request('https://fi
   method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'jwt', 'Sec-Fetch-Site': 'same-origin', ...headers }, body: new URLSearchParams(fields),
 }), env);
 const paths = (calls) => calls.map((c) => c.path.split('/').pop());
+// Household bands and the nudge queue now live on Giving reports' combined pages.
+const reports = (env, query) => worker.fetch(new Request(`https://finance.test/?section=giving-reports${query}`, { headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }), env);
 
 describe('Giving analytics pages (Finance v3)', () => {
   it('shows Trends from Connect’s totals, naming nobody', async () => {
@@ -203,12 +205,16 @@ describe('Giving analytics pages (Finance v3)', () => {
     // The sidebar keeps a non-default choice while moving between Giving pages.
     expect(all).toContain('href="/?section=giving-analytics&amp;page=trends&amp;fund=all"');
 
-    for (const page of ['trends', 'year-over-year', 'household-bands', 'pledges', 'what-if']) {
+    for (const page of ['trends', 'year-over-year', 'pledges', 'what-if']) {
       const html = await (await get(env, `&page=${page}&fund=8`)).text();
       expect(calls.filter((c) => !c.query.includes('fiscal_year')).at(-1).query).toBe('?fund=8');
       expect(html).toContain('<option value="8" selected>Building Fund</option>');
       expect(html).toContain('Building Fund');
     }
+    const annual = await (await reports(env, '&page=bands&fund=8')).text();
+    expect(calls.filter((c) => c.path.endsWith('/giving-analytics-v1')).at(-1).query).toBe('?fund=8');
+    expect(annual).toContain('<option value="8" selected>Building Fund</option>');
+    expect(annual).toContain('<input type="hidden" name="view" value="annual">');
     const whatIf = await (await get(env, '&page=what-if&fund=8&council=1')).text();
     expect(whatIf).toContain('<input type="hidden" name="fund" value="8"><input type="hidden" name="council" value="1">');
     expect(whatIf).toContain('Projected 2027 household giving for Building Fund');
@@ -220,11 +226,18 @@ describe('Giving analytics pages (Finance v3)', () => {
     expect(concentration).toContain('href="/?section=charts&amp;page=concentration" class="is-on"');
   });
 
-  it('lists household bands and pledge progress', async () => {
+  it('lists household bands (now Giving reports › Giving bands, Annual) and pledge progress', async () => {
     const { env } = makeEnv();
-    const bands = await (await get(env, '&page=household-bands')).text();
+    const bands = await (await reports(env, '&page=bands')).text();
+    expect(bands).toContain('<h1 class="page-title">Giving bands</h1>');
+    expect(bands).toContain('<span class="is-on" aria-current="true">Annual</span>');
+    expect(bands).toContain('href="/?section=giving-reports&amp;page=bands&amp;view=weekly');
     expect(bands).toContain('<td>$10,000 and up</td><td>10</td><td>3%</td><td>$269,100</td><td>29%</td>');
     expect(bands).toContain('No names are shown on this page.');
+    // The old Household bands link lands on the Annual view, keeping its fund.
+    const old = await get(env, '&page=household-bands&fund=donor&evil=1');
+    expect(old.status).toBe(303);
+    expect(old.headers.get('Location')).toBe('/?section=giving-reports&page=bands&view=annual&fund=donor');
     const pledges = await (await get(env, '&page=pledges')).text();
     expect(pledges).toContain('$684,000');
     expect(pledges).toContain('212 pledgers');
@@ -245,6 +258,45 @@ describe('Giving analytics pages (Finance v3)', () => {
     expect(calls.every((c) => c.body === null)).toBe(true);
   });
 
+  it('lets the new-household ratio and an average gift change be set, and explains every assumption', () => {
+    const base = whatIfBaseline(TOTALS.households);
+    // 1,040 ÷ 2,310 = 45%; retention 376 of 400 = 94%.
+    expect(Math.round(base.newRatio * 100)).toBe(45);
+    expect(base).toMatchObject({ retentionMeasured: true, newRatioMeasured: true });
+    const plain = projectWhatIf(base, new URLSearchParams('households=400&average=2400&retention=95&new_households=30'));
+    expect(plain.inputs).toMatchObject({ new_ratio: 45, gift_change: 0 });
+    expect(plain.newCents).toBe(Math.round(30 * 240000 * 0.45));
+    const changed = projectWhatIf(base, new URLSearchParams('households=400&average=2400&retention=95&new_households=30&new_ratio=60&gift_change=2.5'));
+    expect(changed.averageCents).toBe(246000);
+    expect(changed.returningCents).toBe(380 * 246000);
+    expect(changed.newCents).toBe(Math.round(30 * 246000 * 0.6));
+    expect(changed.totalCents).toBe(changed.returningCents + changed.newCents);
+    expect(projectWhatIf(base, new URLSearchParams('gift_change=-500&new_ratio=900')).inputs).toMatchObject({ gift_change: -100, new_ratio: 150 });
+    // With no earlier year to measure, the fixed guesses are used and flagged.
+    const empty = whatIfBaseline({ t12_households: 0, t12_cents: 0 });
+    expect(empty).toMatchObject({ retention: 90, newRatio: 0.45, retentionMeasured: false, newRatioMeasured: false });
+  });
+
+  it('shows how the what-if is figured, with the values Connect’s records gave', async () => {
+    const { env } = makeEnv();
+    const html = await (await get(env, '&page=what-if&new_ratio=60&gift_change=3')).text();
+    expect(html).toContain('How this is figured');
+    expect(html).toContain('A household is a Connect household, or one person with no household.');
+    expect(html).toContain('Gifts to every fund count.');
+    expect(html).toContain('The 12 months ending September 20, 2026');
+    expect(html).toContain('<span class="ga-method-value">398 households · $2,308 average</span>');
+    expect(html).toContain('Households that gave in both 2024 and 2025, divided by households that gave in 2024 (376 of 400).');
+    expect(html).toContain('<span class="ga-method-value">94%</span>');
+    expect(html).toContain('Households that gave in 2025 but not in 2024');
+    expect(html).toContain('($1,040) divided by the average 2025 total of every giving household ($2,310), capped at 150%.');
+    expect(html).toContain('<span class="ga-method-value">45%</span>');
+    expect(html).toContain('no raise, no inflation');
+    expect(html).toContain('For calendar 2027');
+    expect(html).toContain('name="new_ratio" value="60"');
+    expect(html).toContain('name="gift_change" value="3"');
+    expect(html).toContain('<dt>Average gift used</dt><dd>$2,377</dd>');
+  });
+
   it('links statements to Connect, and hides named pages for council', async () => {
     const { env } = makeEnv();
     const html = await (await get(env, '&page=statements')).text();
@@ -252,8 +304,8 @@ describe('Giving analytics pages (Finance v3)', () => {
     expect(html).toContain('Email 309 · print 103');
     expect(html).toContain('href="https://connect.timothystl.org/?pane=letters#giving"');
     const council = makeEnv({ role: 'council', giving: 'anon' });
-    const hidden = await (await get(council.env, '&page=nudges')).text();
-    expect(hidden).toContain('Giving nudges name each household');
+    const hidden = await (await reports(council.env, '&page=plateaus')).text();
+    expect(hidden).toContain('Nudges and next steps names givers');
     expect(hidden).not.toContain('Anna Schreiber');
     expect(paths(council.calls)).not.toContain('giving-analytics-people-v1');
     const preview = makeEnv();
@@ -264,19 +316,26 @@ describe('Giving analytics pages (Finance v3)', () => {
 
   it('shows nudges with assign and done forms, and relays them to Connect', async () => {
     const { env, calls } = makeEnv();
-    const html = await (await get(env, '&page=nudges&kind=stopped')).text();
+    // The old Giving nudges link lands on Giving reports › Nudges and next steps.
+    const moved = await get(env, '&page=nudges&kind=stopped');
+    expect(moved.status).toBe(303);
+    expect(moved.headers.get('Location')).toBe('/?section=giving-reports&page=plateaus&kind=stopped');
+    const html = await (await reports(env, '&page=plateaus&kind=stopped')).text();
+    expect(html).toContain('Follow-up queue');
+    expect(html.indexOf('Follow-up queue')).toBeLessThan(html.indexOf('Next steps: the plateau ladder'));
+    expect(html).toContain('href="/?section=giving-reports&amp;page=plateaus&amp;year=2026&amp;scope=household&amp;low_frequency_max=3&amp;kind=first_time"');
     expect(html).toContain('Anna Schreiber');
     expect(html).toContain('Done this month');
     expect(html).toContain('<option value="pastor">Pastor Dinger</option>');
     expect(html).toContain('value="done"');
     const res = await post(env, { op: 'assign', kind: 'stopped', subject_key: 'p:3', episode: '2026-05-03', assigned_to: 'pastor' });
     expect(res.status).toBe(303);
-    expect(res.headers.get('Location')).toBe('/?section=giving-analytics&page=nudges&kind=stopped&status=ok&msg=Nudge+assigned.');
+    expect(res.headers.get('Location')).toBe('/?section=giving-reports&page=plateaus&kind=stopped&status=ok&msg=Nudge+assigned.');
     expect(calls.find((c) => c.path.endsWith('/giving-followup-write-v1')).body).toEqual({ op: 'assign', kind: 'stopped', subject_key: 'p:3', episode: '2026-05-03', assigned_to: 'pastor' });
-    const first = await (await get(env, '&page=nudges')).text();
+    const first = await (await reports(env, '&page=plateaus')).text();
     expect(first).toContain('href="https://connect.timothystl.org/?pane=receipts#giving"');
     const viewOnly = makeEnv({ giving: 'view' });
-    expect(await (await get(viewOnly.env, '&page=nudges&kind=stopped')).text()).not.toContain('value="done"');
+    expect(await (await reports(viewOnly.env, '&page=plateaus&kind=stopped')).text()).not.toContain('value="done"');
   });
 
   it('shows Connect’s refusal and refuses cross-site posts and unknown actions itself', async () => {

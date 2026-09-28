@@ -1,7 +1,7 @@
 // ── Reports, Engagement, Prayer API handlers ─────────────────────────────────
 import { json } from './auth.js';
 import { makeBreezeClient } from './breeze.js';
-import { isoWeekKey, bucketGivingMethod, projectYearEnd, sundaysElapsedThroughDate, sundaysInYear, nthSundayOfYear, periodAsOfDate, monthElapsedFraction, spreadBudgetYtd, computeConcentration, computeGivingPlateaus, fetchGivingPlateauRows, plateauWeeksElapsed, computeGivingBands, computeGivingDistribution, inflationAdjustCents, CPI_U_ANNUAL, FUND_CATEGORIES, normalizeFundCategory, resolveGeneralFundIds, resolveGeneralFundBudget, buildBoardCategoryBlock, SACRAMENT_YES, csvRow, safeFilenamePart} from './api-utils.js';
+import { isoWeekKey, bucketGivingMethod, projectYearEnd, sundaysElapsedThroughDate, sundaysInYear, nthSundayOfYear, periodAsOfDate, monthElapsedFraction, spreadBudgetYtd, computeConcentration, computeGivingPlateaus, fetchGivingPlateauRows, plateauWeeksElapsed, computeGivingBands, computeGivingDistribution, inflationAdjustCents, CPI_U_ANNUAL, FUND_CATEGORIES, normalizeFundCategory, resolveGeneralFundIds, resolveGeneralFundBudget, buildBoardCategoryBlock, SACRAMENT_YES, csvRow, safeFilenamePart, sameDayLastYear, yearElapsedShare} from './api-utils.js';
 import { resolveChurchYearPrecedence, readCashPolicy } from './api-finance.js';
 import { loadGivingYearTrendRows } from './giving-rollups.js';
 
@@ -1495,42 +1495,70 @@ if (seg === 'reports/giving-statement-household' && method === 'GET') {
 
 if (seg === 'reports/giving-yoy' && method === 'GET') {
   if (!isFinance) return json({ error: 'Access denied' }, 403);
-  const baseYear = parseInt(url.searchParams.get('year') || String(new Date().getFullYear()), 10);
+  // ?as_of=YYYY-MM-DD is "today" (the real date unless a caller pins it). When the chosen year is
+  // that year, the year is not over, so each person also gets a like-for-like comparison: this
+  // year through as_of against last year through the same day, and a projected year-end.
+  const asOfRaw = String(url.searchParams.get('as_of') || '');
+  const asOf = /^\d{4}-\d{2}-\d{2}$/.test(asOfRaw) && !Number.isNaN(Date.parse(`${asOfRaw}T00:00:00Z`)) ? asOfRaw : new Date().toISOString().slice(0, 10);
+  const baseYear = parseInt(url.searchParams.get('year') || asOf.slice(0, 4), 10);
   if (!baseYear || baseYear < 2000 || baseYear > 2100) return json({ error: 'Invalid year' }, 400);
+  const partial = baseYear === Number(asOf.slice(0, 4));
+  const priorAsOf = sameDayLastYear(asOf);
   const numYears = 3;
   const yearList = [];
   for (let y = baseYear - numYears + 1; y <= baseYear; y++) yearList.push(String(y));
   const placeholders = yearList.map(() => '?').join(',');
+  const giftDay = "COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date)";
   const rows = (await db.prepare(
     `SELECT p.id, p.first_name, p.last_name, p.member_type,
-            substr(COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date),1,4) AS yr,
-            SUM(ge.amount) AS total_cents, COUNT(ge.id) AS gifts
+            substr(${giftDay},1,4) AS yr,
+            SUM(ge.amount) AS total_cents, COUNT(ge.id) AS gifts,
+            SUM(CASE WHEN ${giftDay} BETWEEN ? AND ? OR ${giftDay} BETWEEN ? AND ? THEN ge.amount ELSE 0 END) AS to_date_cents
      FROM people p
      JOIN giving_entries ge ON ge.person_id=p.id
      JOIN giving_batches gb ON ge.batch_id=gb.id
      WHERE p.active=1
-       AND substr(COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date),1,4) IN (${placeholders})
+       AND substr(${giftDay},1,4) IN (${placeholders})
      GROUP BY p.id, yr
      ORDER BY p.last_name, p.first_name, yr`
-  ).bind(...yearList).all()).results || [];
+  ).bind(`${baseYear}-01-01`, asOf, `${baseYear - 1}-01-01`, priorAsOf, ...yearList).all()).results || [];
 
   const personMap = {};
   for (const r of rows) {
     if (!personMap[r.id]) {
       personMap[r.id] = { id: r.id, first_name: r.first_name, last_name: r.last_name, member_type: r.member_type, by_year: {} };
     }
-    personMap[r.id].by_year[r.yr] = { total_cents: r.total_cents, gifts: r.gifts };
+    personMap[r.id].by_year[r.yr] = { total_cents: r.total_cents, gifts: r.gifts, to_date_cents: r.to_date_cents || 0 };
   }
   const currYrStr = String(baseYear), priorYrStr = String(baseYear - 1);
+  const elapsed = yearElapsedShare(asOf);
+  const pctOf = (now, before) => (before > 0 ? Math.round((now - before) * 1000 / before) / 10 : null);
   const people = Object.values(personMap).map(p => {
     const curr = (p.by_year[currYrStr] || {}).total_cents || 0;
     const prior = (p.by_year[priorYrStr] || {}).total_cents || 0;
     const change_cents = curr - prior;
-    const change_pct = prior > 0 ? Math.round((curr - prior) * 1000 / prior) / 10 : null;
-    return { ...p, curr_total: curr, prior_total: prior, change_cents, change_pct };
+    const change_pct = pctOf(curr, prior);
+    const out = { ...p, curr_total: curr, prior_total: prior, change_cents, change_pct };
+    if (partial) {
+      // Year to date against last year to the same day; the projection scales last year's whole
+      // year by how this year compares so far, or (with nothing last year to compare) runs this
+      // year's pace to December 31.
+      const currYtd = (p.by_year[currYrStr] || {}).to_date_cents || 0;
+      const priorYtd = (p.by_year[priorYrStr] || {}).to_date_cents || 0;
+      const projected = priorYtd > 0 ? Math.round(prior * currYtd / priorYtd) : Math.round(elapsed > 0 ? currYtd / elapsed : currYtd);
+      Object.assign(out, {
+        curr_ytd: currYtd, prior_ytd: priorYtd,
+        ytd_change_cents: currYtd - priorYtd, ytd_change_pct: pctOf(currYtd, priorYtd),
+        projected_cents: projected, projected_change_cents: projected - prior, projected_change_pct: pctOf(projected, prior),
+      });
+    }
+    return out;
   });
   people.sort((a, b) => Math.abs(b.change_cents) - Math.abs(a.change_cents));
-  return json({ base_year: baseYear, years: yearList, people });
+  return json({
+    base_year: baseYear, years: yearList, people,
+    partial, as_of: partial ? asOf : null, prior_as_of: partial ? priorAsOf : null, year_elapsed: partial ? elapsed : 1,
+  });
 }
 
 

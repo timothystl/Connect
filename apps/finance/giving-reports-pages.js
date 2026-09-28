@@ -3,11 +3,18 @@
 // Connect's own reports use, so the two cannot disagree. Finance pages run no script: each
 // report's choices are GET parameters, and Print is the shell's print version of the page.
 //
-// Distribution, By fund and method, and Giving and attendance name nobody, so council's
-// totals-only Giving access may read them. Top and lapsed givers, Each giver's trend, Plateaus
-// and Bands need Giving view (Connect refuses the rest), and council preview shows that refusal.
+// Distribution, By fund and method, Giving and attendance, and the Annual view of Giving bands
+// name nobody, so council's totals-only Giving access may read them. Top and lapsed givers, Each
+// giver's trend, Nudges and next steps, and the Weekly and Monthly bands need Giving view (Connect
+// refuses the rest), and council preview shows that refusal.
+//
+// Two pages combine what used to be separate pages (Andrew, Sept 28 2026): Nudges and next steps
+// is the Giving follow-up queue (giving-analytics-people-v1) above the plateau ladder, and Giving
+// bands is the annual household bands (giving-analytics-v1) with the weekly and monthly bands.
+// The old Giving › Giving nudges and Household bands links redirect here (shell.js).
 import { escapeHtml as e } from './render-helpers.js';
 import { groupByFundCode } from './council-report-pages.js';
+import { renderHouseholdBandsPage, renderNudgeQueue } from './giving-analytics-pages.js';
 
 export const GIVING_REPORT_PAGES = Object.freeze([
   { id: 'distribution', label: 'Distribution', named: false },
@@ -15,8 +22,9 @@ export const GIVING_REPORT_PAGES = Object.freeze([
   { id: 'attendance', label: 'Giving and attendance', named: false },
   { id: 'insights', label: 'Top and lapsed givers', named: true },
   { id: 'giver-trends', label: 'Each giver, year over year', named: true },
-  { id: 'plateaus', label: 'Plateaus and nudges', named: true },
-  { id: 'bands', label: 'Weekly and monthly bands', named: true },
+  { id: 'plateaus', label: 'Nudges and next steps', named: true },
+  // Annual is totals only; Weekly and Monthly name givers.
+  { id: 'bands', label: 'Giving bands', named: false },
 ]);
 
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -35,13 +43,19 @@ export function givingReportParams(params, today) {
   const to = isDay(params.get('to')) ? params.get('to') : `${year}-12-31`;
   const fund = /^\d{1,9}$/.test(params.get('fund_id') || '') ? params.get('fund_id') : '';
   const lowFreq = Math.min(51, Math.max(1, Number.parseInt(params.get('low_frequency_max'), 10) || 3));
-  const freq = pick('freq', ['weekly', 'monthly'], 'weekly');
+  // Giving bands: Annual (household bands over the last 12 months) unless Weekly or Monthly is
+  // chosen; an older link that only says ?freq= still opens that view.
+  const bandsView = pick('view', ['annual', 'weekly', 'monthly'], ['weekly', 'monthly'].includes(params.get('freq')) ? params.get('freq') : 'annual');
+  const freq = bandsView === 'annual' ? pick('freq', ['weekly', 'monthly'], 'weekly') : bandsView;
   const upliftRaw = params.get('uplift');
   const uplift = upliftRaw != null && upliftRaw !== '' && Number.isFinite(Number(upliftRaw)) ? Math.min(1000, Math.max(0, Math.round(Number(upliftRaw)))) : (freq === 'monthly' ? 40 : 10);
   return {
     year: Number.isInteger(y) && y >= 2000 && y <= year + 1 ? y : year, thisYear: year,
     scope: pick('scope', ['household', 'person'], 'household'),
-    from: from <= to ? from : to, to: from <= to ? to : from, fund, lowFreq, freq, uplift,
+    from: from <= to ? from : to, to: from <= to ? to : from, fund, lowFreq, freq, uplift, bandsView,
+    // The Annual bands' fund scope (general, donor, revenue, all, or a fund id), as on Giving's
+    // other totals pages; Connect validates it.
+    scopeFund: /^[a-z0-9]{1,20}$/.test(params.get('fund') || '') ? params.get('fund') : 'general',
   };
 }
 
@@ -53,7 +67,8 @@ export function givingReportRequests(pageId, p) {
     case 'insights': return [['insights', { year: p.year }]];
     case 'giver-trends': return [['yoy', { year: p.year }]];
     case 'plateaus': return [['plateaus', { year: p.year, scope: p.scope, fund_id: p.fund, low_frequency_max: p.lowFreq }], ['impact', {}], ['funds', {}]];
-    case 'bands': return [['bands', { year: p.year, scope: p.scope, freq: p.freq, uplift_cents: p.uplift * 100, fund_id: p.fund }], ['funds', {}]];
+    // The Annual view reads giving-analytics-v1 instead (shell.js), so asks nothing here.
+    case 'bands': return p.bandsView === 'annual' ? [] : [['bands', { year: p.year, scope: p.scope, freq: p.freq, uplift_cents: p.uplift * 100, fund_id: p.fund }], ['funds', {}]];
     default: return [['distribution', { year: p.year, scope: p.scope }], ['multiyear', { end: p.year, years: 5 }]];
   }
 }
@@ -217,12 +232,46 @@ export function renderInsightsPage({ results, params: p, keep, namedHidden }) {
 }
 
 // ── Each giver, year over year ───────────────────────────────────────────────────────────────
+const signed = (cents) => `${cents > 0 ? '+' : cents < 0 ? '−' : ''}${money(Math.abs(cents))}`;
+const signedPct = (value) => (value == null ? '—' : `${value > 0 ? '+' : ''}${value}%`);
+const tone = (cents) => (cents > 0 ? 'gr-up' : cents < 0 ? 'gr-down' : '');
+const longDay = (iso) => {
+  const [y, m, d] = String(iso || '').split('-').map(Number);
+  return y ? `${['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][m - 1]} ${d}` : '';
+};
+
+// The year is not over: compare this year so far with last year to the same day, so September
+// is not "gave less" for everyone, and project each giver's year-end from that comparison.
+function renderPartialGiverTrends(form, d) {
+  const base = d.base_year; const prior = base - 1;
+  const through = longDay(d.as_of);
+  const people = (d.people || []).filter((x) => (x.curr_ytd || 0) > 0 || (x.prior_ytd || 0) > 0 || (x.prior_total || 0) > 0);
+  const byChange = (list) => list.slice().sort((a, b) => Math.abs(b.ytd_change_cents) - Math.abs(a.ytd_change_cents));
+  const groups = [
+    ['Gave more', `so far in ${base} than by ${through}, ${prior}`, byChange(people.filter((x) => x.prior_total > 0 && x.curr_ytd > x.prior_ytd))],
+    ['Gave less', `so far in ${base} than by ${through}, ${prior}`, byChange(people.filter((x) => x.curr_ytd > 0 && x.curr_ytd < x.prior_ytd))],
+    ['New this year', `gave in ${base}, nothing in ${prior}`, byChange(people.filter((x) => x.prior_total === 0 && x.curr_ytd > 0))],
+    ['Stopped', `gave by ${through}, ${prior}; nothing yet in ${base}`, byChange(people.filter((x) => x.prior_ytd > 0 && x.curr_ytd === 0))],
+  ];
+  const head = `<th>Name</th><th>Type</th><th>${e(prior)} full year</th><th>${e(prior)} to ${e(through)}</th><th>${e(base)} to ${e(through)}</th><th>Change</th><th>%</th><th>Projected ${e(base)}</th><th>vs. ${e(prior)}</th>`;
+  const row = (x) => `<tr><td>${e(nameOf(x))}</td><td>${e(typeOf(x))}</td><td>${money(x.prior_total)}</td><td>${money(x.prior_ytd)}</td><td>${money(x.curr_ytd)}</td>`
+    + `<td class="${tone(x.ytd_change_cents)}">${signed(x.ytd_change_cents)}</td><td>${signedPct(x.ytd_change_pct)}</td><td>${money(x.projected_cents)}</td><td class="${tone(x.projected_change_cents)}">${signed(x.projected_change_cents)}</td></tr>`;
+  const block = ([title, sub, list]) => (list.length ? `<section class="gr-card"><h2>${e(title)} <small>${e(sub)} · ${list.length}</small></h2><div class="table-wrap gr-scroll"><table class="gr-num"><thead><tr>${head}</tr></thead>
+    <tbody>${list.map(row).join('')}</tbody></table></div></section>` : '');
+  const shown = groups.map(block).join('');
+  const sum = (list, key) => list.reduce((s, x) => s + (x[key] || 0), 0);
+  const note = `<p class="gr-caption gr-method"><b>How this is figured.</b> ${e(base)} is not over, so each person’s giving from January 1 through ${e(through)} is compared with their giving from January 1 through ${e(through)}, ${e(prior)} (the same days of the year), and the groups follow that comparison. The projected ${e(base)} total is their whole ${e(prior)} total scaled by how this year compares so far (this year to date ÷ last year to the same day); for someone who had not given by this point last year, it is this year’s giving so far spread over the whole year (${Math.round((d.year_elapsed || 0) * 100)}% of the year has gone by). People who gave in ${e(prior)} only after ${e(through)} and have not given yet this year are on the same schedule, so they are in no group. Counted per person; voided and refunded gifts count at what was kept.</p>`;
+  return `${form}<div class="grid">${groups.map(([t, , list]) => card(t, String(list.length), `${signed(sum(list, 'ytd_change_cents'))} vs. ${e(prior)} to date`)).join('')}</div>
+    ${note}${shown || `<p class="muted">No giving found for ${e(base)} or ${e(prior)}.</p>`}`;
+}
+
 export function renderGiverTrendsPage({ results, params: p, keep, namedHidden }) {
   if (namedHidden) return namedRefusal('Each giver, year over year');
   const [res] = results;
   const form = controls('giver-trends', yearSelect(p), keep);
   if (!res.ok) return form + unavailable('Each giver’s year over year', res.data?.error || res.message);
   const d = res.data;
+  if (d.partial && d.as_of) return renderPartialGiverTrends(form, d);
   const years = d.years || [];
   const base = d.base_year; const prior = base - 1;
   const people = d.people || [];
@@ -259,17 +308,29 @@ function impactPanel(impact, keep) {
   return `<section class="gr-card"><h2>Impact statements</h2><p class="muted">What a suggested increase would make possible, written by the church. The report names the largest one each increase covers.</p>${rows ? `<ul class="gr-impacts">${rows}</ul>` : '<p class="muted">None yet.</p>'}${edit}</section>`;
 }
 
-export function renderPlateausPage({ results, params: p, keep, namedHidden, status }) {
-  if (namedHidden) return namedRefusal('Plateaus and nudges');
+// The follow-up queue (who needs a personal touch now) comes first, then the plateau ladder
+// (the next step up for every giver). Both name households, so both need Giving view; assigning
+// or marking a nudge done needs Giving edit, and Connect checks both again.
+export function renderPlateausPage({ results, params: p, keep, namedHidden, status, nudges = {}, searchParams }) {
+  if (namedHidden) return namedRefusal('Nudges and next steps');
+  const banner = status ? `<p class="status${status.ok ? '' : ' status-error'}">${e(status.message)}</p>` : '';
+  const kind = /^[a-z_]{1,20}$/.test(searchParams?.get('kind') || '') ? searchParams.get('kind') : '';
+  const pageQuery = (extra) => {
+    const q = new URLSearchParams({ section: 'giving-reports', page: 'plateaus', year: String(p.year), scope: p.scope, ...(p.fund ? { fund_id: p.fund } : {}), low_frequency_max: String(p.lowFreq), ...keep, ...extra });
+    return `/?${q.toString().replace(/&/g, '&amp;')}`;
+  };
+  const queue = `<section class="gr-part"><h2 class="gr-part-title">Follow-up queue</h2>
+    <p class="muted">Households worth a personal touch, found from giving patterns across every fund, as of today. Nothing is sent automatically; each nudge is a prompt for a pastor or staff member.</p>
+    ${renderNudgeQueue({ result: nudges.result || { ok: false, message: 'not requested' }, totals: nudges.totals, params: searchParams, canEdit: !!nudges.canEdit && !keep.council, kindHref: (key) => pageQuery({ kind: key }) })}</section>`;
   const [res, impact, funds] = results;
   const form = controls('plateaus', yearSelect(p) + fundSelect(p, funds?.ok ? funds.data.funds : []) + scopeSelect(p)
-    + `<label>Occasional: gifts a year, at most <input type="number" name="low_frequency_max" min="1" max="51" value="${p.lowFreq}" class="gr-small"></label>`, keep);
-  const banner = status ? `<p class="status${status.ok ? '' : ' status-error'}">${e(status.message)}</p>` : '';
-  if (!res.ok) return banner + form + unavailable('The plateau report', res.data?.error || res.message) + impactPanel(impact, keep);
+    + `<label>Occasional: gifts a year, at most <input type="number" name="low_frequency_max" min="1" max="51" value="${p.lowFreq}" class="gr-small"></label>${kind ? hidden('kind', kind) : ''}`, keep);
+  const ladderHead = `<h2 class="gr-part-title">Next steps: the plateau ladder</h2><p class="muted">Each giver’s weekly-equivalent giving for the year chosen here, and the next round amount above it.</p>`;
+  if (!res.ok) return `${banner}${queue}<section class="gr-part">${ladderHead}${form}${unavailable('The plateau report', res.data?.error || res.message)}${impactPanel(impact, keep)}</section>`;
   const d = res.data;
   const who = scopeWord(d.scope, 2);
   const s = d.summary || {};
-  if (!s.total_givers) return `${banner}${form}<p class="muted">No giving found for ${e(d.year)}${p.fund ? ' in this fund' : ''}.</p>${impactPanel(impact, keep)}`;
+  if (!s.total_givers) return `${banner}${queue}<section class="gr-part">${ladderHead}${form}<p class="muted">No giving found for ${e(d.year)}${p.fund ? ' in this fund' : ''}.</p>${impactPanel(impact, keep)}</section>`;
   const weeks = d.partial ? 'so far this year' : 'the whole year ÷ 52';
   const excl = d.excluded_organizations?.count ? `<p class="gr-caption">${plural(d.excluded_organizations.count, 'organization')} (${money(d.excluded_organizations.total_cents)}) left out, such as donor-advised funds and IRA custodians, which pass along a person’s gift.</p>` : '';
   const tiers = d.tiers || [];
@@ -283,31 +344,51 @@ export function renderPlateausPage({ results, params: p, keep, namedHidden, stat
   const dist = d.distribution || [];
   const maxN = Math.max(...dist.map((x) => x.n), 1);
   const histogram = dist.length ? `<section class="gr-card"><h2>Weekly-equivalent giving</h2><div class="gr-hist">${dist.map((x) => `<span style="height:${(x.n / maxN * 100).toFixed(1)}%" title="$${x.plateau_dollars}/wk: ${x.n}"></span>`).join('')}</div><div class="gr-axisrow"><span>$${dist[0].plateau_dollars}/wk</span><span>$${dist[dist.length - 1].plateau_dollars}/wk</span></div></section>` : '';
-  return `${banner}${form}<div class="grid">${card(`Giving ${who}`, String(s.total_givers), `Weekly amounts are ${weeks}`)}${card('If each took the next step', `+${money(s.total_upside_modest_annual_cents)}–${money(s.total_upside_generous_annual_cents)}`, 'a year, modest to generous')}${card('Occasional givers', String(s.low_frequency_givers), `${p.lowFreq} gifts a year or fewer`)}</div>${excl}
+  return `${banner}${queue}<section class="gr-part">${ladderHead}${form}<div class="grid">${card(`Giving ${who}`, String(s.total_givers), `Weekly amounts are ${weeks}`)}${card('If each took the next step', `+${money(s.total_upside_modest_annual_cents)}–${money(s.total_upside_generous_annual_cents)}`, 'a year, modest to generous')}${card('Occasional givers', String(s.low_frequency_givers), `${p.lowFreq} gifts a year or fewer`)}</div>${excl}
     <section class="gr-card"><h2>Nudge targets <small>standard option</small></h2><p class="muted">Each ${who1} is grouped by the next round weekly amount above what they give now; Modest, Standard and Generous are the next three steps.</p><div class="table-wrap"><table class="gr-num"><thead><tr><th>Nudge to</th><th>${who[0].toUpperCase() + who.slice(1)}</th><th>Now</th><th>Average increase</th><th>Added a year</th></tr></thead><tbody>${tierRows}<tr class="total-row"><td>Total</td><td>${s.total_givers}</td><td></td><td></td><td>+${money(s.total_upside_modest_annual_cents)}–${money(s.total_upside_generous_annual_cents)}</td></tr></tbody></table></div></section>
-    <section class="gr-card"><h2>Who is in each step</h2>${tierPeople}</section>${occBlock}${histogram}${impactPanel(impact, keep)}`;
+    <section class="gr-card"><h2>Who is in each step</h2>${tierPeople}</section>${occBlock}${histogram}${impactPanel(impact, keep)}</section>`;
 }
 
-// ── Weekly and monthly bands ─────────────────────────────────────────────────────────────────
-export function renderBandsPage({ results, params: p, keep, namedHidden }) {
-  if (namedHidden) return namedRefusal('Weekly and monthly bands');
+// ── Giving bands ─────────────────────────────────────────────────────────────────────────────
+const BAND_VIEWS = [['annual', 'Annual'], ['weekly', 'Weekly'], ['monthly', 'Monthly']];
+
+function bandsToggle(p, keep) {
+  const link = (view) => {
+    const q = new URLSearchParams({ section: 'giving-reports', page: 'bands', view, ...keep });
+    if (view !== 'annual') { q.set('year', String(p.year)); q.set('scope', p.scope); if (p.fund) q.set('fund_id', p.fund); }
+    else if (p.scopeFund !== 'general') q.set('fund', p.scopeFund);
+    return `/?${q.toString().replace(/&/g, '&amp;')}`;
+  };
+  return `<div class="gr-toggle" role="group" aria-label="Which bands"><span class="gr-toggle-label">Bands by</span>${BAND_VIEWS.map(([view, label]) => (view === p.bandsView
+    ? `<span class="is-on" aria-current="true">${label}</span>` : `<a href="${link(view)}">${label}</a>`)).join('')}</div>
+    <p class="gr-caption">${p.bandsView === 'annual'
+    ? 'Annual: each household’s total for the last 12 months. Totals only; no one is named.'
+    : `${p.bandsView === 'weekly' ? 'Weekly' : 'Monthly'}: each giver’s giving for the year chosen, per ${p.bandsView === 'weekly' ? 'week' : 'month'}, with what a small increase would add. Needs Giving view.`}</p>`;
+}
+
+// One page, three views: Annual (household bands over the last 12 months, from giving-analytics-v1;
+// totals only, so council may read it) or Weekly/Monthly (bands by giving level for a year with an
+// uplift, from giving-reports-v1; needs Giving view, as before).
+export function renderBandsPage({ results, params: p, keep, namedHidden, annual }) {
+  const toggle = bandsToggle(p, keep);
+  if (p.bandsView === 'annual') return toggle + renderHouseholdBandsPage({ result: annual || { ok: false, message: 'not requested' }, keep, at: { section: 'giving-reports', page: 'bands', hidden: { view: 'annual' } } });
+  if (namedHidden) return toggle + namedRefusal('Weekly and monthly giving bands');
   const [res, funds] = results;
-  const per = p.freq === 'monthly' ? 'month' : 'week';
-  const form = controls('bands', yearSelect(p) + fundSelect(p, funds?.ok ? funds.data.funds : []) + scopeSelect(p)
-    + `<label>Per <select name="freq"><option value="weekly"${p.freq === 'weekly' ? ' selected' : ''}>Week</option><option value="monthly"${p.freq === 'monthly' ? ' selected' : ''}>Month</option></select></label>`
+  const form = controls('bands', hidden('view', p.bandsView) + yearSelect(p) + fundSelect(p, funds?.ok ? funds.data.funds : []) + scopeSelect(p)
     + `<label>If each gives $<input type="number" name="uplift" min="0" max="1000" step="1" value="${p.uplift}" class="gr-small"> more</label>`, keep);
-  if (!res.ok) return form + unavailable('Giving bands', res.data?.error || res.message);
+  const top = toggle + form;
+  if (!res.ok) return top + unavailable('Giving bands', res.data?.error || res.message);
   const d = res.data;
   const unit = d.freq === 'monthly' ? 'mo' : 'wk';
   const perWord = d.freq === 'monthly' ? 'month' : 'week';
   const who = scopeWord(d.scope, 2);
   const s = d.summary || {};
-  if (!s.givers) return `${form}<p class="muted">No giving recorded for ${e(d.year)}.</p>`;
+  if (!s.givers) return `${top}<p class="muted">No giving recorded for ${e(d.year)}.</p>`;
   const bands = d.bands || [];
   const maxN = Math.max(...bands.map((b) => b.n), 1);
   const upliftDollars = Math.round((d.uplift_cents || 0) / 100);
   const rows = bands.map((b) => `<tr${b.n ? '' : ' class="is-quiet"'}><td>${b.high_cents == null ? `${money(b.low_cents)}+` : `${money(b.low_cents)}–${money(b.high_cents)}`}/${unit}</td><td class="gr-barcell">${bar(b.n / maxN)}</td><td>${b.n}</td><td>${b.n ? `${money(b.avg_per_period_cents)}/${unit}` : '—'}</td><td>${money(b.total_cents)}</td><td>${b.n ? `+${money(b.uplift_annual_cents)}` : '—'}</td></tr>`).join('');
-  return `${form}<div class="grid">${card(`${who[0].toUpperCase() + who.slice(1)} who gave`, String(s.givers))}${card('Added a year', `+${money(s.uplift_annual_cents)}`, `if every ${scopeWord(d.scope, 1)} gave $${upliftDollars} more a ${perWord}`)}${card(d.partial ? 'Giving at this pace, a full year' : 'Giving', money(d.partial ? s.current_annualized_cents : s.total_cents), d.partial ? `${money(s.total_cents)} so far` : e(String(d.year)))}</div>
+  return `${top}<div class="grid">${card(`${who[0].toUpperCase() + who.slice(1)} who gave`, String(s.givers))}${card('Added a year', `+${money(s.uplift_annual_cents)}`, `if every ${scopeWord(d.scope, 1)} gave $${upliftDollars} more a ${perWord}`)}${card(d.partial ? 'Giving at this pace, a full year' : 'Giving', money(d.partial ? s.current_annualized_cents : s.total_cents), d.partial ? `${money(s.total_cents)} so far` : e(String(d.year)))}</div>
     <section class="gr-card"><h2>${e(who[0].toUpperCase() + who.slice(1))} by giving level ($/${unit})</h2><p class="muted">Each ${scopeWord(d.scope, 1)}’s level is their ${e(d.year)} giving ÷ ${d.periods_elapsed} ${perWord}s${d.partial ? ' so far' : ''}. Anonymous gifts and organizations are left out.</p>
     <div class="table-wrap"><table class="gr-num"><thead><tr><th>Band</th><th></th><th>${e(who[0].toUpperCase() + who.slice(1))}</th><th>Average</th><th>Given ${e(d.year)}</th><th>+$${upliftDollars}/${unit} adds a year</th></tr></thead><tbody>${rows}
     <tr class="total-row"><td>Total</td><td></td><td>${s.givers}</td><td></td><td>${money(s.total_cents)}</td><td>+${money(s.uplift_annual_cents)}</td></tr></tbody></table></div></section>`;
@@ -384,11 +465,20 @@ export const GIVING_REPORTS_STYLES = `
     .gr-hist { display:flex; align-items:flex-end; gap:2px; height:120px; margin-top:10px; border-bottom:1px solid #D5DAE3; }
     .gr-hist span { flex:1; min-height:1px; background:var(--gold); border-radius:2px 2px 0 0; }
     .gr-axisrow { display:flex; justify-content:space-between; margin-top:6px; color:var(--muted); font-size:12px; }
+    .gr-method { max-width:72rem; line-height:1.5; }
+    .gr-part { margin-top:22px; }
+    .gr-part + .gr-part { padding-top:18px; border-top:2px solid var(--line); }
+    .gr-part-title { margin:0 0 .25rem; font-size:20px; }
+    .gr-toggle { display:inline-flex; align-items:center; margin-top:14px; border:1px solid #D5DAE3; border-radius:8px; overflow:hidden; background:#fff; }
+    .gr-toggle-label { padding:7px 12px; font-size:13px; color:var(--muted); border-right:1px solid #D5DAE3; }
+    .gr-toggle a, .gr-toggle .is-on { padding:7px 14px; font-size:14px; color:var(--navy); text-decoration:none; }
+    .gr-toggle a + a, .gr-toggle a + .is-on, .gr-toggle .is-on + a { border-left:1px solid #D5DAE3; }
+    .gr-toggle .is-on { background:var(--navy); color:#fff; font-weight:600; }
     .gr-impacts { margin:.4rem 0 0; padding-left:20px; color:var(--ink); font-size:14px; line-height:1.6; }
     .gr-edit { margin-top:12px; }
     .gr-edit summary { cursor:pointer; font-weight:600; color:var(--navy); }
     .gr-impact-form { margin-top:10px; }
     .gr-impact-row { display:grid; grid-template-columns:minmax(120px,160px) 1fr; gap:10px; margin-top:8px; }
     .gr-impact-row label { display:flex; flex-direction:column; gap:4px; }
-    @media print { .gr-controls, .gr-edit { display:none !important; } .gr-scroll { max-height:none; overflow:visible; } .gr-tier { break-inside:avoid; } details.gr-tier > * { display:block; } }
+    @media print { .gr-controls, .gr-edit, .gr-toggle { display:none !important; } .gr-scroll { max-height:none; overflow:visible; } .gr-tier { break-inside:avoid; } details.gr-tier > * { display:block; } }
 `;

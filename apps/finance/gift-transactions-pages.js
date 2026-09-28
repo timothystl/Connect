@@ -9,10 +9,9 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 export const METHOD_LABELS = { check: 'Check', cash: 'Cash', online: 'Online', card: 'Card', ach: 'ACH / bank', stock: 'Stock', other: 'Other' };
 const VOID_KINDS = [['error', 'Recorded in error'], ['returned', 'Returned check (NSF)'], ['refund', 'Refunded to the giver']];
 const INTERVALS = [['weekly', 'Weekly'], ['biweekly', 'Every two weeks'], ['twice_monthly', 'Twice a month'], ['monthly', 'Monthly']];
-const SORTS = [['date_desc', 'Newest first'], ['date_asc', 'Oldest first'], ['amount_desc', 'Largest first'], ['amount_asc', 'Smallest first'], ['name', 'Name']];
 const STATUSES = [['all', 'All gifts'], ['active', 'Not voided or refunded'], ['voided', 'Voided'], ['refunded', 'Refunded'], ['changed', 'Corrected']];
 // The filter parameters a Transactions URL carries (and the form posts return to).
-export const TRANSACTION_PARAMS = ['from', 'to', 'funds', 'methods', 'min', 'max', 'q', 'status', 'sort', 'view', 'offset', 'batch_id'];
+export const TRANSACTION_PARAMS = ['from', 'to', 'funds', 'methods', 'min', 'max', 'q', 'status', 'sort', 'gsort', 'view', 'offset', 'batch_id'];
 
 const EXACT_USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 function money(cents) {
@@ -74,30 +73,51 @@ function overviewTable(title, rows) {
   return `<div class="panel"><h2>${e(title)}</h2><table class="pm-table tx-overview"><tbody>${rows.map(([label, count, cents]) => `<tr><td>${e(label)} <span class="tone-muted">(${count})</span></td><td class="num">${money(cents)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
+// The fields people use most (search and dates) sit on one row; fund, method, amount and status
+// fold into "More filters", which opens by itself whenever one of them is in use. The column
+// sort rides along as a hidden field so running the report keeps it.
 function filterForm(data, params) {
   const f = data.filters;
   const chosenFunds = new Set((params.get('funds') || '').split(',').filter(Boolean));
   const chosenMethods = new Set((params.get('methods') || '').split(',').filter(Boolean));
   const fundsLabel = chosenFunds.size ? `${chosenFunds.size} fund${chosenFunds.size === 1 ? '' : 's'}` : 'All funds';
   const methodsLabel = chosenMethods.size ? [...chosenMethods].map(methodLabel).join(', ') : 'All methods';
+  const moreInUse = [chosenFunds.size > 0, chosenMethods.size > 0, !!params.get('min'), !!params.get('max'), (f.status || 'all') !== 'all'].filter(Boolean).length;
+  const keep = ['view', 'sort', 'gsort'].filter((k) => params.get(k)).map((k) => `<input type="hidden" name="${k}" value="${e(params.get(k))}">`).join('');
   return `<form method="GET" action="/" class="tx-filters panel">
-    <input type="hidden" name="section" value="giving"><input type="hidden" name="page" value="transactions">
-    ${params.get('view') ? `<input type="hidden" name="view" value="${e(params.get('view'))}">` : ''}
-    <label class="field"><span>From</span><input type="date" name="from" value="${e(f.from)}"></label>
-    <label class="field"><span>To</span><input type="date" name="to" value="${e(f.to)}"></label>
-    <label class="field tx-search"><span>Name, envelope #, check #, or memo</span><input name="q" value="${e(f.q || '')}" placeholder="Current or past envelope # works too"></label>
-    <details class="field tx-pick"><summary>${e(fundsLabel)}</summary><div class="tx-pick-list">
-      ${data.funds.map((fund) => `<label><input type="checkbox" name="fund" value="${fund.id}"${chosenFunds.has(String(fund.id)) ? ' checked' : ''}> ${e(fund.name)}${fund.active ? '' : ' <small>(inactive)</small>'}</label>`).join('')}
-    </div></details>
-    <details class="field tx-pick"><summary>${e(methodsLabel)}</summary><div class="tx-pick-list">
-      ${data.methods.map((m) => `<label><input type="checkbox" name="method" value="${e(m)}"${chosenMethods.has(m) ? ' checked' : ''}> ${e(methodLabel(m))}</label>`).join('')}
-    </div></details>
-    <label class="field tx-amt"><span>Amount from ($)</span><input name="min" inputmode="decimal" value="${e(params.get('min') || '')}" placeholder="0.00"></label>
-    <label class="field tx-amt"><span>to ($)</span><input name="max" inputmode="decimal" value="${e(params.get('max') || '')}" placeholder="any"></label>
-    <label class="field"><span>Show</span><select name="status">${STATUSES.map(([k, v]) => `<option value="${k}"${f.status === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
-    <label class="field"><span>Sort</span><select name="sort">${SORTS.map(([k, v]) => `<option value="${k}"${f.sort === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
-    <div class="form-actions"><button type="submit">Run report</button> <a class="button-outline" href="/?section=giving&amp;page=transactions">Clear</a></div>
+    <input type="hidden" name="section" value="giving"><input type="hidden" name="page" value="transactions">${keep}
+    <div class="tx-main">
+      <label class="field tx-search"><span>Name, envelope #, check #, or memo</span><input type="search" name="q" value="${e(f.q || '')}" placeholder="Current or past envelope # works too"></label>
+      <label class="field"><span>From</span><input type="date" name="from" value="${e(f.from)}"></label>
+      <label class="field"><span>To</span><input type="date" name="to" value="${e(f.to)}"></label>
+      <div class="form-actions"><button type="submit">Run report</button> <a class="button-outline" href="/?section=giving&amp;page=transactions">Clear</a></div>
+    </div>
+    <details class="tx-more"${moreInUse ? ' open' : ''}><summary>More filters${moreInUse ? ` <span class="tx-more-count">${moreInUse} in use</span>` : ''}</summary>
+      <div class="tx-more-fields">
+        <details class="field tx-pick"><summary>${e(fundsLabel)}</summary><div class="tx-pick-list">
+          ${data.funds.map((fund) => `<label><input type="checkbox" name="fund" value="${fund.id}"${chosenFunds.has(String(fund.id)) ? ' checked' : ''}> ${e(fund.name)}${fund.active ? '' : ' <small>(inactive)</small>'}</label>`).join('')}
+        </div></details>
+        <details class="field tx-pick"><summary>${e(methodsLabel)}</summary><div class="tx-pick-list">
+          ${data.methods.map((m) => `<label><input type="checkbox" name="method" value="${e(m)}"${chosenMethods.has(m) ? ' checked' : ''}> ${e(methodLabel(m))}</label>`).join('')}
+        </div></details>
+        <label class="field tx-amt"><span>Amount from ($)</span><input name="min" inputmode="decimal" value="${e(params.get('min') || '')}" placeholder="0.00"></label>
+        <label class="field tx-amt"><span>to ($)</span><input name="max" inputmode="decimal" value="${e(params.get('max') || '')}" placeholder="any"></label>
+        <label class="field"><span>Show</span><select name="status">${STATUSES.map(([k, v]) => `<option value="${k}"${f.status === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+      </div>
+    </details>
   </form>`;
+}
+
+// A column heading that sorts the list: the first click picks the column's natural direction
+// (newest or largest first for dates and amounts, A to Z otherwise), the next click reverses it.
+// Sorting starts again from the first page.
+function sortHeader(params, { param = 'sort', current, key, label, numeric = false, firstDir = numeric ? 'desc' : 'asc' }) {
+  const [activeKey, activeDir] = String(current || '').split('_');
+  const active = activeKey === key;
+  const nextDir = active ? (activeDir === 'asc' ? 'desc' : 'asc') : firstDir;
+  const arrow = active ? (activeDir === 'asc' ? ' ▲' : ' ▼') : '';
+  const aria = active ? ` aria-sort="${activeDir === 'asc' ? 'ascending' : 'descending'}"` : '';
+  return `<th${numeric ? ' class="num"' : ''}${aria}><a class="tx-sort" href="${transactionsHref(params, { [param]: `${key}_${nextDir}`, offset: '' })}" title="Sort by ${e(label.toLowerCase())}">${e(label)}${arrow}</a></th>`;
 }
 
 function viewTabs(params) {
@@ -110,6 +130,7 @@ function viewTabs(params) {
 }
 
 function listView(data, params) {
+  const sort = data.filters.sort === 'name' ? 'name_asc' : data.filters.sort;
   if (!data.rows.length) return '<div class="panel panel-spaced"><div class="empty-note">No gifts match these filters.</div></div>';
   const rows = data.rows.map((r) => `<tr class="${r.voided_at ? 'is-void' : ''}">
       <td class="nowrap">${e(shortDay(r.gift_date))}</td>
@@ -131,7 +152,10 @@ function listView(data, params) {
       ${offset + limit < total ? `<a class="button-outline" href="${transactionsHref(params, { offset: offset + limit })}">Next</a>` : ''}
     </div>` : '';
   return `<div class="panel panel-spaced list-panel"><div class="table-scroll"><table class="pm-table tx-table">
-      <thead><tr><th>Date</th><th>Batch</th><th>Name</th><th>Envelope</th><th>Fund</th><th>Method</th><th>Check #</th><th>Note</th><th class="num">Amount</th><th></th><th></th></tr></thead>
+      <thead><tr>${[
+        { key: 'date', label: 'Date', firstDir: 'desc' }, { key: 'batch', label: 'Batch' }, { key: 'name', label: 'Name' },
+        { key: 'envelope', label: 'Envelope' }, { key: 'fund', label: 'Fund' }, { key: 'method', label: 'Method' }, { key: 'check', label: 'Check #' },
+      ].map((col) => sortHeader(params, { current: sort, ...col })).join('')}<th>Note</th>${sortHeader(params, { current: sort, key: 'amount', label: 'Amount', numeric: true })}<th></th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>${pager}</div>`;
 }
 
@@ -139,8 +163,11 @@ function giversView(data, params) {
   if (!data.by_giver.length) return '<div class="panel panel-spaced"><div class="empty-note">No gifts match these filters.</div></div>';
   const rows = data.by_giver.map((g) => `<tr><td>${g.person_id ? `<a href="${transactionsHref(params, { q: g.envelope_number || g.person_name, view: '' })}">${e(g.person_name)}</a>` : '<span class="tone-muted">Anonymous</span>'}</td>
       <td>${e(g.envelope_number || '')}</td><td class="num">${g.gift_count}</td><td>${e(day(g.last_gift_date))}</td><td class="num">${money(g.total_cents)}</td></tr>`).join('');
+  const current = data.filters.giver_sort || 'total_desc';
+  const head = (key, label, opts = {}) => sortHeader(params, { param: 'gsort', current, key, label, ...opts });
   return `<div class="panel panel-spaced list-panel"><div class="table-scroll"><table class="pm-table">
-      <thead><tr><th>Giver</th><th>Envelope</th><th class="num">Gifts</th><th>Last gift</th><th class="num">Total</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+      <thead><tr>${head('name', 'Giver')}${head('envelope', 'Envelope')}${head('gifts', 'Gifts', { numeric: true })}${head('last', 'Last gift', { firstDir: 'desc' })}${head('total', 'Total', { numeric: true })}</tr></thead><tbody>${rows}</tbody></table></div>
+      ${data.by_giver.length >= 500 ? '<p class="muted-line">The first 500 givers in this order.</p>' : ''}</div>`;
 }
 
 function monthsView(data) {
@@ -387,16 +414,23 @@ export function renderOnlineGivingPage({ result, params, status, people = [] }) 
 }
 
 export const GIFT_TRANSACTIONS_STYLES = `
-    .tx-filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px 14px; align-items:end; margin-top:14px; }
-    .tx-filters .tx-search { grid-column:span 2; }
+    .tx-filters { margin-top:14px; }
+    .tx-main { display:grid; grid-template-columns:minmax(220px,2.2fr) minmax(140px,1fr) minmax(140px,1fr) auto; gap:10px 14px; align-items:end; }
+    .tx-main .tx-search input { width:100%; }
+    .tx-more { margin-top:10px; }
+    .tx-more > summary { cursor:pointer; font-size:14px; color:var(--navy); font-weight:600; }
+    .tx-more-count { display:inline-block; margin-left:6px; padding:1px 8px; border-radius:10px; background:#EEF3FA; font-size:12px; font-weight:600; }
+    .tx-more-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px 14px; align-items:end; margin-top:10px; }
     .tx-filters .form-actions { display:flex; gap:8px; align-items:center; }
+    .tx-sort { color:inherit; text-decoration:none; white-space:nowrap; }
+    .tx-sort:hover { text-decoration:underline; }
     .tx-filters .form-actions button, .tx-filters .form-actions a { margin:0; }
     .tx-pick summary { cursor:pointer; padding:7px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; font-size:14px; }
     .tx-pick-list { position:absolute; z-index:5; max-height:260px; overflow:auto; margin-top:4px; padding:8px 12px; background:#fff; border:1px solid var(--line); border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.08); }
     .tx-pick { position:relative; }
     .tx-pick-list label { display:block; font-size:14px; padding:3px 0; white-space:nowrap; }
     .tx-overviews { grid-template-columns:1fr 1fr; margin-top:14px; }
-    @media(max-width:800px){ .tx-overviews, .tx-gift-grid { grid-template-columns:1fr !important; } .tx-filters .tx-search { grid-column:auto; } }
+    @media(max-width:800px){ .tx-overviews, .tx-gift-grid, .tx-main { grid-template-columns:1fr !important; } }
     .tx-overview td.num, .tx-table td.num, .pm-table td.num, .pm-table th.num { text-align:right; white-space:nowrap; }
     .tx-toolbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-top:16px; }
     .tx-table td.nowrap, .tx-table .actions { white-space:nowrap; }

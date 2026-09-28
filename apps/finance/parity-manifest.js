@@ -21,8 +21,10 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
   {
     id: 'giving', label: 'Giving Entry', group: 'Gift Entry', permission: 'finance',
     // Batches, deposits and gifts live in Connect's giving_* tables; these pages read and write
-    // them through the giving-batch-*-v1 contracts (connect-giving-batch-client.js).
-    capabilities: ['enter a batch', 'find and correct a gift', 'void or refund a gift', 'online giving and recurring gifts', 'bank reconciliation', 'batch reports', 'record a gift', 'online form settings', 'relayed live to Connect, never stored in Finance'],
+    // them through the giving-batch-*-v1 contracts (connect-giving-batch-client.js). Every gift is
+    // entered in a batch; the old single-gift page (page=quick-entry) is gone, and its links land
+    // on Enter a batch, the section's first page.
+    capabilities: ['enter a batch', 'find and correct a gift', 'void or refund a gift', 'online giving and recurring gifts', 'bank reconciliation', 'batch reports', 'online form settings', 'relayed live to Connect, never stored in Finance'],
     pages: [
       { id: 'batch', label: 'Enter a batch', status: 'live' },
       { id: 'transactions', label: 'Transactions', status: 'live' },
@@ -30,7 +32,6 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
       { id: 'funds', label: 'Funds', status: 'live' },
       { id: 'reconciliation', label: 'Reconciliation to bank', status: 'live' },
       { id: 'reports', label: 'Batch reports', status: 'live' },
-      { id: 'quick-entry', label: 'Record a single gift', status: 'live' },
       // A tab of Online giving (Payments · Recurring · Givers & matching · Form settings), so it
       // is left out of the sidebar list and highlights Online giving there instead.
       { id: 'online-form', label: 'Online form settings', status: 'live', navParent: 'online' },
@@ -38,31 +39,31 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
   },
   {
     id: 'giving-analytics', label: 'Giving', group: 'Giving', permission: 'finance',
-    capabilities: ['council giving report', 'trends', 'year over year', 'household bands', 'pledges', 'what-if modeling', 'statements', 'nudges'],
+    // Household bands and Giving nudges moved into Giving reports (Giving bands; Nudges and next
+    // steps) on Sept 28 2026; shell.js redirects their old links.
+    capabilities: ['council giving report', 'trends', 'year over year', 'pledges', 'what-if modeling', 'statements'],
     pages: [
       { id: 'council', label: 'Council report', status: 'live' },
       { id: 'trends', label: 'Trends', status: 'live' },
       { id: 'year-over-year', label: 'Year over year', status: 'live' },
-      { id: 'household-bands', label: 'Household bands', status: 'live' },
       { id: 'pledges', label: 'Pledges', status: 'live' },
       { id: 'what-if', label: 'Giving what-if', status: 'live' },
       { id: 'statements', label: 'Giving statements', status: 'live' },
-      { id: 'nudges', label: 'Giving nudges', status: 'live' },
     ],
   },
   {
     // Connect's Giving › Reports › Analysis, read live through giving-reports-v1 (Andrew, Sept 28
     // 2026). Folded into the Giving sidebar group after the pages above.
     id: 'giving-reports', label: 'Giving reports', group: 'Giving', permission: 'finance',
-    capabilities: ['distribution and median', 'by fund and method', 'giving and attendance', 'top and lapsed givers', 'each giver year over year', 'plateaus and impact statements', 'weekly and monthly bands'],
+    capabilities: ['distribution and median', 'by fund and method', 'giving and attendance', 'top and lapsed givers', 'each giver year over year', 'nudges, plateaus and impact statements', 'annual, weekly and monthly bands'],
     pages: [
       { id: 'distribution', label: 'Distribution', status: 'live' },
       { id: 'funds-methods', label: 'By fund and method', status: 'live' },
       { id: 'attendance', label: 'Giving and attendance', status: 'live' },
       { id: 'insights', label: 'Top and lapsed givers', status: 'live' },
       { id: 'giver-trends', label: 'Each giver, year over year', status: 'live' },
-      { id: 'plateaus', label: 'Plateaus and nudges', status: 'live' },
-      { id: 'bands', label: 'Weekly and monthly bands', status: 'live' },
+      { id: 'plateaus', label: 'Nudges and next steps', status: 'live' },
+      { id: 'bands', label: 'Giving bands', status: 'live' },
     ],
   },
   {

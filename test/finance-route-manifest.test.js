@@ -17,7 +17,7 @@ import {
 // default. Anything else claiming non-GET/HEAD methods, a `writer` flag, or a live dataSource is
 // a regression.
 const WRITE_ROUTE_IDS = new Set([
-  'giving-quick-entry-v1', 'budget-plan-write-v1', 'compensation-plan-write-v1', 'payroll-hours-save-v1', 'payroll-period-approve-v1',
+  'budget-plan-write-v1', 'compensation-plan-write-v1', 'payroll-hours-save-v1', 'payroll-period-approve-v1',
   'payroll-staff-save-v1', 'payroll-staff-deactivate-v1', 'payroll-email-v1',
   'budget-generate-v1', 'budget-generate-all-v1', 'budget-commit-v1', 'budget-plan-remove-v1',
   'church-actual-override-v1', 'church-budget-xlsx-import-write-v1', 'church-balances-xlsx-import-write-v1',
@@ -84,7 +84,7 @@ describe('Finance staging route manifest', () => {
     expect(paths).toEqual([
       '/', '/index.html', '/health', '/assets/finance-mark.png', '/assets/finance-icon.png', '/assets/fonts/hero-regular.woff2', '/assets/fonts/hero-bold.woff2', '/assets/fonts/outfit.woff2', '/assets/fonts/figtree.woff2', '/api/v1/summary',
       '/api/v1/connect-giving-preview', '/api/v1/board-packet-export', '/api/v1/connect-giving-transport-evidence',
-      '/api/v1/connect-giving-quick-entry', '/api/v1/budget-plan-save', '/api/v1/connect-budget-plan-write', '/api/v1/connect-compensation-plan-write',
+      '/api/v1/budget-plan-save', '/api/v1/connect-budget-plan-write', '/api/v1/connect-compensation-plan-write',
       '/api/v1/connect-budget-generate', '/api/v1/connect-budget-generate-all', '/api/v1/connect-budget-commit', '/api/v1/connect-budget-plan-remove',
       '/api/v1/connect-base-projection-write',
       '/api/v1/connect-church-actual-override',
@@ -218,9 +218,8 @@ describe('Finance staging route manifest', () => {
     expect(resolveFinanceRoute('/api/v1/connect-giving-transport-evidence')).toMatchObject({
       id: 'giving-transport-evidence-v1', contract: 'finance.connect-giving-transport-evidence.v1', dataSource: 'synthetic-static',
     });
-    expect(resolveFinanceRoute('/api/v1/connect-giving-quick-entry')).toMatchObject({
-      id: 'giving-quick-entry-v1', contract: 'connect.giving-quick-entry-relay.v1',
-    });
+    // Finance's single-gift quick entry is gone; every gift is entered in a batch.
+    expect(resolveFinanceRoute('/api/v1/connect-giving-quick-entry')).toBeUndefined();
     expect(resolveFinanceRoute('/api/v1/budget-plan-save')).toMatchObject({
       id: 'budget-plan-save-v1', contract: 'finance.budget-plan-save.v1', dataSource: 'finance-d1-write',
     });
@@ -395,7 +394,7 @@ describe('Finance staging route manifest', () => {
       expect(isMethodAllowedForRoute(readRoute, method)).toBe(false);
     }
 
-    const writeRoute = resolveFinanceRoute('/api/v1/connect-giving-quick-entry');
+    const writeRoute = resolveFinanceRoute('/api/v1/connect-budget-plan-write');
     expect(isMethodAllowedForRoute(writeRoute, 'POST')).toBe(true);
     expect(isMethodAllowedForRoute(writeRoute, 'GET')).toBe(false);
     expect(isMethodAllowedForRoute(writeRoute, 'HEAD')).toBe(false);
