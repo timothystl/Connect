@@ -28,7 +28,8 @@ import { renderGymIncomePage } from './gym-income-pages.js';
 import { fetchGymIncome, describeGymIncomeFailure } from './gym-income-client.js';
 import { describeGivingBatchFailure, fetchGivingBatchLedger, fetchGivingBatchWorkspace, fetchGivingTransactions, fetchOnlineGiving, postGivingBatchWrite, fetchGivingOnlineSettings, postGivingOnlineSettingsWrite } from './connect-giving-batch-client.js';
 import { GIFT_TRANSACTIONS_STYLES, buildTransactionsCsv, normalizeTransactionParams, renderOnlineGivingPage, renderTransactionsPage, transactionsCsvFilename, transactionsCsvParams } from './gift-transactions-pages.js';
-import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, fetchGivingBoard, postGivingBoardEmail, postGivingFollowupWrite } from './connect-giving-analytics-client.js';
+import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, fetchGivingBoard, fetchGivingReport, postGivingBoardEmail, postGivingFollowupWrite, postGivingImpactWrite } from './connect-giving-analytics-client.js';
+import { GIVING_REPORTS_STYLES, givingReportParams, givingReportRequests, impactStatementsFromForm, renderGivingReportPage } from './giving-reports-pages.js';
 import { COUNCIL_REPORT_STYLES, councilParams, renderCouncilEmailHtml, renderCouncilReportPage } from './council-report-pages.js';
 import { fetchAccessRoles } from './connect-access-client.js';
 import { fetchFinanceClassification } from './finance-classification-client.js';
@@ -1020,6 +1021,20 @@ async function handleGivingBoardEmail(request, env, url) {
   return back({ status: 'ok', msg: `Report emailed to ${sent.result.sent} address${sent.result.sent === 1 ? '' : 'es'}.${failed.length ? ` Not sent to: ${failed.join(', ').slice(0, 120)}.` : ''}` });
 }
 
+// Giving › Reports › Plateaus: the impact statements form. Connect keeps changing them admin-only
+// and checks the signed-in person itself.
+async function handleGivingImpactWrite(request, env, url) {
+  const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving-reports', page: 'plateaus', ...params }).toString()}` } });
+  if (!isSameOriginPost(request, url)) return back({ status: 'error', message: 'That form did not come from Timothy Finance.' });
+  let form = null;
+  try { form = Object.fromEntries([...(await request.formData()).entries()].filter(([, v]) => typeof v === 'string')); } catch { /* reported below */ }
+  if (!form) return back({ status: 'error', message: 'The form could not be read.' });
+  const saved = await postGivingImpactWrite(env, request.headers.get('Cf-Access-Jwt-Assertion') || '', impactStatementsFromForm(form));
+  if (!saved.ok) return back({ status: 'error', message: describeGivingBatchFailure(saved).slice(0, 200) });
+  const n = saved.result.statements.length;
+  return back({ status: 'ok', msg: `Impact statements saved (${n}).` });
+}
+
 // The v3 Budget builder asks for growth as a percentage (3 for 3%); the older forms and Connect's
 // routes take a fraction (0.03). A percentage field, when sent, is converted here.
 function budgetGrowthFraction(form) {
@@ -1310,6 +1325,16 @@ function renderSectionBody(ctx) {
       case 'nudges': return renderNudgesPage({ result: asResult(ctx.givingAnalyticsPeople), totals, params: ctx.searchParams, canEdit: canEditNudges, councilPreview: namedHidden, status });
       default: return renderTrendsPage({ result: totals, keep, mdoBooks: ctx.givingMdoBooks });
     }
+  }
+  if (section.id === 'giving-reports') {
+    const namedHidden = councilPreview || (roleResult.ok && roleResult.role !== 'admin' && roleResult.permissions?.giving === 'anon');
+    const results = (ctx.givingReports || []).map((r) => (r?.ok ? { ok: true, data: r.result } : { ok: false, message: describeGivingBatchFailure(r), data: null }));
+    const status = ctx.searchParams.get('status') === 'ok' ? { ok: true, message: ctx.searchParams.get('msg') || 'Saved in Connect.' }
+      : ctx.searchParams.get('status') === 'error' ? { ok: false, message: `Not saved: ${ctx.searchParams.get('message') || 'the request did not complete.'}` } : null;
+    return renderGivingReportPage(page.id, {
+      results: results.length ? results : [{ ok: false, message: 'not requested' }],
+      params: givingReportParams(ctx.searchParams, isoDay(new Date())), keep: councilPreview ? { council: '1' } : {}, namedHidden, status,
+    });
   }
   if (section.id === 'charts' && page.id === 'concentration') {
     return renderConcentrationPage({ result: ctx.givingAnalytics?.ok ? { ok: true, data: ctx.givingAnalytics.result } : { ok: false, message: describeGivingBatchFailure(ctx.givingAnalytics) }, keep: councilPreview ? { council: '1' } : {} });
@@ -1646,7 +1671,7 @@ function renderShell(ctx) {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Timothy Finance${production ? '' : ' — Staging'}</title>
   <link rel="icon" href="/assets/finance-mark.png"><link rel="apple-touch-icon" href="/assets/finance-icon.png">
-  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${COUNCIL_REPORT_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}</style>
+  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${COUNCIL_REPORT_STYLES}${GIVING_REPORTS_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}</style>
 </head>
 <body${councilPreview ? ' class="council-preview"' : ''}>
   <header class="app-header">
@@ -1897,6 +1922,7 @@ export default {
       return handleGivingFollowupWrite(request, env, url);
     }
 
+    if (route.id === 'giving-impact-write-v1') return handleGivingImpactWrite(request, env, url);
     if (route.id === 'giving-board-email-v1') {
       return handleGivingBoardEmail(request, env, url);
     }
@@ -4274,6 +4300,13 @@ export default {
             : { ok: false })).catch(() => ({ ok: false }))
           : null;
         let givingAnalyticsPeople = after(givingAnalyticsLoads, (loads) => loads[1]);
+        // Giving › Reports: each page's own Connect reports, read together; Connect decides access
+        // per report, and the named ones are not asked for in council preview.
+        const reportsPageId = section.id === 'giving-reports' ? resolveFinancePage(section, pageId).id : null;
+        const reportsNamedHidden = councilPreview || (roleResult.ok && roleResult.role !== 'admin' && roleResult.permissions?.giving === 'anon');
+        const givingReportsLoad = reportsPageId && !(reportsNamedHidden && ['insights', 'giver-trends', 'plateaus', 'bands'].includes(reportsPageId))
+          ? Promise.all(givingReportRequests(reportsPageId, givingReportParams(url.searchParams, isoDay(new Date())))
+            .map(([report, query]) => fetchGivingReport(env, accessJwt, report, query))) : null;
         const facilitiesPageId = section.id === 'facilities' ? resolveFinancePage(section, pageId).id : null;
         // Gym rental income is read live from Website Admin with the caller's own Access identity.
         let gymIncome = facilitiesPageId === 'gym-rentals'
@@ -4296,6 +4329,7 @@ export default {
         const plannerPage = (section.id === 'compensation' && effectivePageId === 'planner') || section.id === 'tuition';
         const shellResponse = response((printMode ? renderPrintPage : renderShell)({
           printFragment: printMode && url.searchParams.get('fragment') === '1',
+          givingReports: givingReportsLoad ? await givingReportsLoad : null,
           healthView: url.searchParams.get('view'), healthAppeal: url.searchParams.get('appeal'), healthFlow: url.searchParams.get('flow'), financeHealth, facilities, hr, givingBatch, givingAnalytics, givingAnalyticsPeople, givingMdoBooks, gymIncome, accessRoles, budgetBuilder, boardLayout, planningBasis, planningScenarios, planningRunway, propertyBooks, searchParams: url.searchParams,
           metadata, summary, giving, givingSource, section, pageId, councilPreview, roleResult, churchReport, churchReportLive, churchTrendLive,
           balanceSheet, balanceTrends, balancePriorYear, balancePropertyValue, balanceMortgageHistory, balanceSelection, daycareReport, daycareReportLive, daycareEntries, daycareEditId, propertyReport, propertyReportLive, propertyReserves,

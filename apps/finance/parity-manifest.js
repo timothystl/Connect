@@ -51,6 +51,21 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     ],
   },
   {
+    // Connect's Giving › Reports › Analysis, read live through giving-reports-v1 (Andrew, Sept 28
+    // 2026). Folded into the Giving sidebar group after the pages above.
+    id: 'giving-reports', label: 'Giving reports', group: 'Giving', permission: 'finance',
+    capabilities: ['distribution and median', 'by fund and method', 'giving and attendance', 'top and lapsed givers', 'each giver year over year', 'plateaus and impact statements', 'weekly and monthly bands'],
+    pages: [
+      { id: 'distribution', label: 'Distribution', status: 'live' },
+      { id: 'funds-methods', label: 'By fund and method', status: 'live' },
+      { id: 'attendance', label: 'Giving and attendance', status: 'live' },
+      { id: 'insights', label: 'Top and lapsed givers', status: 'live' },
+      { id: 'giver-trends', label: 'Each giver, year over year', status: 'live' },
+      { id: 'plateaus', label: 'Plateaus and nudges', status: 'live' },
+      { id: 'bands', label: 'Weekly and monthly bands', status: 'live' },
+    ],
+  },
+  {
     // Moved from Connect (Andrew, Sept 28 2026). Connect's own planner, served inside Finance.
     id: 'tuition', label: 'Tuition Aid', group: 'Tuition Aid', permission: 'tuitionaid',
     capabilities: ['K-8 aid planner', 'Lutheran High School aid', 'aid budget and policy', 'year navigator and history', 'pipeline'],

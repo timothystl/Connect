@@ -3,6 +3,7 @@ import { json } from './auth.js';
 import { makeBreezeClient } from './breeze.js';
 import { parseFundSplits, givingEntryId, isGivingDup, getRolePermissions, resolveRolePermissions, ROLE_PERMISSION_ROLES, ROLE_PERMISSION_ITEM_KEYS, ROLE_PERMISSION_LEVELS, archiveEnvelope, scanForFeeFields, sanitizeLetterTemplateHtml, logoSizeWarning, csvCell, csvRow} from './api-utils.js';
 import { validateImageUpload } from './api-people.js';
+import { readImpactStatements, writeImpactStatements } from './giving-impact.js';
 import { sendBrevoTransactionalEmail } from './api-emails.js';
 
 // Load only the contribution IDs relevant to the current import payload. The
@@ -489,24 +490,11 @@ if (seg === 'config/church' && method === 'PUT') {
 // costs are church-specific and never fabricated by the app — this is purely
 // what an admin types in. Stored as one JSON array in giving_settings.
 if (seg === 'config/giving-impact' && method === 'GET') {
-  const row = await db.prepare("SELECT value FROM giving_settings WHERE key='giving_impact_statements_json'").first();
-  let statements = [];
-  try { statements = row?.value ? JSON.parse(row.value) : []; } catch {}
-  return json({ statements: Array.isArray(statements) ? statements : [] });
+  return json({ statements: await readImpactStatements(db) });
 }
 if (seg === 'config/giving-impact' && method === 'PUT') {
   let b = {}; try { b = await req.json(); } catch {}
-  const list = Array.isArray(b.statements) ? b.statements : [];
-  const cleaned = list
-    .map(s => ({
-      monthly_cents: Math.max(0, Math.round(Number(s?.monthly_cents) || 0)),
-      label: String(s?.label || '').trim().slice(0, 200),
-    }))
-    .filter(s => s.monthly_cents > 0 && s.label)
-    .slice(0, 50);
-  await db.prepare("INSERT INTO giving_settings(key,value) VALUES('giving_impact_statements_json',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
-    .bind(JSON.stringify(cleaned)).run();
-  return json({ ok: true, statements: cleaned });
+  return json({ ok: true, statements: await writeImpactStatements(db, b.statements) });
 }
 
 // ── Letterhead logo — shown at the top of giving letters (view/email/preview) in place of
