@@ -125,7 +125,7 @@ describe('Gift Entry batches (Finance v3)', () => {
     expect(html).toContain('Matched through');
     expect(html).toContain('Sep 14');
     expect(html).toContain('Midweek gifts');
-    expect(html).toContain('Deposit $1,340.00');
+    expect(html).toContain('name="amount" inputmode="decimal" value="1340.00"');
     expect(html).toContain('name="bank_amount" inputmode="decimal" value="8120.00"');
     const res = await post(env, { op: 'reconcile_deposit', deposit_id: '21', bank_amount: '8120.00' });
     expect(res.headers.get('Location')).toBe('/?section=giving&page=reconciliation&status=ok&msg=Deposit+matched+to+the+bank.');
