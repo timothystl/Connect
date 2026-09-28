@@ -1,6 +1,7 @@
 import { makeQboClient, refreshTokens } from './quickbooks-oauth-client.js';
 import { ensureFreshAccessToken } from './quickbooks-token-service.js';
 import { getConnection } from './quickbooks-oauth-routes.js';
+import { normalizeChurchClassification } from './quickbooks-church-sync.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_RANGE_DAYS = 366;
@@ -71,22 +72,68 @@ function parseAmount(value) {
   return Number.isFinite(number) ? Math.round(number * 100) : null;
 }
 
+function rowFromCells(cells, indexes) {
+  const cell = (field) => indexes[field] == null ? null : cells[indexes[field]];
+  const type = cell('type')?.value || '';
+  const id = cell('type')?.id || cells.find((entry) => entry?.id)?.id || null;
+  const amount = cell('amount')?.value || '';
+  return {
+    date: cell('date')?.value || '', type, docNum: cell('docNum')?.value || '',
+    name: cell('name')?.value || '', memo: cell('memo')?.value || '',
+    account: cell('account')?.value || '', split: cell('split')?.value || '', amount, amountCents: parseAmount(amount),
+    transactionId: id, viewUrl: transactionUrl(type, id),
+  };
+}
+
+const EXPENSE_CLASSIFICATIONS = new Set(['Expenses', 'Cost of Goods Sold', 'Other Expenses']);
+const EXPENSE_GROUPS = new Set(['expenses', 'cogs', 'otherexpenses']);
+
+function walkProfitAndLossDetail(rows, path, isExpense, indexes, output) {
+  for (const row of rows || []) {
+    if (row.type === 'Section' || row.Header) {
+      const label = String(row.Header?.ColData?.[0]?.value || '').trim();
+      // The top-level section is the classification (this company labels it "Expenditures");
+      // everything under it is the account path, parent:child like the Church Report.
+      const topLevel = isExpense == null;
+      const expense = topLevel
+        ? EXPENSE_GROUPS.has(String(row.group || '').toLowerCase()) || EXPENSE_CLASSIFICATIONS.has(normalizeChurchClassification(label))
+        : isExpense;
+      walkProfitAndLossDetail(row.Rows?.Row, topLevel || !label ? path : [...path, label], expense, indexes, output);
+    } else if (isExpense && row.type === 'Data' && Array.isArray(row.ColData) && path.length) {
+      const line = rowFromCells(row.ColData, indexes);
+      if (line.amountCents == null || line.amountCents === 0) continue;
+      output.push({ ...line, account: path.join(':') });
+    }
+  }
+}
+
+// Profit and Loss Detail lists every expense line under the account it was charged to, so a bill
+// split across several accounts appears once per line with that line's own amount. Amounts are
+// signed as the P&L shows them: a credit or refund reduces the account's spending.
+export function parseProfitAndLossDetail(report) {
+  const indexes = columnIndexes(report?.Columns?.Column);
+  delete indexes.account;
+  const lines = [];
+  walkProfitAndLossDetail(report?.Rows?.Row, [], null, indexes, lines);
+  return lines;
+}
+
+export function summarizeExpenseLines(lines) {
+  const totals = new Map();
+  for (const line of lines || []) {
+    const current = totals.get(line.account) || { account: line.account, transactionCount: 0, amountCents: 0 };
+    current.transactionCount += 1;
+    current.amountCents += line.amountCents;
+    totals.set(line.account, current);
+  }
+  return [...totals.values()].sort((a, b) => b.amountCents - a.amountCents || a.account.localeCompare(b.account));
+}
+
 export function parseTransactionList(report) {
   const indexes = columnIndexes(report?.Columns?.Column);
   const rows = [];
   flattenRows(report?.Rows?.Row, rows);
-  return rows.map((cells) => {
-    const cell = (field) => indexes[field] == null ? null : cells[indexes[field]];
-    const type = cell('type')?.value || '';
-    const id = cell('type')?.id || cells.find((entry) => entry?.id)?.id || null;
-    const amount = cell('amount')?.value || '';
-    return {
-      date: cell('date')?.value || '', type, docNum: cell('docNum')?.value || '',
-      name: cell('name')?.value || '', memo: cell('memo')?.value || '',
-      account: cell('account')?.value || '', split: cell('split')?.value || '', amount, amountCents: parseAmount(amount),
-      transactionId: id, viewUrl: transactionUrl(type, id),
-    };
-  });
+  return rows.map((cells) => rowFromCells(cells, indexes));
 }
 
 function defaultDates(now) {
@@ -109,7 +156,7 @@ export function resolveTransactionDates(searchParams, now = Date.now()) {
   return { ok: true, startDate, endDate };
 }
 
-export async function loadQuickbooksTransactions(env, searchParams, { now = Date.now(), fetchImpl = fetch } = {}) {
+export async function loadQuickbooksTransactions(env, searchParams, { now = Date.now(), fetchImpl = fetch, includeExpenseLines = false } = {}) {
   const dates = resolveTransactionDates(searchParams, now);
   if (!dates.ok) return dates;
   const connection = await getConnection(env.FINANCE_DB);
@@ -123,12 +170,27 @@ export async function loadQuickbooksTransactions(env, searchParams, { now = Date
   } catch {
     return { ok: false, ...dates, error: 'QuickBooks needs to be reconnected before transactions can be loaded.' };
   }
-  const response = await makeQboClient(env, fresh, fetchImpl).transactionList({
-    start_date: dates.startDate, end_date: dates.endDate, sort_by: 'tx_date', sort_order: 'descend',
-  });
+  const client = makeQboClient(env, fresh, fetchImpl);
+  const range = { start_date: dates.startDate, end_date: dates.endDate };
+  const [response, detail] = await Promise.all([
+    client.transactionList({ ...range, sort_by: 'tx_date', sort_order: 'descend' }),
+    includeExpenseLines ? loadExpenseLines(client, range) : null,
+  ]);
   if (!response.ok) return { ok: false, ...dates, error: `QuickBooks could not load the transaction report (HTTP ${response.status}).` };
   const transactions = parseTransactionList(await response.json());
-  return { ok: true, ...dates, transactions, syncedAt: new Date(now).toISOString() };
+  return { ok: true, ...dates, transactions, ...(detail || {}), syncedAt: new Date(now).toISOString() };
+}
+
+// A failed Profit and Loss Detail read only drops the per-line view; the drill-down then falls
+// back to grouping whole transactions and says so.
+async function loadExpenseLines(client, range) {
+  try {
+    const response = await client.profitAndLossDetail(range);
+    if (!response.ok) return { expenseLinesError: `QuickBooks could not load Profit and Loss Detail (HTTP ${response.status}).` };
+    return { expenseLines: parseProfitAndLossDetail(await response.json()) };
+  } catch {
+    return { expenseLinesError: 'QuickBooks could not load Profit and Loss Detail.' };
+  }
 }
 
 function isSpending(row) {

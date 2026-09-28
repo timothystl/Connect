@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  findTransactionExceptions, parseTransactionList, resolveTransactionDates, searchTransactions,
+  findTransactionExceptions, loadQuickbooksTransactions, parseProfitAndLossDetail, parseTransactionList, summarizeExpenseLines, resolveTransactionDates, searchTransactions,
   sortRows, spendingRowsFor, summarizeExpenseAccounts, summarizeVendorSpend, TRANSACTION_SORTS,
 } from '../apps/finance/quickbooks-transactions-service.js';
 import { renderQuickbooksPage } from '../apps/finance/quickbooks-pages.js';
@@ -124,5 +124,84 @@ describe('Finance QuickBooks transaction reporting', () => {
     const vendors = render('vendor-spend', 'q=ace');
     expect(vendors).toContain('vendor=Ace+Plumbing');
     expect(vendors).not.toContain('vendor=Extension+Fund');
+  });
+
+  // Profit and Loss Detail as QuickBooks returns it for this company: "Revenue"/"Expenditures"
+  // top-level sections, nested account sections, and one Data row per posted line.
+  const col = (ColTitle, key) => ({ ColTitle, ColType: 'String', MetaData: [{ Name: 'ColKey', Value: key }] });
+  const line = (date, type, id, num, name, memo, split, amount) => ({ type: 'Data', ColData: [
+    { value: date }, { value: type, id }, { value: num }, { value: name }, { value: memo }, { value: split }, { value: amount }, { value: '0' },
+  ] });
+  const section = (label, rows, extra = {}) => ({ type: 'Section', ...extra, Header: { ColData: [{ value: label }] }, Rows: { Row: rows }, Summary: { ColData: [{ value: `Total ${label}` }] } });
+  const pnlDetail = {
+    Columns: { Column: [col('Date', 'tx_date'), col('Transaction Type', 'txn_type'), col('Num', 'doc_num'), col('Name', 'name'),
+      col('Memo/Description', 'memo'), col('Split', 'split_acc'), col('Amount', 'subt_nat_amount'), col('Balance', 'rbal_nat_amount')] },
+    Rows: { Row: [
+      section('Revenue', [section('Offerings', [line('2026-09-15', 'Deposit', '9', '', 'Square', '', 'Checking', '70.29')])], { group: 'Income' }),
+      section('Expenditures', [
+        section('Facilities', [
+          section('Repairs', [
+            line('2026-09-17', 'Expense', '21003', '', 'Ace Plumbing', 'Parts', 'Checking', '80.00'),
+            line('2026-09-16', 'Vendor Credit', '21004', '', 'Ace Plumbing', 'Refund', 'Accounts Payable', '-50.00'),
+          ]),
+          section('Supplies', [line('2026-09-17', 'Expense', '21003', '', 'Ace Plumbing', 'Filters', 'Checking', '40.00')]),
+        ]),
+      ]),
+      { type: 'Section', group: 'NetIncome', Summary: { ColData: [{ value: 'Net Revenue' }, { value: '0' }] } },
+    ] },
+  };
+
+  it('reads Profit and Loss Detail into one expense line per account, splitting a split bill', () => {
+    const lines = parseProfitAndLossDetail(pnlDetail);
+    expect(lines.map((row) => [row.account, row.amountCents, row.transactionId])).toEqual([
+      ['Facilities:Repairs', 8000, '21003'], ['Facilities:Repairs', -5000, '21004'], ['Facilities:Supplies', 4000, '21003'],
+    ]);
+    expect(lines[0]).toMatchObject({ name: 'Ace Plumbing', memo: 'Parts', split: 'Checking', viewUrl: 'https://qbo.intuit.com/app/expense?txnId=21003' });
+    expect(summarizeExpenseLines(lines)).toEqual([
+      { account: 'Facilities:Supplies', transactionCount: 1, amountCents: 4000 },
+      { account: 'Facilities:Repairs', transactionCount: 2, amountCents: 3000 },
+    ]);
+  });
+
+  it('drills down by expense line when Profit and Loss Detail loaded, and falls back when it did not', () => {
+    const base = { ok: true, startDate: '2026-09-01', endDate: '2026-09-28', syncedAt: '2026-09-28T01:31:00Z', transactions: parseTransactionList(liveReport) };
+    const render = (result, query) => renderQuickbooksPage('expense-drilldown', { quickbooksTransactions: result, searchParams: new URLSearchParams(query) });
+    const withLines = { ...base, expenseLines: parseProfitAndLossDetail(pnlDetail) };
+
+    const summary = render(withLines, '');
+    expect(summary).toContain('account=Facilities%3ASupplies');
+    expect(summary).not.toContain('Multiple accounts');
+    expect(summary).toContain('>Lines');
+
+    const supplies = render(withLines, 'account=Facilities:Supplies');
+    expect(supplies).toContain('Filters');
+    expect(supplies).not.toContain('Parts');
+    expect(supplies).toContain('$40.00');
+
+    const fallback = render({ ...base, expenseLinesError: 'QuickBooks could not load Profit and Loss Detail (HTTP 500).' }, '');
+    expect(fallback).toContain('Showing whole transactions instead.');
+    expect(fallback).toContain('Multiple accounts (split transaction)');
+  });
+
+  it('fetches Profit and Loss Detail alongside the transaction list only when the drill-down asks', async () => {
+    const now = Date.parse('2026-09-28T01:00:00Z');
+    const db = { prepare: () => ({ first: async () => ({ realm_id: '123', access_token: 'token', environment: 'production', access_token_expires_at: '2026-09-28T02:00:00Z' }) }) };
+    const env = { FINANCE_DB: db };
+    const calls = [];
+    const fetchImpl = async (url) => {
+      calls.push(new URL(url).pathname);
+      if (url.includes('ProfitAndLossDetail')) return new Response('{}', { status: 500 });
+      return new Response(JSON.stringify(liveReport), { status: 200 });
+    };
+    const params = new URLSearchParams('start_date=2026-09-01&end_date=2026-09-28');
+
+    const plain = await loadQuickbooksTransactions(env, params, { now, fetchImpl });
+    expect(calls).toEqual(['/v3/company/123/reports/TransactionList']);
+    expect(plain.expenseLines).toBeUndefined();
+
+    const drill = await loadQuickbooksTransactions(env, params, { now, fetchImpl, includeExpenseLines: true });
+    expect(calls.slice(1).sort()).toEqual(['/v3/company/123/reports/ProfitAndLossDetail', '/v3/company/123/reports/TransactionList']);
+    expect(drill).toMatchObject({ ok: true, expenseLinesError: 'QuickBooks could not load Profit and Loss Detail (HTTP 500).' });
+    expect(drill.transactions).toHaveLength(6);
   });
 });

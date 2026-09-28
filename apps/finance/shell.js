@@ -3893,7 +3893,7 @@ export default {
         let quickbooksTransactions = section.id === 'quickbooks'
           && ['transactions', 'expense-drilldown', 'vendor-spend', 'exceptions'].includes(resolveFinancePage(section, pageId).id)
           && qbEnabled(env) && env.FINANCE_DB
-          ? loadQuickbooksTransactions(env, url.searchParams).catch((error) => ({ ok: false, error: error.message })) : null;
+          ? loadQuickbooksTransactions(env, url.searchParams, { includeExpenseLines: resolveFinancePage(section, pageId).id === 'expense-drilldown' }).catch((error) => ({ ok: false, error: error.message })) : null;
         let importHistory = section.id === 'quickbooks' && resolveFinancePage(section, pageId).id === 'import-history'
           ? readImportHistory(env.FINANCE_DB).catch((error) => ({ ok: false, error: error.message })) : null;
         let dataStatus = ['data', 'health', 'quickbooks'].includes(section.id)

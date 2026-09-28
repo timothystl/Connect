@@ -3,7 +3,7 @@ import { buildAccountsReportView } from './accounts-report-service.js';
 import { escapeHtml, renderKpiCards, renderSectionHeading, renderTable } from './render-helpers.js';
 import {
   expenseAccountOf, findTransactionExceptions, searchTransactions, sortRows, spendingCents, spendingRowsFor,
-  summarizeExpenseAccounts, summarizeVendorSpend, TRANSACTION_SORTS,
+  summarizeExpenseAccounts, summarizeExpenseLines, summarizeVendorSpend, TRANSACTION_SORTS,
 } from './quickbooks-transactions-service.js';
 
 function flattenAccountHierarchy(nodes) {
@@ -150,11 +150,11 @@ function renderTransactionTable(pageId, result, view, rows, { includeReason = fa
   return table(head, body, emptyMessage);
 }
 
-function renderSummaryTable(pageId, result, view, summary, { label, key, linkParam }) {
+function renderSummaryTable(pageId, result, view, summary, { label, key, linkParam, countLabel = 'Transactions' }) {
   const sorts = { [key]: (row) => row[key], count: (row) => row.transactionCount, amount: (row) => row.amountCents };
   const sorted = sortRows(summary, sorts, view.sort || 'amount', view.dir || (view.sort === key ? 'asc' : 'desc'));
   const h = (text, sortKey, options) => sortHeader(text, sortKey, pageId, result, view, { defaultKey: 'amount', ...options });
-  const head = h(label, key) + h('Transactions', 'count', { numeric: true }) + h('Spend', 'amount', { numeric: true });
+  const head = h(label, key) + h(countLabel, 'count', { numeric: true }) + h('Spend', 'amount', { numeric: true });
   const body = sorted.map((row) => `<tr><td><a href="${escapeHtml(pageHref(pageId, result, view, { [linkParam]: row[key], q: '', sort: '', dir: '' }))}">${escapeHtml(row[key])}</a></td><td class="num">${row.transactionCount}</td><td class="num">${money(row.amountCents)}</td></tr>`).join('');
   const total = sorted.reduce((sum, row) => sum + row.amountCents, 0);
   const footer = sorted.length ? `<tr><td><strong>Total</strong></td><td class="num"><strong>${sorted.reduce((sum, row) => sum + row.transactionCount, 0)}</strong></td><td class="num"><strong>${money(total)}</strong></td></tr>` : '';
@@ -193,30 +193,41 @@ function renderTransactionPage(pageId, result, searchParams) {
 
   const drill = pageId === 'expense-drilldown' ? { param: 'account', value: view.account, noun: 'account' }
     : pageId === 'vendor-spend' ? { param: 'vendor', value: view.vendor, noun: 'vendor' } : null;
+  // Expense drill-down prefers Profit and Loss Detail, one row per expense line, so a split bill
+  // counts toward each account it was charged to. Without it, whole transactions are grouped.
+  const byLine = pageId === 'expense-drilldown' && Array.isArray(result.expenseLines);
+  const lineNote = byLine
+    ? 'Lines come from QuickBooks Profit and Loss Detail, so a bill split across accounts counts toward each one, and totals match the Profit and Loss. Credits and refunds reduce an account.'
+    : `${SPENDING_NOTE} A bill or expense spread across several accounts appears once, under “Multiple accounts”.`;
+  const lineWarning = pageId === 'expense-drilldown' && result.expenseLinesError
+    ? `<p class="status status-error">${escapeHtml(result.expenseLinesError)} Showing whole transactions instead.</p>` : '';
   if (drill && drill.value) {
     // One account or vendor: the spending rows behind its total, searchable and sortable.
-    const detail = spendingRowsFor(all, { [drill.param]: drill.value });
+    const detail = byLine
+      ? result.expenseLines.filter((line) => line.account === drill.value)
+      : spendingRowsFor(all, { [drill.param]: drill.value });
     const shown = searchTransactions(detail, view.q);
-    const total = shown.reduce((sum, row) => sum + spendingCents(row), 0);
+    const total = shown.reduce((sum, row) => sum + (byLine ? row.amountCents : spendingCents(row)), 0);
     const back = pageHref(pageId, result, view, { [drill.param]: '', q: '', sort: '', dir: '' });
     const other = drill.param === 'account'
       ? [...new Set(shown.map((row) => row.name).filter(Boolean))].length
       : [...new Set(shown.map(expenseAccountOf).filter(Boolean))].length;
     body = `<p><a href="${escapeHtml(back)}">← All ${drill.noun === 'account' ? 'accounts' : 'vendors'}</a></p>
-      <h3>${escapeHtml(drill.value)}</h3>
+      <h3>${escapeHtml(drill.value)}</h3>${lineWarning}
       ${renderFilterForm(pageId, result, view, { searchPlaceholder: 'Name, memo, number, amount…' })}
       ${kpis(shown.length, [{ label: 'Spend', value: money(total) }, { label: drill.param === 'account' ? 'Vendors' : 'Accounts', value: String(other) }])}
       ${renderTransactionTable(pageId, result, view, shown, { emptyMessage: `No spending for this ${drill.noun} matches.` })}
-      <p class="muted">${escapeHtml(SPENDING_NOTE)}</p>`;
+      <p class="muted">${escapeHtml(drill.param === 'account' ? lineNote : SPENDING_NOTE)}</p>`;
   } else if (drill) {
-    const summary = drill.param === 'account' ? summarizeExpenseAccounts(all) : summarizeVendorSpend(all);
+    const summary = drill.param === 'vendor' ? summarizeVendorSpend(all)
+      : byLine ? summarizeExpenseLines(result.expenseLines) : summarizeExpenseAccounts(all);
     const key = drill.param === 'account' ? 'account' : 'name';
     const shown = filterSummary(summary, key, view.q);
     body = `${renderFilterForm(pageId, result, view, { searchLabel: `Find ${drill.noun}`, searchPlaceholder: drill.param === 'account' ? 'Account name or number' : 'Vendor name' })}
       ${kpis(null, [{ label: drill.param === 'account' ? 'Accounts' : 'Vendors', value: String(shown.length) }])}
       <p>Select ${drill.param === 'account' ? 'an account' : 'a vendor'} to see the transactions behind its total.</p>
-      ${renderSummaryTable(pageId, result, view, shown, { label: drill.param === 'account' ? 'Expense account' : 'Vendor', key, linkParam: drill.param })}
-      <p class="muted">${escapeHtml(SPENDING_NOTE)} A bill or expense spread across several accounts appears once, under “Multiple accounts”.</p>`;
+      ${lineWarning}${renderSummaryTable(pageId, result, view, shown, { label: drill.param === 'account' ? 'Expense account' : 'Vendor', key, linkParam: drill.param, countLabel: byLine ? 'Lines' : 'Transactions' })}
+      <p class="muted">${escapeHtml(drill.param === 'account' ? lineNote : SPENDING_NOTE)}</p>`;
   } else {
     const base = pageId === 'exceptions' ? findTransactionExceptions(all) : all;
     const types = [...new Set(base.map((row) => row.type).filter(Boolean))].sort();
