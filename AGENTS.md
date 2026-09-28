@@ -44,7 +44,8 @@ Keep durable instructions here and detailed progress there.
 
 ## Runtime and ownership
 
-- `connect-worker.js` serves Connect, Giving, Serve/Scheduler, and legacy Finance as
+- The GitHub repository is `timothystl/connect` (renamed from `chms`). `connect-worker.js`
+  serves Connect, Giving, Serve/Scheduler, and legacy Finance as
   `timothy-connect`. Production binds `DB` to `timothy-connect-db`, `KV` to the
   `timothy-connect-kv` namespace, and `PHOTOS` to `timothy-connect-photos`.
 - `apps/finance/shell.js` deploys separately as `timothy-finance-app`, with its own

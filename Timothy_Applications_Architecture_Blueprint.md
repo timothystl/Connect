@@ -72,13 +72,13 @@ Avoid dual-write. If unavoidable, require idempotency, one declared source of tr
 | Public church site | `timothystl/website` | Worker `timothystl-site`; `timothystl.org` | Published Website Admin data |
 | Website administration | `timothystl/website` | Worker `tlc-newsletter-admin`; `admin.timothystl.org` | D1 `tlc-newsletter-db`, R2 |
 | Give and Links | `timothystl/website` | `give.timothystl.org`, Worker `tlc-links` | Website settings/external links |
-| Connect/People/Giving | `timothystl/chms` | Worker `tlc-chms`; `connect.timothystl.org` | D1 `tlc-volunteer-db`, KV, R2 |
-| Finance | `timothystl/chms` | Same `tlc-chms` Worker | Same D1 `tlc-volunteer-db` |
-| Serve | `timothystl/chms` | Same Worker; `serve.timothystl.org` | Same D1 `tlc-volunteer-db` |
-| Scheduler | `timothystl/chms` | Same Worker; embedded in Connect | Same D1 `tlc-volunteer-db` |
+| Connect/People/Giving | `timothystl/connect` | Worker `tlc-chms`; `connect.timothystl.org` | D1 `tlc-volunteer-db`, KV, R2 |
+| Finance | `timothystl/connect` | Same `tlc-chms` Worker | Same D1 `tlc-volunteer-db` |
+| Serve | `timothystl/connect` | Same Worker; `serve.timothystl.org` | Same D1 `tlc-volunteer-db` |
+| Scheduler | `timothystl/connect` | Same Worker; embedded in Connect | Same D1 `tlc-volunteer-db` |
 | Payroll | `timothystl/website` | Website Admin Payroll | Supabase payroll RPCs/tables |
-| myMDO | `timothystl/childcare-portal` | Cloudflare Worker deployed by GitHub Actions + Supabase Functions | Supabase project `dahdstopsumxnqvdclmy` |
-| MDO website controls | `timothystl/childcare-portal` | myMDO Admin → Settings → Website | Narrow seasonal settings; general content is developer-managed |
+| myMDO | `timothystl/myMDO` | Cloudflare Worker deployed by GitHub Actions + Supabase Functions | Supabase project `dahdstopsumxnqvdclmy` |
+| MDO website controls | `timothystl/myMDO` | myMDO Admin → Settings → Website | Narrow seasonal settings; general content is developer-managed |
 
 Known cross-system calls:
 

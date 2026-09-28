@@ -16,8 +16,8 @@ workflow with the tested full main SHA and an accurate release reason. Connect r
 `npm test` and the built-script check; Finance runs `npm run validate:finance:prod`.
 Verify completion. A requested routine release needs no additional signoff.
 
-[Connect release](https://github.com/timothystl/chms/actions/runs/35352987006) succeeded at
-`7e93e60f3`; [Finance release](https://github.com/timothystl/chms/actions/runs/35351838490)
+[Connect release](https://github.com/timothystl/connect/actions/runs/35352987006) succeeded at
+`7e93e60f3`; [Finance release](https://github.com/timothystl/connect/actions/runs/35351838490)
 succeeded at `582c72a8f` on September 18. Finance infrastructure is deployed; its authoritative
 data/user cutover remains unfinished. See [the runbook](FINANCE_PRODUCTION_CUTOVER.md).
 
