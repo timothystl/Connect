@@ -4,7 +4,7 @@
 // version bump
 // automatically invalidates the long-lived browser cache on those files, with nowhere else that
 // needs updating in step.
-export const DEPLOY_VERSION = '0.1.0-alpha.6';
+export const DEPLOY_VERSION = '0.1.0-alpha.7';
 
 export const JS_CORE = String.raw`<script>
 // ── DEPLOY VERSION ───────────────────────────────────────────────────
@@ -538,7 +538,8 @@ function loadAppScript(src) {
     document.body.appendChild(s);
   });
 }
-// Resolves once app-ext.js has run; rejects (once, with the error banner shown) if it cannot load.
+// Resolves once app-ext.js has run; rejects if it cannot load. Reporting the failure is the
+// caller's job, so a background prefetch (below) can fail without putting up a banner.
 function loadExtBundle() {
   if (typeof initReports === 'function') return Promise.resolve();
   if (!_extPromise) {
@@ -549,7 +550,6 @@ function loadExtBundle() {
       .catch(function(e) {
         console.error('App bundle load failed:', e);
         _extPromise = null;
-        showErrorBanner('Could not load that section. Check your connection and try again.');
         throw e;
       });
   }
@@ -560,7 +560,30 @@ function ensureExtLoaded(cb) {
   if (typeof initReports === 'function') { cb(); return; }
   loadExtBundle().then(function() {
     try { cb(); } catch (e) { console.error(e); }
-  }, function() {}); // the failure is already reported by loadExtBundle
+  }, function() {
+    showErrorBanner('Could not load that section. Check your connection and try again.');
+  });
+}
+// ── Background prefetch of app-ext.js ───────────────────────────────────────
+// Lazy loading keeps app-ext.js out of the first load, but it moved the wait to the first open
+// of Giving, Attendance, Reports and the rest. Once the landing tab is up and its own requests
+// have had a head start, fetch the bundle quietly while the browser is idle, so by the time
+// someone clicks one of those tabs the code is usually already there. A tab opened mid-prefetch
+// joins the same in-flight load (loadExtBundle keeps one promise), so nothing is fetched twice.
+//
+// Skipped for a member (they get the directory bundle only; Reports, if granted, still loads on
+// open) and for a connection that asks to save data or reports 2G, where the bytes cost more
+// than the wait. A failed prefetch is silent: the next tab open retries and reports its own error.
+var EXT_PREFETCH_DELAY_MS = 2000;
+function scheduleExtPrefetch() {
+  if (_userRole === 'member' || typeof initReports === 'function') return;
+  var c = navigator.connection;
+  if (c && (c.saveData || /(^|-)2g$/.test(c.effectiveType || ''))) return;
+  var run = function() { loadExtBundle().catch(function() {}); };
+  setTimeout(function() {
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 5000 });
+    else run();
+  }, EXT_PREFETCH_DELAY_MS);
 }
 // ── Lazy-load the Finance module (P25-E) ────────────────────────────────────
 // js-finance.js is ~696KB of source and no longer ships in the shell's eager script tags for
@@ -806,6 +829,7 @@ window.addEventListener('load', function() {
     // to prepare and send; givSetView still applies the same role checks as a click would.
     var commsPane = hashTab === 'giving' && /(?:^|[?&])pane=(letters|receipts|nudges)(?:&|$)/.exec(location.search);
     if (commsPane && _userRole !== 'member') ensureExtLoaded(function() { givSetView(commsPane[1]); });
+    scheduleExtPrefetch();
   });
 });
 // ── ROLE UI ──────────────────────────────────────────────────────────────
