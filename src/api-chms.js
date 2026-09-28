@@ -8,6 +8,7 @@ import { handleReportsApi } from './api-reports.js';
 import { handlePeopleApi, handleSendMemberInvite } from './api-people.js';
 import { handleGivingApi } from './api-giving.js';
 import { handleTuitionAidApi } from './api-tuition-aid.js';
+import { tuitionStorage, tuitionStorageStatus } from './tuition-storage.js';
 import { handleFinanceApi } from './api-finance.js';
 import { handleContractsApi } from './api-contracts.js';
 
@@ -828,8 +829,16 @@ export async function handleChmsApi(req, env, url, method, seg, role = 'admin', 
   // ── Tuition Aid Planner → api-tuition-aid.js ────────────────────────────
   // Pass the tuition-specific view flag (not the giving one) — the central gate has already
   // enforced view/edit for this item, so this only needs to satisfy the handler's own guard.
+  // The records themselves live where TUITION_STORAGE_MODE says (src/tuition-storage.js): Connect's
+  // D1, paused for the move, or Finance's D1. People stay in Connect, so the handler gets both.
   if (seg.startsWith('tuition-aid')) {
-    const result = await handleTuitionAidApi(req, env, url, method, seg, db, canView('tuitionaid'));
+    if (seg === 'tuition-aid/storage' && method === 'GET') return json(await tuitionStorageStatus(env));
+    let storage;
+    try { storage = await tuitionStorage(env, db); } catch (e) { return json({ error: e.message || 'Tuition Aid is unavailable right now.' }, e.status || 503); }
+    if (!storage.writable && method !== 'GET') {
+      return json({ error: 'Tuition Aid is moving to Finance’s database. Changes are paused for a few minutes; please try again shortly.' }, 503);
+    }
+    const result = await handleTuitionAidApi(req, env, url, method, seg, storage.db, canView('tuitionaid'), db);
     if (result !== null) return result;
   }
 

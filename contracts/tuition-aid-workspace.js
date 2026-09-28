@@ -8,6 +8,7 @@ const ROUTES = new Map([
   ['tuition-aid/year-pins/bulk', ['POST']],
   ['tuition-aid/import-history', ['POST']],
   ['tuition-aid/history', ['PUT']],
+  ['tuition-aid/storage', ['GET']],
 ]);
 const DYNAMIC = [
   [/^tuition-aid\/students\/\d+$/, ['PATCH', 'DELETE']],

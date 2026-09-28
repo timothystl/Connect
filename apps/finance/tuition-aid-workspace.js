@@ -57,12 +57,36 @@ export const TUITION_AID_BOOT = String.raw`(function(){
 })();`;
 const SHIM = `(function(){var add=window.addEventListener;window.addEventListener=function(t,f,o){if(t==='load'||t==='popstate'||t==='hashchange')return;return add.call(window,t,f,o);};window.__restoreTuitionListeners=function(){window.addEventListener=add;};})();`;
 
-export function renderTuitionAidWorkspace(viewer, version) {
+const STATUS_TABLE_LABELS = { tuition_students: 'students', tuition_student_years: 'year records', tuition_history: 'history rows', tuition_year_rates: 'tuition rates', tuition_config: 'settings' };
+
+// Where the tuition records are kept, from Connect's tuition-aid/storage (src/tuition-storage.js).
+export function describeTuitionStorage(status) {
+  if (!status || !status.mode) return '';
+  if (status.mode === 'connect') return 'Records are stored in Connect’s database.';
+  if (status.mode === 'copying') return 'Records are moving to Finance’s database — changes are paused for a few minutes.';
+  if (status.status === 'verified') {
+    const counts = (status.tables || []).filter((t) => STATUS_TABLE_LABELS[t.table]).map((t) => `${t.count} ${STATUS_TABLE_LABELS[t.table]}`).join(', ');
+    return `Records are stored in Finance’s database (moved ${String(status.moved_at || '').slice(0, 16).replace('T', ' ')} UTC and checked row for row${counts ? `: ${counts}` : ''}).`;
+  }
+  if (status.status === 'failed') return 'The move to Finance’s database did not pass its check, so Tuition Aid is paused. Connect still has every record.';
+  return 'Records are moving to Finance’s database on first use.';
+}
+
+export async function fetchTuitionStorageStatus(env, jwt) {
+  try {
+    const res = await env.CONNECT_SERVICE.fetch(new Request('https://connect.timothystl.org/api/contracts/tuition-aid-workspace-v1?path=tuition-aid%2Fstorage', {
+      headers: { 'X-Contract-Key': env.FINANCE_CONTRACT_API_KEY, 'Cf-Access-Jwt-Assertion': jwt }, redirect: 'manual',
+    }));
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
+
+export function renderTuitionAidWorkspace(viewer, version, storageStatus = null) {
   const v = encodeURIComponent(version || 'dev');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Tuition Aid planner · Timothy Finance</title><link rel="stylesheet" href="/accounting/app.css?v=${v}">
 <style>html,body{height:auto!important;overflow:auto!important}body{margin:0;background:var(--warm-bg,#F3F7FA)}#tab-tuitionaid{display:block!important}.workspace-header{padding:14px 20px;background:#fff;border-bottom:1px solid #ddd;display:flex;gap:20px;align-items:center;flex-wrap:wrap}.workspace-header small{color:#5B6475}@media print{.workspace-header{display:none}}</style>
-</head><body><header class="workspace-header"><strong>Timothy Finance · Tuition Aid planner</strong><a href="/" target="_top">Finance home</a>${viewer.permissions.tuitionaid === 'view' ? '<small>View only — changes need Tuition Aid edit access.</small>' : ''}</header>
+</head><body><header class="workspace-header"><strong>Timothy Finance · Tuition Aid planner</strong><a href="/" target="_top">Finance home</a>${describeTuitionStorage(storageStatus) ? `<small>${describeTuitionStorage(storageStatus).replace(/</g, '&lt;')}</small>` : ''}${viewer.permissions.tuitionaid === 'view' ? '<small>View only — changes need Tuition Aid edit access.</small>' : ''}</header>
 <div id="error-boundary" style="display:none"></div>${MARKUP}${MODALS}
 <script>window.__TUITION_AID__=${safeJson({ role: viewer.role, permissions: { tuitionaid: viewer.permissions.tuitionaid } })};${SHIM}</script>
 <script src="/accounting/app.js?v=${v}"></script><script>${TUITION_AID_BOOT}</script></body></html>`;
