@@ -1,0 +1,142 @@
+name: Back up and drop Connect's old QuickBooks tables
+
+# One-time cleanup after the QuickBooks move to Finance (docs/QUICKBOOKS_FINANCE_CUTOVER.md).
+# Andrew confirmed on 2026-09-28 that Finance's sync matches QuickBooks and asked for Connect's
+# leftover copies of finance_qb_connection and finance_qb_snapshot to be backed up and dropped.
+# Nothing in Connect reads or creates them any more: in finance storage mode those tables are read
+# from Finance's database, and initDb() no longer creates them. Run only after a Connect release
+# containing that change is live, or schema setup would recreate empty tables.
+#
+# Backups, before anything is dropped:
+#   1. The D1 Time Travel bookmark for the moment before the drop (full-fidelity restore of the
+#      whole database for 30 days).
+#   2. A JSON copy of both tables as a workflow artifact kept for 90 days. The two OAuth token
+#      columns are blanked: the tokens were revoked at the cutover and must not be stored.
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Full main commit SHA that is deployed to Connect production
+        required: true
+        type: string
+      reason:
+        description: Reason for this cleanup
+        required: true
+        type: string
+      confirm:
+        description: Type DROP to back up and then drop the two tables
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: drop-connect-quickbooks-tables
+  cancel-in-progress: false
+
+jobs:
+  drop:
+    name: Back up and drop finance_qb_* in timothy-connect-db
+    if: github.ref == 'refs/heads/main' && inputs.confirm == 'DROP'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DB_NAME: timothy-connect-db
+      BACKUP_DIR: /tmp/connect-qb-backup
+    steps:
+      - name: Check out the approved commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.expected_sha }}
+
+      - name: Verify the approved commit is on main and no longer creates the tables
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git merge-base --is-ancestor "$EXPECTED_SHA" origin/main
+          if grep -q "CREATE TABLE IF NOT EXISTS finance_qb_" src/db.js; then
+            echo "src/db.js still creates finance_qb_* tables; refusing to drop them."; exit 1
+          fi
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Back up, verify, drop and confirm
+        shell: bash
+        env:
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"
+          q() { npx wrangler d1 execute "$DB_NAME" --remote --json --command "$1"; }
+
+          # Tables that exist now (the drop is a no-op for any already gone).
+          q "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('finance_qb_connection','finance_qb_snapshot') ORDER BY name" > "$BACKUP_DIR/tables.json"
+          present=$(jq -r '[.[0].results[].name] | join(",")' "$BACKUP_DIR/tables.json")
+          echo "Tables present: ${present:-none}"
+
+          # 1. Time Travel bookmark before any change.
+          npx wrangler d1 time-travel info "$DB_NAME" --json > "$BACKUP_DIR/time-travel.json"
+          bookmark=$(jq -r '.bookmark // empty' "$BACKUP_DIR/time-travel.json")
+          test -n "$bookmark"
+
+          # 2. JSON backup, tokens blanked.
+          conn_rows=0; snap_rows=0
+          if [[ ",$present," == *",finance_qb_connection,"* ]]; then
+            q "SELECT id, realm_id, company_name, '' AS access_token, '' AS refresh_token, access_token_expires_at, refresh_token_expires_at, environment, connected_at, last_synced_at FROM finance_qb_connection" \
+              | jq '.[0].results' > "$BACKUP_DIR/finance_qb_connection.json"
+            conn_rows=$(jq 'length' "$BACKUP_DIR/finance_qb_connection.json")
+            live=$(q "SELECT COUNT(*) AS n FROM finance_qb_connection" | jq '.[0].results[0].n')
+            test "$live" = "$conn_rows"
+          fi
+          if [[ ",$present," == *",finance_qb_snapshot,"* ]]; then
+            q "SELECT key, value, synced_at FROM finance_qb_snapshot ORDER BY key" \
+              | jq '.[0].results' > "$BACKUP_DIR/finance_qb_snapshot.json"
+            snap_rows=$(jq 'length' "$BACKUP_DIR/finance_qb_snapshot.json")
+            live=$(q "SELECT COUNT(*) AS n FROM finance_qb_snapshot" | jq '.[0].results[0].n')
+            test "$live" = "$snap_rows"
+          fi
+          (cd "$BACKUP_DIR" && sha256sum *.json > SHA256SUMS)
+
+          # 3. Drop.
+          q "DROP TABLE IF EXISTS finance_qb_snapshot; DROP TABLE IF EXISTS finance_qb_connection;" > /dev/null
+
+          # 4. Confirm they are gone.
+          left=$(q "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('finance_qb_connection','finance_qb_snapshot')" | jq '.[0].results[0].n')
+          test "$left" = "0"
+
+          {
+            echo '## Connect QuickBooks tables backed up and dropped'
+            echo
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Reason: ${REASON}"
+            echo "- Tables present before: ${present:-none}"
+            echo "- Backed up rows: finance_qb_connection ${conn_rows} (tokens blanked), finance_qb_snapshot ${snap_rows}"
+            echo "- Time Travel bookmark before the drop: \`${bookmark}\` (restore with \`wrangler d1 time-travel restore ${DB_NAME} --bookmark=${bookmark}\`, which rewinds the whole database)"
+            echo "- JSON backup: workflow artifact \`connect-qb-tables-backup\`, kept 90 days"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the JSON backup
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: connect-qb-tables-backup
+          path: /tmp/connect-qb-backup/
+          retention-days: 90
+          if-no-files-found: warn

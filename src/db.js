@@ -1891,25 +1891,10 @@ async function _doInitDb(db) {
     // Outside Aid (see migrations/0017_tuition_timothy_override.sql)
     'ALTER TABLE tuition_students ADD COLUMN timothy_award_override_cents INTEGER',
     'ALTER TABLE tuition_students ADD COLUMN family_owed_override_cents INTEGER',
-    // Finance Overview: QuickBooks Online OAuth connection + cached report snapshots,
-    // plus manual daycare entries (see migrations/0016_finance.sql)
-    `CREATE TABLE IF NOT EXISTS finance_qb_connection (
-      id                       INTEGER PRIMARY KEY CHECK (id = 1),
-      realm_id                 TEXT    NOT NULL DEFAULT '',
-      company_name             TEXT    NOT NULL DEFAULT '',
-      access_token             TEXT    NOT NULL DEFAULT '',
-      refresh_token            TEXT    NOT NULL DEFAULT '',
-      access_token_expires_at  TEXT    NOT NULL DEFAULT '',
-      refresh_token_expires_at TEXT    NOT NULL DEFAULT '',
-      environment              TEXT    NOT NULL DEFAULT 'production',
-      connected_at             TEXT    NOT NULL DEFAULT '',
-      last_synced_at           TEXT    NOT NULL DEFAULT ''
-    )`,
-    `CREATE TABLE IF NOT EXISTS finance_qb_snapshot (
-      key        TEXT PRIMARY KEY,
-      value      TEXT NOT NULL DEFAULT '',
-      synced_at  TEXT NOT NULL DEFAULT ''
-    )`,
+    // Finance Overview: manual daycare entries (see migrations/0016_finance.sql). The QuickBooks
+    // connection and report cache from that migration now live only in Finance's database
+    // (dropped from Connect on 2026-09-28 after the QuickBooks move; see
+    // docs/QUICKBOOKS_FINANCE_CUTOVER.md).
     `CREATE TABLE IF NOT EXISTS finance_daycare_entries (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
       period       TEXT    NOT NULL DEFAULT '',
