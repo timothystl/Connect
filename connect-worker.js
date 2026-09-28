@@ -307,7 +307,7 @@ async function _fetchRouted(req, env, url, path, method) {
     // these, so a cold isolate paid one D1 round trip to serve e.g. a favicon. Serving
     // them here, before initDb(), means the pure-asset routes never wait on it at all.
     if (path === '/favicon.svg' && method === 'GET') {
-      const fRes = await fetch('https://raw.githubusercontent.com/timothystl/chms/main/favicon.svg?v=' + DEPLOY_VERSION, { cf: { cacheEverything: true, cacheTtl: 86400 } });
+      const fRes = await fetch('https://raw.githubusercontent.com/timothystl/connect/main/favicon.svg?v=' + DEPLOY_VERSION, { cf: { cacheEverything: true, cacheTtl: 86400 } });
       return new Response(fRes.ok ? fRes.body : '', { status: fRes.ok ? 200 : 404, headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' } });
     }
     // App icons (Connect mark) — proxied from the repo so they update on deploy.
@@ -316,7 +316,7 @@ async function _fetchRouted(req, env, url, path, method) {
     if (path.startsWith('/icons/') && method === 'GET') {
       const m = path.match(/^\/icons\/(icon-(?:16|32|180|192|512|512-maskable)\.png|connect-(?:mark|lockup)\.png)$/);
       if (m) {
-        const fRes = await fetch('https://raw.githubusercontent.com/timothystl/chms/main/icons/' + m[1] + '?v=' + DEPLOY_VERSION, { cf: { cacheEverything: true, cacheTtl: 86400 } });
+        const fRes = await fetch('https://raw.githubusercontent.com/timothystl/connect/main/icons/' + m[1] + '?v=' + DEPLOY_VERSION, { cf: { cacheEverything: true, cacheTtl: 86400 } });
         const ct = m[1].endsWith('.svg') ? 'image/svg+xml' : 'image/png';
         return new Response(fRes.ok ? fRes.body : '', { status: fRes.ok ? 200 : 404, headers: { 'Content-Type': ct, 'Cache-Control': 'public, max-age=86400' } });
       }
@@ -329,14 +329,14 @@ async function _fetchRouted(req, env, url, path, method) {
     if (path.startsWith('/admin/vendor/tinymce/') && method === 'GET') {
       const rel = path.slice('/admin/vendor/tinymce/'.length);
       if (!/^[\w./-]+\.(js|css)$/.test(rel) || rel.includes('..')) return new Response('Not found', { status: 404 });
-      const fRes = await fetch('https://raw.githubusercontent.com/timothystl/chms/main/vendor/tinymce/' + rel, { cf: { cacheEverything: true, cacheTtl: 86400 } });
+      const fRes = await fetch('https://raw.githubusercontent.com/timothystl/connect/main/vendor/tinymce/' + rel, { cf: { cacheEverything: true, cacheTtl: 86400 } });
       const ct = rel.endsWith('.css') ? 'text/css' : 'application/javascript';
       return new Response(fRes.ok ? fRes.body : '', { status: fRes.ok ? 200 : 404, headers: { 'Content-Type': ct, 'Cache-Control': 'public, max-age=86400' } });
     }
     // Public site header/drawer logo — proxied + cached the same way, instead of inlining
     // ~115KB of base64 into every page's HTML.
     if (path === '/header-logo.png' && method === 'GET') {
-      const fRes = await fetch('https://raw.githubusercontent.com/timothystl/chms/main/header-logo.png', { cf: { cacheEverything: true, cacheTtl: 86400 } });
+      const fRes = await fetch('https://raw.githubusercontent.com/timothystl/connect/main/header-logo.png', { cf: { cacheEverything: true, cacheTtl: 86400 } });
       return new Response(fRes.ok ? fRes.body : '', { status: fRes.ok ? 200 : 404, headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' } });
     }
     // ── Versioned-asset cache policy ────────────────────────────────────────────────
