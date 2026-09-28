@@ -69,9 +69,10 @@ Done September 28, 2026, after the step 7 check:
 - Connect's QuickBooks routes, OAuth client (`src/quickbooks.js`), token refresh, `qb_oauth_state:*` use of KV and legacy buttons are removed. Any old `finance/qb/*` link answers 409 and points to Finance; the legacy Data & Imports tab links there too.
 - `QBO_MANAGED_BY_FINANCE` is gone: in `finance` storage mode Connect always reads `finance_qb_connection` and `finance_qb_snapshot` from Finance's database.
 
-Still to do by hand:
-- Delete Connect's Worker secrets `QB_CLIENT_ID`, `QB_CLIENT_SECRET` (and `QB_ENVIRONMENT` if set) from `timothy-connect`.
-- Remove Connect's old redirect URI from the Intuit app, if not already done.
-- Connect's own copies of `finance_qb_connection` and `finance_qb_snapshot` in `timothy-connect-db`: Andrew asked on September 28 for them to be backed up and dropped. `initDb()` no longer creates them, and `.github/workflows/drop-connect-quickbooks-tables.yml` records a D1 Time Travel bookmark, keeps a JSON copy (tokens blanked) as a 90-day workflow artifact, then drops both tables. Run it only after a Connect release without the `CREATE TABLE` statements is live.
+Also completed September 28, 2026:
+- Andrew deleted Connect's Worker secrets `QB_CLIENT_ID` and `QB_CLIENT_SECRET` from `timothy-connect`.
+- Connect's own copies of `finance_qb_connection` and `finance_qb_snapshot` were backed up and dropped from `timothy-connect-db` by `.github/workflows/drop-connect-quickbooks-tables.yml` (run 36378533071): a D1 Time Travel bookmark from before the drop (30-day full-database restore, shown in the run summary) and a JSON copy with the revoked tokens blanked (artifact `connect-qb-tables-backup`, kept until December 27, 2026). `initDb()` no longer creates them.
+
+Optional: remove Connect's old redirect URI (`https://chms.timothystl.org/admin/api/finance/qb/callback`) from the Intuit app if it is still listed.
 
 The rollback section above no longer applies as written: going back would mean restoring the removed Connect code.
