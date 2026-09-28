@@ -133,7 +133,9 @@ as the reference bar) plus explicit research asks. What changed:
   on a real charge (`fee_cents`) always comes from Stax's own response (`total_fees`), never
   this estimate.
   Finance/admin staff change the percentage on `/admin/giving/stax-mockup/funds` (linked from
-  Giving → Recurring). It is stored as `stax_cover_fee_rate` in `giving_settings`, capped at
+  Giving → Recurring), or in Finance under Giving Entry → Online giving form, which relays to
+  Connect's `giving-online-settings(-write)-v1` contracts (`src/api-giving-online-contracts.js`)
+  and also edits which funds the form offers. It is stored as `stax_cover_fee_rate` in `giving_settings`, capped at
   10%, returned to the public form by `/funds`, and used by `checkout`/`recurring` — so a
   change takes effect on the next form load without a deploy.
 - **Memo** (`memo`, up to 500 chars) is stored on the ledger row's `notes` and, on a real charge,

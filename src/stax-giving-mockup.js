@@ -517,6 +517,19 @@ export async function loadEstimatedFeeRate(db) {
     return DEFAULT_FEE_RATE;
   }
 }
+// Percent in and out (2.5 = 2.5%), rate in storage (0.025). Shared by Connect's own admin page
+// and Finance's Online giving form page (api-giving-online-contracts.js).
+export function feeRateToPercent(rate) {
+  return Math.round(rate * 10000) / 100;
+}
+export async function saveFeePercent(db, percent) {
+  const pct = String(percent ?? '').trim() === '' ? NaN : Number(percent);
+  const rate = validFeeRate(Math.round(pct * 100) / 10000);
+  if (rate === null) return { error: `Enter a percentage greater than 0 and no more than ${MAX_FEE_RATE * 100}.` };
+  await db.prepare("INSERT INTO giving_settings(key,value,updated_at) VALUES(?,?,datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+    .bind(FEE_RATE_SETTING_KEY, String(rate)).run();
+  return { rate, percent: feeRateToPercent(rate) };
+}
 function estimateFeeCents(subtotalCents, feeRate) {
   return Math.round(subtotalCents * feeRate);
 }

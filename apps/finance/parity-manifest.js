@@ -22,13 +22,14 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     id: 'giving', label: 'Giving Entry', group: 'Gift Entry', permission: 'finance',
     // Batches, deposits and gifts live in Connect's giving_* tables; these pages read and write
     // them through the giving-batch-*-v1 contracts (connect-giving-batch-client.js).
-    capabilities: ['enter a batch', 'bank reconciliation', 'batch reports', 'record a gift', 'relayed live to Connect, never stored in Finance'],
+    capabilities: ['enter a batch', 'bank reconciliation', 'batch reports', 'record a gift', 'online giving form settings', 'relayed live to Connect, never stored in Finance'],
     pages: [
       { id: 'batch', label: 'Enter a batch', status: 'live' },
       { id: 'funds', label: 'Funds', status: 'live' },
       { id: 'reconciliation', label: 'Reconciliation to bank', status: 'live' },
       { id: 'reports', label: 'Batch reports', status: 'live' },
       { id: 'quick-entry', label: 'Record a single gift', status: 'live' },
+      { id: 'online-form', label: 'Online giving form', status: 'live' },
     ],
   },
   {
@@ -108,13 +109,15 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
   // facilities-service.js).
   {
     id: 'facilities', label: 'Facilities', group: 'Facilities', permission: 'finance',
-    capabilities: ['asset register', 'service history', 'capital projects', 'preventive maintenance'],
+    capabilities: ['asset register', 'service history', 'capital projects', 'preventive maintenance', 'gym rental income'],
     pages: [
       { id: 'overview', label: 'Overview', status: 'live' },
       { id: 'assets', label: 'Assets', status: 'live' },
       { id: 'service-history', label: 'Service history', status: 'live' },
       { id: 'capital-projects', label: 'Capital projects', status: 'live' },
       { id: 'preventive-maintenance', label: 'Preventive maintenance', status: 'live' },
+      // Read live from Website Admin, where gym bookings and invoices are managed.
+      { id: 'gym-rentals', label: 'Gym rental income', status: 'live' },
     ],
   },
   // The Budget builder is real now too, via the connect.finance-budget.v1 contract (real planned
