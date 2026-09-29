@@ -1,12 +1,12 @@
 // Tuition Aid in Finance (Andrew, September 28, 2026: Tuition Aid moves to Finance for good).
 // The tuition_* tables live in Finance's own database (moved there by Connect's Worker and checked
-// row for row, src/tuition-storage.js), and this is now their only writer: the planner page
+// row for row; accounting/tuition-storage.js), and this is now their only writer: the planner page
 // (tuition-planner/) calls /api/v1/tuition?path=..., answered here straight from FINANCE_DB with
-// the same handlers Connect used (src/api-tuition-aid.js). Every call checks the caller's live
+// Finance's own copy of the handlers Connect used (accounting/tuition-aid.js). Every call checks the caller's live
 // Connect role and Tuition Aid permission. Connect is asked for two things only: to finish the
 // move if Finance does not yet hold a verified copy, and the link-a-person search.
-import { handleTuitionAidApi } from '../../src/api-tuition-aid.js';
-import { TUITION_FINANCE_SCHEMA } from '../../src/tuition-storage.js';
+import { handleTuitionAidApi } from './accounting/tuition-aid.js';
+import { TUITION_FINANCE_SCHEMA } from './accounting/tuition-storage.js';
 import { fetchVerifiedRole } from './connect-role-client.js';
 import { isSameOriginPost } from './form-post.js';
 

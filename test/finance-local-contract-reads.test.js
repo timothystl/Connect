@@ -71,3 +71,94 @@ describe('Finance report reads from its own database', () => {
     expect(withLocalContractReads(env)).toBe(env);
   });
 });
+
+// Finance's own accounting writes (apps/finance/accounting/write-contracts.js): answered from
+// FINANCE_DB, with Connect asked only who is acting.
+function makeSettingsDb() {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(`CREATE TABLE finance_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`);
+  const statement = (sql, args = []) => ({
+    bind: (...next) => statement(sql, next),
+    async run() { const r = sqlite.prepare(sql).run(...args); return { success: true, meta: { changes: r.changes } }; },
+    async first() { return sqlite.prepare(sql).get(...args) ?? null; },
+    async all() { return { results: sqlite.prepare(sql).all(...args) }; },
+  });
+  return { prepare: (sql) => statement(sql), sqlite };
+}
+
+function roleConnect(role, { status = 200 } = {}) {
+  const calls = [];
+  return {
+    calls,
+    binding: {
+      async fetch(request) {
+        const path = new URL(request.url).pathname;
+        calls.push(path);
+        if (path.endsWith('/staff-role-v1')) {
+          return status === 200
+            ? new Response(JSON.stringify({ role, identity: 'someone@timothystl.org', username: 'someone', permissions: { finance: 'edit', budget: 'edit', compensation: 'view' } }))
+            : new Response('{}', { status });
+        }
+        return new Response('{"relayed":true}', { status: 200 });
+      },
+    },
+  };
+}
+
+const post = (env, name, body) => env.CONNECT_SERVICE.fetch(new Request(`https://connect.timothystl.org/api/contracts/${name}`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json', 'Cf-Access-Jwt-Assertion': 'jwt' }, body: JSON.stringify(body),
+}));
+
+describe('Finance accounting writes to its own database', () => {
+  it('saves a Chart of Accounts layout change itself, checking the role with Connect', async () => {
+    const db = makeSettingsDb();
+    const connect = roleConnect('admin');
+    const env = withLocalContractReads({ FINANCE_LOCAL_CONTRACT_READS: '1', FINANCE_DB: db, CONNECT_SERVICE: connect.binding, FINANCE_CONTRACT_API_KEY: 'key' });
+    const res = await post(env, 'finance-board-categories-write-v1', { hiddenAccounts: { 'Expenses:Old': true } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).savedBy).toBe('someone');
+    const saved = JSON.parse(db.sqlite.prepare("SELECT value FROM finance_settings WHERE key='finance_planning_board_categories'").get().value);
+    expect(saved.hiddenAccounts).toEqual({ 'Expenses:Old': true });
+    expect(connect.calls).toEqual(['/api/contracts/staff-role-v1']);
+  });
+
+  it('applies the same role rules Connect did', async () => {
+    const db = makeSettingsDb();
+    const env = withLocalContractReads({ FINANCE_LOCAL_CONTRACT_READS: '1', FINANCE_DB: db, CONNECT_SERVICE: roleConnect('finance').binding, FINANCE_CONTRACT_API_KEY: 'key' });
+    const res = await post(env, 'finance-board-categories-write-v1', { hiddenAccounts: { 'Expenses:Old': true } });
+    expect(res.status).toBe(403);
+    expect(db.sqlite.prepare('SELECT COUNT(*) n FROM finance_settings').get().n).toBe(0);
+  });
+
+  it('refuses to save when Connect cannot confirm who is acting, and never relays the write', async () => {
+    const db = makeSettingsDb();
+    const connect = roleConnect('admin', { status: 503 });
+    const env = withLocalContractReads({ FINANCE_LOCAL_CONTRACT_READS: '1', FINANCE_DB: db, CONNECT_SERVICE: connect.binding, FINANCE_CONTRACT_API_KEY: 'key' });
+    const res = await post(env, 'finance-cash-policy-write-v1', { floor_cents: 100 });
+    expect(res.status).toBe(503);
+    expect(connect.calls).toEqual(['/api/contracts/staff-role-v1']);
+    expect(db.sqlite.prepare('SELECT COUNT(*) n FROM finance_settings').get().n).toBe(0);
+    const noIdentity = await env.CONNECT_SERVICE.fetch(new Request('https://connect.timothystl.org/api/contracts/finance-board-categories-write-v1', { method: 'POST', body: '{}' }));
+    expect(noIdentity.status).toBe(401);
+  });
+
+  it('keeps who saved it in Finance’s own audit log', async () => {
+    const db = makeSettingsDb();
+    const env = withLocalContractReads({ FINANCE_LOCAL_CONTRACT_READS: '1', FINANCE_DB: db, CONNECT_SERVICE: roleConnect('admin').binding, FINANCE_CONTRACT_API_KEY: 'key' });
+    const res = await post(env, 'finance-compensation-write-v1', { roster: [] });
+    expect(res.status).toBe(200);
+    const plan = await env.CONNECT_SERVICE.fetch(new Request('https://connect.timothystl.org/api/contracts/finance-compensation-plan-v1', { headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }));
+    expect(plan.status).toBe(200);
+    if (res.status === 200) {
+      expect(db.sqlite.prepare("SELECT action FROM finance_audit_log").all().map((r) => r.action)).toContain('salary_planner_write_via_finance');
+    }
+  });
+
+  it('sends the myMDO sync to Connect until Finance has that connection, and Giving always', async () => {
+    const connect = roleConnect('admin');
+    const env = withLocalContractReads({ FINANCE_LOCAL_CONTRACT_READS: '1', FINANCE_DB: makeSettingsDb(), CONNECT_SERVICE: connect.binding, FINANCE_CONTRACT_API_KEY: 'key' });
+    await post(env, 'finance-daycare-sync-v1', {});
+    await post(env, 'giving-fund-cleanup-write-v1', { op: 'retire', fund_ids: [1] });
+    expect(connect.calls).toEqual(['/api/contracts/finance-daycare-sync-v1', '/api/contracts/giving-fund-cleanup-write-v1']);
+  });
+});
