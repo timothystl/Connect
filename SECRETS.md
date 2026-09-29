@@ -162,6 +162,7 @@ These are not required for the app to function but unlock additional capabilitie
   - **Known limitation**: Payroll actual can't account for staff who left mid-window (no termination date tracked on the daycare side), so it may run slightly high for months after someone departs.
 - **Set**: `wrangler secret put DAYCARE_API_URL` (the full Supabase function URL above) then `wrangler secret put DAYCARE_API_KEY` (same value as the daycare app's `FINANCE_API_KEY`).
 - **Risk if leaked**: Read-only access to the daycare app's financial summary endpoint (as scoped by whatever the daycare app itself enforces on that key).
+- **Moving to Finance (Andrew, 2026-09-29)**: the myMDO syncs belong to Finance. Set `DAYCARE_API_URL`, `DAYCARE_API_KEY` and `DAYCARE_ROOMS_API_URL` on `timothy-finance-app` with the same values Connect has; Finance then runs both syncs itself (`apps/finance/accounting/write-contracts.js` and `accounting/workspace.js` check for them) and stops asking Connect. Once a sync has succeeded from Finance, delete the three from `timothy-connect`.
 
 ---
 
