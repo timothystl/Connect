@@ -268,6 +268,7 @@ const ROUTES = [
   { id: 'giving-letters-print', paths: ['/giving-letters/print'], dataSource: 'live-relay-read', contract: 'connect.giving-letters.v1' },
   { id: 'giving-statement-csv', paths: ['/api/v1/giving-statement.csv'], dataSource: 'live-relay-read', contract: 'connect.giving-letters.v1' },
   { id: 'giving-fund-passthrough-write-v1', paths: ['/api/v1/giving-fund-passthrough'], methods: WRITE_METHODS, dataSource: 'live-relay', writer: true, contract: 'connect.giving-fund-passthrough-write.v1' },
+  { id: 'giving-fund-cleanup-write-v1', paths: ['/api/v1/giving-fund-cleanup'], methods: WRITE_METHODS, dataSource: 'live-relay', writer: true, contract: 'connect.giving-fund-cleanup-write.v1' },
   { id: 'giving-impact-write-v1', paths: ['/api/v1/giving-impact'], methods: WRITE_METHODS, dataSource: 'live-relay', writer: true, contract: 'connect.giving-impact-write.v1' },
   { id: 'giving-board-email-v1', paths: ['/api/v1/giving-board-email'], methods: WRITE_METHODS, dataSource: 'live-relay', writer: true, contract: 'connect.giving-board-email.v1' },
   { id: 'summary-legacy', paths: ['/api/summary'], dataSource: 'synthetic-d1', queryBudget: 'summary', deprecated: true },

@@ -28,7 +28,8 @@ import { renderGymIncomePage } from './gym-income-pages.js';
 import { fetchGymIncome, describeGymIncomeFailure } from './gym-income-client.js';
 import { describeGivingBatchFailure, fetchGivingDeposit, fetchGivingBatchLedger, fetchGivingBatchWorkspace, fetchGivingTransactions, fetchOnlineGiving, postGivingBatchWrite, fetchGivingOnlineSettings, postGivingOnlineSettingsWrite } from './connect-giving-batch-client.js';
 import { GIFT_TRANSACTIONS_STYLES, buildTransactionsCsv, normalizeTransactionParams, renderOnlineGivingPage, renderTransactionsPage, transactionsCsvFilename, transactionsCsvParams } from './gift-transactions-pages.js';
-import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, fetchGivingBoard, fetchGivingReport, postGivingBoardEmail, postGivingFollowupWrite, postGivingImpactWrite, postGivingFundPassThrough } from './connect-giving-analytics-client.js';
+import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, fetchGivingBoard, fetchGivingReport, postGivingBoardEmail, postGivingFollowupWrite, postGivingImpactWrite, postGivingFundPassThrough, fetchGivingFundCleanup, postGivingFundCleanup } from './connect-giving-analytics-client.js';
+import { FUND_CLEANUP_STYLES, renderFundCleanup } from './fund-cleanup-pages.js';
 import { GIVING_REPORTS_STYLES, givingReportParams, givingReportRequests, impactStatementsFromForm, renderGivingReportPage } from './giving-reports-pages.js';
 import { DONOR_LETTERS_STYLES, kindOfPage, renderDonorLettersPage } from './donor-letters-pages.js';
 import { fetchGivingLetters, lettersParams, listQuery } from './donor-letters-service.js';
@@ -1031,6 +1032,39 @@ async function handleGivingFundPassThrough(request, env, url) {
   return back({ status: 'ok', msg: `Saved. ${n} designated fund${n === 1 ? ' is' : 's are'} pass-through.` });
 }
 
+// Gift Entry › Funds › Clean up funds: combine a duplicate group into the fund kept, or retire /
+// restore funds. Connect re-checks that the signed-in person is a Connect admin.
+async function handleGivingFundCleanup(request, env, url) {
+  const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving', page: 'funds', ...params }).toString()}#fund-cleanup` } });
+  if (!isSameOriginPost(request, url)) return back({ status: 'error', message: 'That form did not come from Timothy Finance.' });
+  let form;
+  try { form = await request.formData(); } catch { return back({ status: 'error', message: 'The form could not be read.' }); }
+  const ids = (name) => [...new Set(form.getAll(name).map(String).filter((v) => /^\d{1,9}$/.test(v)).map(Number))];
+  const op = String(form.get('op') || '');
+  let body;
+  if (op === 'merge') {
+    const keep = Number(form.get('keep'));
+    const remove = ids('remove').filter((id) => id !== keep);
+    if (!Number.isInteger(keep) || keep <= 0) return back({ status: 'error', message: 'Choose the fund to keep.' });
+    if (!remove.length) return back({ status: 'error', message: 'Tick at least one other fund to combine into the one you keep.' });
+    if (form.get('confirm') !== '1') return back({ status: 'error', message: 'Tick the confirmation box to combine funds.' });
+    body = { op, keep_id: keep, remove_ids: remove };
+  } else if (op === 'retire' || op === 'restore') {
+    const fundIds = ids('fund_id');
+    if (!fundIds.length) return back({ status: 'error', message: 'Tick at least one fund.' });
+    body = { op, fund_ids: fundIds };
+  } else {
+    return back({ status: 'error', message: 'Unknown action.' });
+  }
+  const result = await postGivingFundCleanup(env, request.headers.get('Cf-Access-Jwt-Assertion') || '', body);
+  if (!result.ok) return back({ status: 'error', message: describeGivingBatchFailure(result).slice(0, 200) });
+  const r = result.result || {};
+  const msg = op === 'merge'
+    ? `Combined into ${r.kept || 'the kept fund'}: ${r.moved_gifts || 0} gift${r.moved_gifts === 1 ? '' : 's'} moved, ${r.removed || 0} fund${r.removed === 1 ? '' : 's'} removed.`
+    : `${r.changed ?? body.fund_ids.length} fund${(r.changed ?? body.fund_ids.length) === 1 ? '' : 's'} ${op === 'retire' ? 'retired' : 'restored'}.`;
+  return back({ status: 'ok', msg });
+}
+
 async function handleGivingFollowupWrite(request, env, url) {
   const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving-reports', page: 'plateaus', ...params }).toString()}` } });
   if (!isSameOriginPost(request, url)) return back({ status: 'error', message: 'That form did not come from Timothy Finance.' });
@@ -1418,7 +1452,13 @@ function renderSectionBody(ctx) {
       if (page.id === 'reports') return renderBatchReportsPage({ result: batchResult, today });
       return renderBatchPage({ result: batchResult, params: ctx.searchParams, status: batchStatus, today });
     }
-    return renderGiftEntryPage(page.id, { giving, givingSource });
+    const fundCleanup = page.id === 'funds' && ctx.givingBatch
+      ? renderFundCleanup({
+        result: ctx.givingBatch.ok ? { ok: true, data: ctx.givingBatch.result } : { ok: false, message: describeGivingBatchFailure(ctx.givingBatch) },
+        status: ctx.searchParams.get('status') === 'ok' ? { ok: true, message: ctx.searchParams.get('msg') || 'Saved in Connect.' }
+          : ctx.searchParams.get('status') === 'error' ? { ok: false, message: `Not saved: ${ctx.searchParams.get('message') || 'the request did not complete.'}` } : null,
+      }) : '';
+    return renderGiftEntryPage(page.id, { giving, givingSource }) + fundCleanup;
   }
   if (section.id === 'tuition') {
     // Finance's own planner (tuition-planner/): the page carries its settings and script; every
@@ -1852,7 +1892,7 @@ function renderShell(ctx) {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Timothy Finance${production ? '' : ' — Staging'}</title>
   <link rel="icon" href="/assets/finance-mark.png"><link rel="apple-touch-icon" href="/assets/finance-icon.png">
-  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${COUNCIL_REPORT_STYLES}${GIVING_REPORTS_STYLES}${DONOR_LETTERS_STYLES}${PLEDGE_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}</style>
+  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${COUNCIL_REPORT_STYLES}${GIVING_REPORTS_STYLES}${DONOR_LETTERS_STYLES}${PLEDGE_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}${FUND_CLEANUP_STYLES}</style>
 </head>
 <body${councilPreview ? ' class="council-preview"' : ''}>
   <header class="app-header">
@@ -2103,6 +2143,7 @@ export default {
       return handleGivingFollowupWrite(request, env, url);
     }
     if (route.id === 'giving-fund-passthrough-write-v1') return handleGivingFundPassThrough(request, env, url);
+    if (route.id === 'giving-fund-cleanup-write-v1') return handleGivingFundCleanup(request, env, url);
 
     if (route.id === 'giving-impact-write-v1') return handleGivingImpactWrite(request, env, url);
     if (route.id === 'giving-letters-write-v1') return handleDonorLettersWrite(request, env, url);
@@ -4475,7 +4516,9 @@ export default {
                 fetchOnlineGiving(env, accessJwt),
                 url.searchParams.get('queue') && url.searchParams.get('q') ? fetchGivingBatchWorkspace(env, accessJwt, { q: url.searchParams.get('q') }) : null,
               ]).then(([online, lookup]) => ({ ...online, people: lookup?.ok ? lookup.result.people || [] : [] }))
-                : givingPageId === 'online-form' ? fetchGivingOnlineSettings(env, accessJwt) : null;
+                : givingPageId === 'online-form' ? fetchGivingOnlineSettings(env, accessJwt)
+                  // Clean up funds on Gift Entry › Funds: Connect admins only (Connect re-checks).
+                  : givingPageId === 'funds' && !councilPreview && roleResult.ok && roleResult.role === 'admin' ? fetchGivingFundCleanup(env, accessJwt) : null;
         // Giving pages read Connect live too; the named pages (statements, nudges) use their own
         // contract, never requested for council preview or a totals-only (council) Giving role.
         // Giving reports' Nudges and next steps reads the nudge queue (and this year's first-time

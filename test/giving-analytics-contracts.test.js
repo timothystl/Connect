@@ -246,6 +246,45 @@ describe('Giving analytics contracts (giving-analytics-*-v1, giving-followup-wri
     expect((await post({ fund_ids: [png], passthrough_fund_ids: [png] }, 'carl@timothystl.org')).status).toBe(403);
   });
 
+  it('lets a Connect admin combine duplicate funds and retire old ones, and hides retired funds from the designated list', async () => {
+    const { db, ids, building } = setup();
+    const raw = db._raw;
+    const numbered = insertFund(db, '25004 Building Fund');
+    const youth = insertFund(db, '46045 Youth');
+    const gathering = insertFund(db, '46045 Youth Gathering');
+    const egg = insertFund(db, 'Easter Egg Hunt');
+    raw.prepare("INSERT INTO giving_entries (batch_id, person_id, fund_id, amount, method, contribution_date) VALUES (1,?,?,?,'check',?)")
+      .run(ids.acme, gathering, 2500, '2026-04-01');
+    const admin = 'pastor@timothystl.org';
+    const list = await (await call(db, '/api/contracts/giving-fund-cleanup-v1', { email: admin })).json();
+    expect(list.contract).toBe('connect.giving-fund-cleanup.v1');
+    const groupOf = (id) => list.duplicate_groups.find((g) => g.fund_ids.includes(id));
+    expect(groupOf(building).fund_ids.sort()).toEqual([building, numbered].sort());
+    expect(groupOf(building).suggested_keep_id).toBe(numbered);
+    expect(groupOf(youth).fund_ids.sort()).toEqual([youth, gathering].sort());
+    expect(groupOf(egg)).toBeUndefined();
+    // Only an admin may read or change it.
+    expect((await call(db, '/api/contracts/giving-fund-cleanup-v1')).status).toBe(403);
+    const post = (body, email = admin) => call(db, '/api/contracts/giving-fund-cleanup-write-v1', { method: 'POST', body, email });
+    expect((await post({ op: 'retire', fund_ids: [egg] }, 'sarah@timothystl.org')).status).toBe(403);
+    const buildingGifts = raw.prepare('SELECT COUNT(*) n FROM giving_entries WHERE fund_id=?').get(building).n;
+    const merged = await post({ op: 'merge', keep_id: numbered, remove_ids: [building] });
+    expect(merged.status).toBe(200);
+    expect(await merged.json()).toMatchObject({ ok: true, moved_gifts: buildingGifts, kept: '25004 Building Fund', removed: 1 });
+    expect(raw.prepare('SELECT COUNT(*) n FROM funds WHERE id=?').get(building).n).toBe(0);
+    expect(raw.prepare('SELECT COUNT(*) n FROM giving_entries WHERE fund_id=?').get(numbered).n).toBe(buildingGifts);
+    expect((await post({ op: 'merge', keep_id: numbered, remove_ids: [numbered] })).status).toBe(400);
+    expect((await post({ op: 'retire', fund_ids: [egg, gathering] })).status).toBe(200);
+    expect(raw.prepare('SELECT active FROM funds WHERE id=?').get(egg).active).toBe(0);
+    raw.prepare("UPDATE funds SET category='restricted' WHERE id IN (?,?)").run(egg, gathering);
+    const analytics = await (await call(db, '/api/contracts/giving-analytics-v1', { query: '?as_of=2026-09-20&fund=all' })).json();
+    const designated = analytics.designated_funds.map((f) => f.fund_id);
+    expect(designated).not.toContain(egg); // retired, no gifts
+    expect(designated).toContain(gathering); // retired, but given to this year
+    expect((await post({ op: 'restore', fund_ids: [egg] })).status).toBe(200);
+    expect(raw.prepare('SELECT active FROM funds WHERE id=?').get(egg).active).toBe(1);
+  });
+
   it('leaves pass-through funds out of donor giving and revenue but reports them as their own category', async () => {
     const { db, ids, general } = setup();
     const raw = db._raw;

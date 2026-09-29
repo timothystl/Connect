@@ -25,6 +25,16 @@ export function postGivingFundPassThrough(env, accessJwt, body) {
   return callConnectContract(env, accessJwt, 'giving-fund-passthrough-write-v1', { method: 'POST', body });
 }
 
+// Fund cleanup (Gift Entry › Funds): every fund with its totals and the likely duplicates, and
+// combining or retiring funds. Connect admin only; Connect re-checks.
+export function fetchGivingFundCleanup(env, accessJwt) {
+  return callConnectContract(env, accessJwt, 'giving-fund-cleanup-v1');
+}
+
+export function postGivingFundCleanup(env, accessJwt, body) {
+  return callConnectContract(env, accessJwt, 'giving-fund-cleanup-write-v1', { method: 'POST', body });
+}
+
 export function postGivingFollowupWrite(env, accessJwt, body) {
   return callConnectContract(env, accessJwt, 'giving-followup-write-v1', { method: 'POST', body });
 }
