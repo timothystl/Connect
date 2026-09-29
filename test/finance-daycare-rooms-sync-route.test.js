@@ -68,13 +68,14 @@ describe('Daycare Report — "Sync now" (room) form and relay route', () => {
     expect(html).not.toContain('/api/v1/connect-daycare-rooms-sync');
   });
 
-  it('shows the room-sync form for a verified admin viewer', async () => {
+  // Finance takes only myMDO's tuition and payroll (Andrew, 2026-09-29), so no viewer is offered room sync.
+  it('no longer offers room sync, even to an admin', async () => {
     const env = roleEnv('admin', async () => new Response('not found', { status: 404 }));
     const res = await worker.fetch(new Request('https://finance.test/?section=daycare', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), env);
     const html = await res.text();
-    expect(html).toContain('<form method="POST" action="/api/v1/connect-daycare-rooms-sync">');
+    expect(html).not.toContain('/api/v1/connect-daycare-rooms-sync');
   });
 
   it('redirects to a not_configured error when the service binding and shared secret are not set', async () => {
@@ -115,13 +116,13 @@ describe('Daycare Report — "Sync now" (room) form and relay route', () => {
     const shownEnv = roleEnv('admin', async () => new Response('not found', { status: 404 }));
     const shown = await worker.fetch(new Request(location.toString(), { headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' } }), shownEnv);
     const html = await shown.text();
-    expect(html).toContain('Room data synced in Connect.');
+    expect(html).not.toContain('Room data synced');
   });
 
   // The legacy finance/daycare/rooms/sync route itself surfaces "not configured" as an ordinary
   // error when DAYCARE_ROOMS_API_URL isn't set on Connect's side -- this relay must show that
   // exact message rather than reword it into a generic relay failure.
-  it('redirects with the refusal reason and op=rooms-sync when Connect declines the sync, and shows it back on the page', async () => {
+  it('redirects with the refusal reason and op=rooms-sync when Connect declines the sync, ', async () => {
     const env = liveEnv(async () => new Response(JSON.stringify({ error: 'Daycare app room API is not configured (DAYCARE_ROOMS_API_URL)' }), { status: 400 }));
     const res = await postForm(env, { accessJwt: 'signed.jwt.here' });
     const location = new URL(res.headers.get('location'), 'https://finance.test');
@@ -133,7 +134,7 @@ describe('Daycare Report — "Sync now" (room) form and relay route', () => {
     const shownEnv = roleEnv('admin', async () => new Response('not found', { status: 404 }));
     const shown = await worker.fetch(new Request(location.toString(), { headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' } }), shownEnv);
     const html = await shown.text();
-    expect(html).toContain('Not synced: Daycare app room API is not configured (DAYCARE_ROOMS_API_URL)');
+    expect(html).not.toContain('room API is not configured');
   });
 
   it('redirects with a network_error reason when the relay call itself fails, never throwing', async () => {
