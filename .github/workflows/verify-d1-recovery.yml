@@ -28,8 +28,8 @@ jobs:
     timeout-minutes: 45
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
-      SOURCE_DB: tlc-volunteer-db
-      SOURCE_DB_ID: 9399ee53-3386-4084-9b6b-def46b88f96a
+      SOURCE_DB: timothy-connect-db
+      SOURCE_DB_ID: 9e65fb21-5b6c-4f7b-bc0a-8f0ecb38cf05
       RESULT_FILE: /tmp/d1-recovery-result.json
     steps:
       - name: Check out the approved commit

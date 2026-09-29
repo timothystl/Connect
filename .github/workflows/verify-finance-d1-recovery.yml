@@ -50,12 +50,9 @@ jobs:
     environment: production
     timeout-minutes: 45
     env:
-      # Deliberately NOT secrets.CLOUDFLARE_D1_API_TOKEN (the existing
-      # Connect drill's secret) -- its scope was set up for
-      # tlc-volunteer-db and has not been confirmed to also cover the
-      # Finance D1 database. Add a new, distinctly-scoped D1-only token as
-      # this secret name before dispatching this workflow.
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_FINANCE_D1_API_TOKEN }}
+      # The one shared D1 data token. Cloudflare's D1 permission covers every database in the
+      # account, so a separate Finance-only token added no protection (consolidated September 29, 2026).
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
       # A narrowly-scoped D1-only token (no broader Account Settings:Read
       # permission) can't auto-resolve which Cloudflare account to act
       # against -- wrangler then fails with "Failed to automatically

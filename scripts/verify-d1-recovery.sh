@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source_db="${SOURCE_DB:-tlc-volunteer-db}"
+source_db="${SOURCE_DB:-timothy-connect-db}"
 source_db_id="${SOURCE_DB_ID:?SOURCE_DB_ID is required}"
-restore_db="tlc-chms-recovery-$(date -u +%Y%m%d%H%M%S)-$$"
+restore_db="timothy-connect-recovery-$(date -u +%Y%m%d%H%M%S)-$$"
 temp_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/timothy-d1-recovery.XXXXXX")"
-export_file="$temp_dir/tlc-volunteer-db.sql"
-import_file="$temp_dir/tlc-volunteer-db-import.sql"
+export_file="$temp_dir/timothy-connect-db.sql"
+import_file="$temp_dir/timothy-connect-db-import.sql"
 rewrite_metadata="$temp_dir/rewrite-metadata.json"
 snapshot_db="$temp_dir/source-snapshot.sqlite"
 result_file="${RESULT_FILE:-/tmp/timothy-d1-recovery-result.json}"
