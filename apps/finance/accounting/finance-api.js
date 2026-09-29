@@ -4083,7 +4083,7 @@ export async function syncDaycareFromApi(env, db) {
   const client = makeDaycareClient(env);
   // makeDaycareClient can now also be built from the rooms URL alone, so check for the method
   // this function actually calls rather than for a truthy client.
-  if (!client || !client.summary) return { error: 'The daycare app is not configured. Add DAYCARE_API_URL and DAYCARE_API_KEY (see SECRETS.md).', status: 503 };
+  if (!client || !client.summary) return { error: 'The daycare app is not configured. Add MYMDO_API_URL and MYMDO_API_KEY to Finance (see SECRETS.md).', status: 503 };
   let res;
   try { res = await client.summary(); }
   catch (e) { return { error: 'Could not reach the daycare app: ' + e.message, status: 502 }; }
