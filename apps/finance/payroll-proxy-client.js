@@ -72,6 +72,11 @@ export async function callPayrollProxy(env, accessJwt, fn, params) {
     return { ok: false, reason: 'network_error', detail: e?.message || String(e) };
   }
 
+  // A function that returns nothing (payroll_approve_period, payroll_unapprove_period,
+  // payroll_save_hours) answers 204 with an empty body: that is success, not bad JSON.
+  // Reading it as a failure told Andrew an approval "did not save" when it had.
+  if (res.ok && !text.trim()) return { ok: true, result: null };
+
   let payload;
   try {
     payload = JSON.parse(text);
@@ -84,4 +89,16 @@ export async function callPayrollProxy(env, accessJwt, fn, params) {
 
   if (!res.ok) return { ok: false, reason: 'http_error', status: res.status, message: payload?.message || payload?.error };
   return { ok: true, result: payload };
+}
+
+// A plain-language reason for a failed payroll call, for the page's error banner when the
+// payroll service sent no message of its own.
+export function describePayrollFailure(result) {
+  const r = result || {};
+  if (r.reason === 'no_access_identity') return 'your sign-in could not be read; reload the page and try again';
+  if (r.reason === 'not_configured') return 'Finance is not connected to the payroll service';
+  if (r.reason === 'network_error') return 'the payroll service did not answer in time; reload to check whether it saved';
+  if (r.reason === 'http_error') return `the payroll service refused it (HTTP ${r.status})`;
+  if (r.reason === 'invalid_json') return `the payroll service sent an unreadable answer (HTTP ${r.status})`;
+  return r.reason || 'unknown error';
 }
