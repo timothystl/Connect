@@ -94,7 +94,8 @@ describe('Budget vs actual in the Budget planner layout', () => {
   it('renders the board table with a show-hidden link, and the flat table without a layout', () => {
     const html = renderChurchPage('budget-actual', { churchReport: report, churchTrendLive: { source: 'live', years: [] }, boardLayout: layout });
     expect(html).toContain('<table class="bb-table">');
-    expect(html).toContain('Youth gathering<small>70100 Youth Gathering</small>');
+    expect(html).toContain('>Youth gathering</td>');
+    expect(html).not.toContain('<small>70100 Youth Gathering</small>');
     expect(html).toContain('<td>Total Youth &amp; Family</td>'.replace('<td>', '<td style="padding-left:10px">'));
     expect(html).toContain('1 old line hidden');
     expect(html).toContain('page=budget-actual&amp;hidden=1');
