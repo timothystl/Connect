@@ -28,7 +28,7 @@ import { renderGymIncomePage } from './gym-income-pages.js';
 import { fetchGymIncome, describeGymIncomeFailure } from './gym-income-client.js';
 import { describeGivingBatchFailure, fetchGivingDeposit, fetchGivingBatchLedger, fetchGivingBatchWorkspace, fetchGivingTransactions, fetchOnlineGiving, postGivingBatchWrite, fetchGivingOnlineSettings, postGivingOnlineSettingsWrite } from './connect-giving-batch-client.js';
 import { GIFT_TRANSACTIONS_STYLES, buildTransactionsCsv, normalizeTransactionParams, renderOnlineGivingPage, renderTransactionsPage, transactionsCsvFilename, transactionsCsvParams } from './gift-transactions-pages.js';
-import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, fetchGivingBoard, fetchGivingReport, postGivingBoardEmail, postGivingFollowupWrite, postGivingImpactWrite } from './connect-giving-analytics-client.js';
+import { fetchGivingAnalytics, fetchGivingAnalyticsPeople, fetchGivingBoard, fetchGivingReport, postGivingBoardEmail, postGivingFollowupWrite, postGivingImpactWrite, postGivingFundPassThrough } from './connect-giving-analytics-client.js';
 import { GIVING_REPORTS_STYLES, givingReportParams, givingReportRequests, impactStatementsFromForm, renderGivingReportPage } from './giving-reports-pages.js';
 import { DONOR_LETTERS_STYLES, kindOfPage, renderDonorLettersPage } from './donor-letters-pages.js';
 import { fetchGivingLetters, lettersParams, listQuery } from './donor-letters-service.js';
@@ -1012,6 +1012,25 @@ const GIVING_FOLLOWUP_MESSAGES = { assign: 'Nudge assigned.', done: 'Marked done
 // Giving nudges (Giving reports › Nudges and next steps): assign one to a staff member or mark
 // it done. Connect records the follow-up (giving-followup-write-v1) and re-checks Giving edit
 // access for the signed-in person.
+// Trends › Designated funds: which of them are pass-through. Every designated fund shown is sent
+// with the ones ticked; Connect re-checks Giving edit and changes only restricted/pass-through funds.
+async function handleGivingFundPassThrough(request, env, url) {
+  let form = null;
+  try { form = await request.formData(); } catch { /* reported below */ }
+  const fund = String(form?.get('fund') || '');
+  const keep = /^(general|donor|revenue|all|\d{1,9})$/.test(fund) ? { fund } : {};
+  const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving-analytics', page: 'trends', ...keep, ...params }).toString()}#designated-funds` } });
+  if (!isSameOriginPost(request, url)) return back({ status: 'error', message: 'That form did not come from Timothy Finance.' });
+  if (!form) return back({ status: 'error', message: 'The form could not be read.' });
+  const ids = (name) => form.getAll(name).map(String).filter((v) => /^\d{1,9}$/.test(v)).map(Number);
+  const result = await postGivingFundPassThrough(env, request.headers.get('Cf-Access-Jwt-Assertion') || '', {
+    fund_ids: ids('fund_id'), passthrough_fund_ids: ids('passthrough'),
+  });
+  if (!result.ok) return back({ status: 'error', message: describeGivingBatchFailure(result).slice(0, 200) });
+  const n = result.result.passthrough;
+  return back({ status: 'ok', msg: `Saved. ${n} designated fund${n === 1 ? ' is' : 's are'} pass-through.` });
+}
+
 async function handleGivingFollowupWrite(request, env, url) {
   const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving-reports', page: 'plateaus', ...params }).toString()}` } });
   if (!isSameOriginPost(request, url)) return back({ status: 'error', message: 'That form did not come from Timothy Finance.' });
@@ -1436,7 +1455,7 @@ function renderSectionBody(ctx) {
       });
       case 'what-if': return renderWhatIfPage({ result: totals, params: ctx.searchParams, keep });
       case 'statements': return renderStatementsPage({ result: asResult(ctx.givingAnalyticsPeople), councilPreview: namedHidden });
-      default: return renderTrendsPage({ result: totals, keep, mdoBooks: ctx.givingMdoBooks });
+      default: return renderTrendsPage({ result: totals, keep, mdoBooks: ctx.givingMdoBooks, canEditFunds: canEditNudges, status });
     }
   }
   if (section.id === 'giving-letters') {
@@ -2081,6 +2100,7 @@ export default {
     if (route.id === 'giving-followup-write-v1') {
       return handleGivingFollowupWrite(request, env, url);
     }
+    if (route.id === 'giving-fund-passthrough-write-v1') return handleGivingFundPassThrough(request, env, url);
 
     if (route.id === 'giving-impact-write-v1') return handleGivingImpactWrite(request, env, url);
     if (route.id === 'giving-letters-write-v1') return handleDonorLettersWrite(request, env, url);

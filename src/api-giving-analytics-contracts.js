@@ -460,6 +460,11 @@ export async function respondWithGivingAnalyticsV1(url, db) {
     months: months.results || [],
     funds: fundYtd,
     categories: summarizeCategories(fundRowsYtd),
+    // Every designated fund (restricted or pass-through), whichever view is shown, so Finance can
+    // offer the pass-through choice for each.
+    designated_funds: fundRows
+      .filter((f) => ['restricted', 'passthrough'].includes(normalizeFundCategory(f.category)))
+      .map((f) => ({ fund_id: f.id, fund_name: f.name, passthrough: normalizeFundCategory(f.category) === 'passthrough' })),
     weeks: weekSeries,
     households: summarizeHouseholds(householdRows),
     pledges: pledgeSummary,
@@ -684,6 +689,25 @@ export async function respondWithGivingAnalyticsPeopleV1(url, db) {
 const SUBJECT_RE = /^(?:h:\d{1,9}|p:\d{1,9}|ge\d{1,9}:\d{4}-\d{2}-\d{2})$/;
 const EPISODE_RE = /^(?:\d{4}-\d{2}-\d{2}|\d{4}-H[12]|\d{4}-Q[1-4])$/;
 
+// Marks designated funds as pass-through (money received for another organization) or back to
+// restricted. Only funds that are already restricted or pass-through can change here; the General
+// Fund, earned, passive and MDO categories stay with Connect's Fund categories setting.
+export async function applyFundPassThroughWrite(db, body) {
+  const ids = (list) => (Array.isArray(list) ? list : []).map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0);
+  const shown = ids(body?.fund_ids);
+  const pass = new Set(ids(body?.passthrough_fund_ids));
+  if (!shown.length || shown.length > 200) return { status: 400, error: 'No funds were sent' };
+  if ([...pass].some((id) => !shown.includes(id))) return { status: 400, error: 'A checked fund was not in the list' };
+  const rows = (await db.prepare(`SELECT id, category FROM funds WHERE id IN (${shown.join(',')})`).all()).results || [];
+  const designated = rows.filter((r) => ['restricted', 'passthrough'].includes(normalizeFundCategory(r.category)));
+  if (designated.length !== shown.length) return { status: 400, error: 'Only designated funds can be marked pass-through' };
+  const changes = designated
+    .map((r) => ({ id: r.id, to: pass.has(r.id) ? 'passthrough' : 'restricted', from: normalizeFundCategory(r.category) }))
+    .filter((c) => c.to !== c.from);
+  for (const c of changes) await db.prepare('UPDATE funds SET category=? WHERE id=?').bind(c.to, c.id).run();
+  return { ok: true, changed: changes.length, passthrough: pass.size };
+}
+
 export async function applyGivingFollowupWrite(db, body, email) {
   const op = String(body?.op || '');
   const kind = String(body?.kind || '');
@@ -787,6 +811,15 @@ export async function handleGivingAnalyticsContracts(req, env, path) {
     const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'people' });
     if (auth.response) return auth.response;
     return respondWithGivingAnalyticsPeopleV1(new URL(req.url), env.DB);
+  }
+  // Pass-through designated funds (Finance › Giving › Trends). A fund setting, so Giving edit.
+  if (path === '/api/contracts/giving-fund-passthrough-write-v1' && req.method === 'POST') {
+    const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'write' });
+    if (auth.response) return auth.response;
+    let body = {};
+    try { body = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+    const result = await applyFundPassThroughWrite(env.DB, body);
+    return result.ok ? json(result) : json({ error: result.error }, result.status);
   }
   if (path === '/api/contracts/giving-followup-write-v1' && req.method === 'POST') {
     const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'write' });

@@ -128,6 +128,38 @@ describe('Giving analytics pages (Finance v3)', () => {
     expect(html).toContain('All revenue (no MDO)</a> $600,000');
   });
 
+  it('lets Giving edit choose which designated funds are pass-through, and relays the choice', async () => {
+    const data = { ...TOTALS, fund: { key: 'revenue', label: 'All revenue except MDO', fund_count: 8 },
+      designated_funds: [{ fund_id: 11, fund_name: "25010 Concordia Children's Services", passthrough: true }, { fund_id: 12, fund_name: 'PNG Mission Society', passthrough: false }] };
+    const sent = [];
+    const setupEnv = (giving) => {
+      const { env } = makeEnv({ giving });
+      const inner = env.CONNECT_SERVICE.fetch;
+      env.CONNECT_SERVICE.fetch = async (req) => {
+        const url = new URL(req.url);
+        if (url.pathname.endsWith('/giving-analytics-v1')) return new Response(JSON.stringify(data));
+        if (url.pathname.endsWith('/giving-fund-passthrough-write-v1')) { sent.push(await req.json()); return new Response(JSON.stringify({ ok: true, changed: 1, passthrough: 2 })); }
+        return inner(req);
+      };
+      return env;
+    };
+    const editor = setupEnv('edit');
+    const html = await (await get(editor, '&page=trends&fund=revenue')).text();
+    expect(html).toContain('Designated funds: which are pass-through?');
+    expect(html).toContain('name="passthrough" value="11" checked');
+    expect(html).toContain('name="passthrough" value="12">');
+    const viewer = await (await get(setupEnv('view'), '&page=trends&fund=revenue')).text();
+    expect(viewer).not.toContain('Designated funds: which are pass-through?');
+    const res = await worker.fetch(new Request('https://finance.test/api/v1/giving-fund-passthrough', {
+      method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'jwt', 'Sec-Fetch-Site': 'same-origin' },
+      body: new URLSearchParams([['fund', 'revenue'], ['fund_id', '11'], ['fund_id', '12'], ['passthrough', '11'], ['passthrough', '12']]),
+    }), editor);
+    expect(res.status).toBe(303);
+    expect(res.headers.get('Location')).toContain('fund=revenue');
+    expect(res.headers.get('Location')).toContain('status=ok');
+    expect(sent.at(-1)).toEqual({ fund_ids: [11, 12], passthrough_fund_ids: [11, 12] });
+  });
+
   it('compares months and the same days of last year on Year over year', async () => {
     const { env } = makeEnv();
     const html = await (await get(env, '&page=year-over-year')).text();

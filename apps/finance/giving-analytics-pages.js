@@ -139,7 +139,7 @@ function changeNote(now, before, label) {
 
 // ── Trends ────────────────────────────────────────────────────────────────────────────────────
 
-export function renderTrendsPage({ result, keep = {}, mdoBooks = null }) {
+export function renderTrendsPage({ result, keep = {}, mdoBooks = null, canEditFunds = false, status = null }) {
   if (!result.ok) return unavailable('Giving trends', result.message);
   const a = result.data;
   const t = a.totals;
@@ -176,7 +176,7 @@ export function renderTrendsPage({ result, keep = {}, mdoBooks = null }) {
       <div class="panel"><h2>${e(fundOf(a).label)}, last 13 weeks</h2><p class="muted-line">Each bar is a week ending on Sunday.</p>${weekBars}</div>
       <div class="panel"><h2>By fund, year to date</h2><p class="muted-line">Every fund, whichever is shown above. Choose a fund to see it alone.</p>${funds}</div>
     </div>
-    ${revenueMix(a, keep, mdoBooks)}`;
+    ${revenueMix(a, keep, mdoBooks)}${canEditFunds ? designatedFundsForm(a, status) : ''}`;
 }
 
 // Where the church's money comes from this year, in the four revenue categories, with donations
@@ -191,6 +191,24 @@ const MIX_GROUPS = [
   { title: 'Passive income', keys: ['passive'], names: { passive: 'Interest, dividends, property income' } },
   { title: 'MDO income', keys: ['mdo'], names: { mdo: 'MDO tuition and fees' } },
 ];
+
+// Which designated funds are pass-through: money the church receives for another organization and
+// sends on (Concordia Children's Services, PNG Mission Society). Pass-through funds are left out of
+// donor giving, revenue and the totals above. Saved in Connect's Fund categories (Giving edit).
+function designatedFundsForm(a, status) {
+  const funds = Array.isArray(a.designated_funds) ? a.designated_funds : [];
+  if (!funds.length) return '';
+  const banner = status ? `<p class="status${status.ok ? '' : ' status-error'}">${e(status.message)}</p>` : '';
+  const rows = funds.map((f) => `<li><label><input type="checkbox" name="passthrough" value="${f.fund_id}"${f.passthrough ? ' checked' : ''}> ${e(f.fund_name)}</label><input type="hidden" name="fund_id" value="${f.fund_id}"></li>`).join('');
+  const count = funds.filter((f) => f.passthrough).length;
+  return `<details class="panel panel-spaced edit-panel" id="designated-funds"${status ? ' open' : ''}><summary>Designated funds: which are pass-through? <span class="muted">(${count} of ${funds.length})</span></summary>
+      ${banner}<form method="POST" action="/api/v1/giving-fund-passthrough">
+        <input type="hidden" name="fund" value="${e(fundKey(a))}">
+        <p class="muted-line">Tick a fund when the church receives the money for another organization and passes it on. Pass-through funds are left out of donor giving, revenue and the totals; the rest stay restricted and designated gifts.</p>
+        <ul class="ga-fund-checks">${rows}</ul>
+        <div class="form-actions"><button type="submit">Save</button></div>
+      </form></details>`;
+}
 
 function revenueMix(a, keep, mdoBooks = null) {
   const raw = new Map((a.categories || []).map((c) => [c.key, c]));
@@ -761,6 +779,9 @@ export const GIVING_ANALYTICS_STYLES = `
     .ga-mix td small { display:block; color:#6B7280; font-size:12px; }
     .ga-mix td:nth-child(2) { width:28%; }
     .ga-mix .ga-meter { display:block; }
+    .ga-fund-checks { list-style:none; padding:0; margin:8px 0; columns:2 260px; }
+    .ga-fund-checks li { padding:4px 0; break-inside:avoid; }
+    .ga-fund-checks label { display:flex; gap:8px; align-items:center; font-size:14px; }
     .ga-mix-pass td { color:#6B7280; font-style:italic; border-top:1px dashed #D5DAE3; }
     .ga-mix-pass td:not(:first-child) { text-align:right; }
     .ga-mix-group th small { display:block; font-weight:400; color:#6B7280; font-size:12px; text-transform:none; letter-spacing:0; }

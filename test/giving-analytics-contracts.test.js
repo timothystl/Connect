@@ -220,6 +220,32 @@ describe('Giving analytics contracts (giving-analytics-*-v1, giving-followup-wri
     expect(revenue.households.ytd_households).toBe(donor.households.ytd_households);
   });
 
+  it('lists designated funds and lets Giving edit mark them pass-through, and only those', async () => {
+    const { db, general, building } = setup();
+    const raw = db._raw;
+    const png = insertFund(db, 'PNG Mission Society');
+    raw.prepare("UPDATE funds SET category='general' WHERE id=?").run(general);
+    const read = async () => (await call(db, '/api/contracts/giving-analytics-v1', { query: '?as_of=2026-09-20&fund=revenue' })).json();
+    const before = await read();
+    expect(before.designated_funds.map((f) => f.fund_id).sort()).toEqual([building, png].sort());
+    expect(before.designated_funds.every((f) => f.passthrough === false)).toBe(true);
+    const post = (body, email) => call(db, '/api/contracts/giving-fund-passthrough-write-v1', { method: 'POST', body, ...(email ? { email } : {}) });
+    const ok = await post({ fund_ids: [building, png], passthrough_fund_ids: [png] });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ ok: true, changed: 1, passthrough: 1 });
+    expect(raw.prepare('SELECT category FROM funds WHERE id=?').get(png).category).toBe('passthrough');
+    const after = await read();
+    expect(after.designated_funds.find((f) => f.fund_id === png).passthrough).toBe(true);
+    // Unticking returns a fund to restricted.
+    await post({ fund_ids: [building, png], passthrough_fund_ids: [] });
+    expect(raw.prepare('SELECT category FROM funds WHERE id=?').get(png).category).toBe('restricted');
+    // The General Fund is not a designated fund and cannot be changed here.
+    expect((await post({ fund_ids: [general], passthrough_fund_ids: [general] })).status).toBe(400);
+    expect(raw.prepare('SELECT category FROM funds WHERE id=?').get(general).category).toBe('general');
+    // Council (totals-only Giving) cannot change fund settings.
+    expect((await post({ fund_ids: [png], passthrough_fund_ids: [png] }, 'carl@timothystl.org')).status).toBe(403);
+  });
+
   it('leaves pass-through funds out of donor giving and revenue but reports them as their own category', async () => {
     const { db, ids, general } = setup();
     const raw = db._raw;
