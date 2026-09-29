@@ -1,14 +1,15 @@
-// Serves Finance's own report reads from Finance's database instead of asking Connect.
+// Finance answers its own accounting contracts instead of asking Connect.
 //
-// Connect's read contracts build every Finance report from accounting tables that now live only
-// in Finance's database (Connect reaches them through its FINANCE_DB binding, the same database
-// this Worker binds as FINANCE_DB). Running the same contract functions here, against that same
-// database, returns the identical response without a round trip through Connect, so a slow or
-// redeploying Connect no longer blanks Finance's reports.
+// Finance's accounting records live only in Finance's database. Reads (reports) and, since
+// 2026-09-29, writes (budget plan, imports, Chart of Accounts layout, Commercial Property, Daycare
+// Report, Compensation plan, settings) run here with Finance's own copy of the accounting code
+// (apps/finance/accounting/), so a Finance change never needs a matching Connect change and a slow
+// or redeploying Connect no longer blanks or blocks them.
 //
-// Only GET reads whose every table is Finance-owned are listed. Giving, staff identity and roles,
-// and every write still go to Connect. If a local read fails for any reason, the request falls
-// through to Connect unchanged, so this can only add a faster path, never remove the old one.
+// Connect still answers what it owns: Giving, staff identity and roles (every local write asks
+// Connect who is acting), the reads that mix in Giving, and the myMDO syncs until Finance has
+// that connection's settings. A local READ that fails falls through to Connect, which reads the
+// same database; a local WRITE never does, so a save can't be applied twice.
 import {
   respondWithFinanceDataStatusV1, respondWithFinanceCashRunwayV1, respondWithFinanceChartOfAccountsV1,
   respondWithFinanceBudgetV1, respondWithFinanceChurchReportV1, respondWithFinanceChurchReportTrendV1,
@@ -16,14 +17,15 @@ import {
   respondWithFinanceDaycareEntriesV1, respondWithFinancePropertyValuationV1, respondWithFinanceCompensationV1,
   respondWithFinancePropertyOperatingV1, respondWithFinancePropertyReservesV1, respondWithFinancePropertyLedgersV1,
   respondWithFinancePropertyForecastV1,
-} from '../../src/api-contracts.js';
-import { respondWithFinanceClassificationV1 } from '../../src/api-classification-contracts.js';
-import { respondWithFinanceBoardLayoutV1 } from '../../src/api-board-layout-contracts.js';
-import { respondWithFinanceBudgetBuilderV1 } from '../../src/api-budget-builder-contracts.js';
-import { respondWithFinancePlanningBasisV1 } from '../../src/api-planning-contracts.js';
-import { respondWithFinancePropertyPolicyV1 } from '../../src/api-property-policy-contracts.js';
-import { respondWithFinancePropertyDebtV1 } from '../../src/api-property-debt-contracts.js';
-import { respondWithFinanceImportStatusV1, respondWithFinanceDaycareChurchBudgetPreviewV1 } from '../../src/api-data-imports-contracts.js';
+} from './accounting/contracts.js';
+import { respondWithFinanceClassificationV1 } from './accounting/classification-contract.js';
+import { respondWithFinanceBoardLayoutV1 } from './accounting/board-layout-contract.js';
+import { respondWithFinanceBudgetBuilderV1 } from './accounting/budget-builder-contract.js';
+import { respondWithFinancePlanningBasisV1 } from './accounting/planning-contract.js';
+import { respondWithFinancePropertyPolicyV1 } from './accounting/property-policy-contract.js';
+import { respondWithFinancePropertyDebtV1 } from './accounting/property-debt-contract.js';
+import { respondWithFinanceImportStatusV1, respondWithFinanceDaycareChurchBudgetPreviewV1 } from './accounting/data-imports-contract.js';
+import { localAccountingContract } from './accounting/write-contracts.js';
 
 const LOCAL_READS = {
   'finance-data-status-v1': (url, db) => respondWithFinanceDataStatusV1(db),
@@ -58,20 +60,23 @@ export function localContractReadsEnabled(env) {
   return env.FINANCE_LOCAL_CONTRACT_READS === '1' && !!env.FINANCE_DB && !!env.CONNECT_SERVICE;
 }
 
-// Wraps the Connect service binding: listed reads are answered from FINANCE_DB, everything else
-// (and any local read that fails) goes to Connect exactly as before.
+// Wraps the Connect service binding: accounting contracts are answered from FINANCE_DB,
+// everything else goes to Connect exactly as before.
 export function withLocalContractReads(env) {
   if (!localContractReadsEnabled(env)) return env;
   const connect = env.CONNECT_SERVICE;
   const db = env.FINANCE_DB;
+  // The local write handlers ask the real Connect binding who is acting.
+  const direct = { ...env, CONNECT_SERVICE: connect };
   return {
     ...env,
     CONNECT_SERVICE: {
       async fetch(request, init) {
         const req = request instanceof Request ? request : new Request(request, init);
         const url = new URL(req.url);
-        const read = req.method === 'GET' ? LOCAL_READS[url.pathname.replace(/^\/api\/contracts\//, '')] : null;
-        if (read && url.pathname.startsWith('/api/contracts/')) {
+        const name = url.pathname.startsWith('/api/contracts/') ? url.pathname.slice('/api/contracts/'.length) : '';
+        const read = req.method === 'GET' ? LOCAL_READS[name] : null;
+        if (read) {
           try {
             const res = await read(url, db);
             if (res.ok) return res;
@@ -79,6 +84,8 @@ export function withLocalContractReads(env) {
             // Fall through to Connect.
           }
         }
+        const write = name ? localAccountingContract(name, req.method, env) : null;
+        if (write) return write(req, direct);
         return connect.fetch(req);
       },
     },
