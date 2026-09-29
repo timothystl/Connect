@@ -1,5 +1,6 @@
 import { buildChurchReportView, buildLiveChurchReportView } from './church-report-service.js';
 import { escapeHtml, formatCents, formatSignedCents, renderKpiCards, renderSectionHeading, renderTable } from './render-helpers.js';
+import { accountDisplayName, buildBoardSections, isHiddenAccount } from './board-layout.js';
 
 // Admin-only correction of one account's real, posted actual figure -- relayed live to Connect's
 // finance_church_entries table (see finance-church-actual-override-v1 in
@@ -125,6 +126,88 @@ export function renderLiveChurchRows(rows) {
   }).join('');
 }
 
+// Budget vs actual laid out the way the Budget planner's Board view is: the Chart of Accounts
+// board categories under their saved headings, Unrestricted and Restricted gifts inside the Donor
+// Income wrapper, each account under its display rename, a total for every group and side, and
+// the net result. A line with no actual and no budget is left out; a line hidden in Chart of
+// Accounts is left out too while it has no money (shown again with `showHidden`). Every row that
+// carries money is kept, so the totals match the report's own.
+export function buildBudgetActualBoard(accounts, layout, { showHidden = false } = {}) {
+  const quiet = (a) => !a.actualCents && !a.budgetCents;
+  const lines = accounts.filter((a) => a.classification === 'Income' || a.classification === 'Expenses');
+  const hidden = lines.filter((a) => quiet(a) && isHiddenAccount(layout, a.categoryPath));
+  const shown = lines.filter((a) => !quiet(a) || (showHidden && isHiddenAccount(layout, a.categoryPath)));
+  const sections = buildBoardSections(shown, layout, (a) => ({ path: a.categoryPath, name: a.accountName, isRevenue: a.classification === 'Income' }));
+  const sum = (items) => items.reduce((t, a) => ({
+    actualCents: t.actualCents + (a.actualCents || 0),
+    budgetCents: t.budgetCents + (a.budgetCents || 0),
+    hasBudget: t.hasBudget || a.budgetCents !== null,
+  }), { actualCents: 0, budgetCents: 0, hasBudget: false });
+  const rows = [];
+  const group = (g, depth) => {
+    rows.push({ kind: 'header', label: g.label, depth });
+    for (const a of g.items) {
+      rows.push({
+        kind: 'leaf', depth: depth + 1, isRevenue: g.isRevenue, label: accountDisplayName(layout, a.categoryPath, a.accountName),
+        qbName: a.accountName, hidden: isHiddenAccount(layout, a.categoryPath),
+        actualCents: a.actualCents || 0, budgetCents: a.budgetCents, hasBudget: a.budgetCents !== null,
+      });
+    }
+    rows.push({ kind: 'total', label: `Total ${g.label}`, depth, isRevenue: g.isRevenue, ...sum(g.items) });
+    return g.items;
+  };
+  const side = (label, list, isRevenue) => {
+    if (!list.length) return sum([]);
+    rows.push({ kind: 'side', label });
+    const items = list.flatMap((sec) => {
+      if (sec.kind !== 'wrapper') return group(sec, 0);
+      rows.push({ kind: 'header', label: sec.label, depth: 0 });
+      const inner = sec.groups.flatMap((g) => group(g, 1));
+      rows.push({ kind: 'total', label: `Total ${sec.label}`, depth: 0, isRevenue, ...sum(inner) });
+      return inner;
+    });
+    const total = sum(items);
+    rows.push({ kind: 'sidetotal', label: `Total ${label}`, isRevenue, ...total });
+    return total;
+  };
+  const revenue = side('Revenue', sections.revenue, true);
+  const expense = side('Expenses', sections.expense, false);
+  if (rows.length) {
+    rows.push({ kind: 'net', label: 'Net (Revenue − Expenses)', isRevenue: true, actualCents: revenue.actualCents - expense.actualCents, budgetCents: revenue.budgetCents - expense.budgetCents, hasBudget: revenue.hasBudget || expense.hasBudget });
+  }
+  return { rows, hiddenCount: hidden.length };
+}
+
+function renderBudgetActualBoard(board, fiscalYear, showHidden) {
+  const e = escapeHtml;
+  const money = (c) => formatSignedCents(c);
+  const figures = (r) => {
+    const variance = r.hasBudget ? (r.isRevenue ? r.actualCents - r.budgetCents : r.budgetCents - r.actualCents) : null;
+    return `<td>${money(r.actualCents)}</td><td${r.hasBudget ? '' : ' class="tone-muted"'}>${r.hasBudget ? money(r.budgetCents) : '—'}</td><td class="${variance === null ? 'tone-muted' : variance < 0 ? 'bp-up' : ''}">${variance === null ? '—' : money(variance)}</td>`;
+  };
+  const body = board.rows.map((r) => {
+    const pad = `style="padding-left:${10 + (r.depth || 0) * 16}px"`;
+    if (r.kind === 'side') return `<tr class="bb-group"><td colspan="4">${e(r.label)}</td></tr>`;
+    if (r.kind === 'header') return `<tr class="bp-header"><td colspan="4" ${pad}>${e(r.label)}</td></tr>`;
+    if (r.kind === 'leaf') {
+      const sub = [r.hidden ? 'Hidden old line' : '', r.label !== r.qbName ? e(r.qbName) : ''].filter(Boolean).join(' · ');
+      return `<tr${r.hidden ? ' class="coa-hidden"' : ''}><td ${pad}>${e(r.label)}${sub ? `<small>${sub}</small>` : ''}</td>${figures(r)}</tr>`;
+    }
+    if (r.kind === 'total') return `<tr class="bb-subtotal"><td ${pad}>${e(r.label)}</td>${figures(r)}</tr>`;
+    if (r.kind === 'sidetotal') return `<tr class="bb-total"><td>${e(r.label)}</td>${figures(r)}</tr>`;
+    return `<tr class="bb-result"><td>${e(r.label)}</td>${figures(r)}</tr>`;
+  }).join('');
+  const base = `/?section=church&amp;page=budget-actual`;
+  const toggle = board.hiddenCount
+    ? (showHidden
+      ? `<p class="muted-line"><a href="${base}">Hide the ${board.hiddenCount} old line${board.hiddenCount === 1 ? '' : 's'} again</a></p>`
+      : `<p class="muted-line">${board.hiddenCount} old line${board.hiddenCount === 1 ? '' : 's'} hidden in Chart of Accounts › Budget layout. <a href="${base}&amp;hidden=1">Show hidden lines</a></p>`)
+    : '';
+  return `<div class="table-wrap"><table class="bb-table"><thead><tr><th>Account</th><th>FY${fiscalYear} Actual</th><th>FY${fiscalYear} Budget</th><th>Favorable variance</th></tr></thead><tbody>${body || '<tr><td colspan="4" class="tone-muted">No actual or budget figures for this year yet.</td></tr>'}</tbody></table></div>
+    ${toggle}
+    <p><small>Grouped and named as in the Budget planner. Headings, account names and hidden lines are set in Chart of Accounts › Budget layout. Lines with no actual and no budget are left out.</small></p>`;
+}
+
 export function renderChurchTrendRows(rows) {
   return rows.map((row) => `<tr><td>${row.fiscal_year}</td><td>${formatCents(row.income_cents)}</td><td>${formatCents(row.expense_cents)}</td><td>${formatSignedCents(row.net_cents)}</td></tr>`).join('');
 }
@@ -153,6 +236,7 @@ export function renderChurchPage(pageId, {
   canImportChurchMultiYear,
   churchActivityXlsxImportStatus, churchActivityXlsxImportMessage,
   churchBudgetMultiYearXlsxImportStatus, churchBudgetMultiYearXlsxImportMessage,
+  boardLayout = null, showHidden = false,
 }) {
   if (pageId === 'trend') {
     const isTrendLive = churchTrendLive.source === 'live';
@@ -190,7 +274,10 @@ export function renderChurchPage(pageId, {
         { label: 'Budgeted net result', value: formatSignedCents(report.totals.budgetNetCents) },
         { label: 'Variance', value: formatSignedCents(variance), hint: variance >= 0 ? 'Ahead of budget' : 'Behind budget' },
       ])}
-      ${renderTable({ head: ['Classification', 'Account', 'Actual', 'Budget', 'Favorable variance'], rows })}
+      ${isLive && boardLayout
+    ? renderBudgetActualBoard(buildBudgetActualBoard(churchReport.accounts, boardLayout, { showHidden }), report.fiscalYear, showHidden)
+    : renderTable({ head: ['Classification', 'Account', 'Actual', 'Budget', 'Favorable variance'], rows })}
+      ${isLive && !boardLayout ? '<p><small>The Budget planner’s layout could not be read from Connect just now, so lines are listed in QuickBooks order.</small></p>' : ''}
       ${fallbackNote}
     </section>${canManageChurchReport ? renderChurchBudgetXlsxImportForm(churchBudgetXlsxImportStatus, churchBudgetXlsxImportMessage) : ''}`;
   }

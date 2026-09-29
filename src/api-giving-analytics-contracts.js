@@ -20,6 +20,7 @@ import { json } from './auth.js';
 import { computeGivingBoard } from './api-reports.js';
 import { sendBrevoTransactionalEmail } from './api-emails.js';
 import { verifyAccessJwt } from './access-jwt.js';
+import { applyFundCleanupWrite, buildFundCleanup } from './api-fund-cleanup-contracts.js';
 import {
   getRolePermissions, permissionsForRole, resolveGeneralFundIds, normalizeFundCategory, fundCategoryLabel, sameDayLastYear, yearElapsedShare,
   resolveGeneralFundBudget, accountRowMatchesFundCode, fundNumericPrefix,
@@ -62,7 +63,8 @@ export async function authorizeGivingAnalyticsContract(req, env, { level }) {
     || (level === 'people' && ['view', 'edit'].includes(giving))
     || (level === 'write' && giving === 'edit');
   if (!allowed) {
-    const message = level === 'write' ? 'Updating a giving follow-up requires Giving edit access'
+    const message = level === 'admin' ? 'Combining or retiring funds requires Connect admin access'
+      : level === 'write' ? 'Updating a giving follow-up requires Giving edit access'
       : level === 'people' ? 'Named giving detail requires Giving view access; council access is totals only'
         : 'Giving analytics requires Giving access';
     return { response: json({ error: message }, 403) };
@@ -352,7 +354,7 @@ async function respondWithGivingPeriod(db, { asOf, period, scope, fundRows }) {
 // PERIOD_MAX_DAYS) it answers that one period instead (respondWithGivingPeriod above).
 export async function respondWithGivingAnalyticsV1(url, db) {
   const asOf = resolveAsOf(url);
-  const fundRows = (await db.prepare(`SELECT id, name, category FROM funds ORDER BY name`).all()).results || [];
+  const fundRows = (await db.prepare(`SELECT id, name, category, active FROM funds ORDER BY name`).all()).results || [];
   const scope = resolveFundScope(url.searchParams.get('fund'), fundRows);
   const period = resolvePeriod(url);
   if (period) return respondWithGivingPeriod(db, { asOf, period, scope, fundRows });
@@ -441,6 +443,7 @@ export async function respondWithGivingAnalyticsV1(url, db) {
   const fundYtd = fundRowsYtd.filter((f) => f.cents !== 0)
     .map(({ fund_id, fund_name, category, cents }) => ({ fund_id, fund_name, category, cents }));
 
+  const usedIds = new Set((usedFunds.results || []).map((r) => r.fund_id));
   const weekMap = new Map((weeks.results || []).map((w) => [w.week_ending, w]));
   const weekSeries = [];
   for (let i = 12; i >= 0; i -= 1) {
@@ -455,15 +458,17 @@ export async function respondWithGivingAnalyticsV1(url, db) {
     year,
     year_elapsed: elapsed,
     fund: { key: scope.key, label: scope.label, fund_count: scope.ids ? scope.ids.length : fundRows.length },
-    fund_options: fundOptions(fundRows, new Set((usedFunds.results || []).map((r) => r.fund_id)), scope),
+    fund_options: fundOptions(fundRows, usedIds, scope),
     totals: { ...totals, first_time_givers: firstTime?.n || 0 },
     months: months.results || [],
     funds: fundYtd,
     categories: summarizeCategories(fundRowsYtd),
     // Every designated fund (restricted or pass-through), whichever view is shown, so Finance can
     // offer the pass-through choice for each.
+    // A retired fund (active=0) is left out unless it was given to in the compared years.
     designated_funds: fundRows
       .filter((f) => ['restricted', 'passthrough'].includes(normalizeFundCategory(f.category)))
+      .filter((f) => (f.active !== 0 && f.active !== false) || usedIds.has(f.id))
       .map((f) => ({ fund_id: f.id, fund_name: f.name, passthrough: normalizeFundCategory(f.category) === 'passthrough' })),
     weeks: weekSeries,
     households: summarizeHouseholds(householdRows),
@@ -811,6 +816,21 @@ export async function handleGivingAnalyticsContracts(req, env, path) {
     const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'people' });
     if (auth.response) return auth.response;
     return respondWithGivingAnalyticsPeopleV1(new URL(req.url), env.DB);
+  }
+  // Fund cleanup (Finance › Giving › Fund cleanup): combine duplicate funds, retire old ones.
+  // Admin only, like Connect's own Manage Funds merge.
+  if (path === '/api/contracts/giving-fund-cleanup-v1' && req.method === 'GET') {
+    const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'admin' });
+    if (auth.response) return auth.response;
+    return json(await buildFundCleanup(env.DB));
+  }
+  if (path === '/api/contracts/giving-fund-cleanup-write-v1' && req.method === 'POST') {
+    const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'admin' });
+    if (auth.response) return auth.response;
+    let body = {};
+    try { body = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+    const result = await applyFundCleanupWrite(env.DB, body, auth.email);
+    return result.ok ? json(result) : json({ error: result.error }, result.status);
   }
   // Pass-through designated funds (Finance › Giving › Trends). A fund setting, so Giving edit.
   if (path === '/api/contracts/giving-fund-passthrough-write-v1' && req.method === 'POST') {

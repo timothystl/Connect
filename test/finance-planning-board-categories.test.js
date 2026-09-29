@@ -38,7 +38,7 @@ describe('finance/planning/board-categories', () => {
     const res = await GET(db, false);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ revenue: {}, expense: {}, revenueLabels: {}, expenseLabels: {}, donorWrapperLabel: '', accountLabels: {} });
+    expect(body).toEqual({ revenue: {}, expense: {}, revenueLabels: {}, expenseLabels: {}, donorWrapperLabel: '', accountLabels: {}, hiddenAccounts: {} });
   });
 
   it('a non-admin can read but not write', async () => {
