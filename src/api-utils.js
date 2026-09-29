@@ -1691,16 +1691,11 @@ export function logoSizeWarning(fileBytes) {
 // ── ADDRESS VALIDATION HELPERS ───────────────────────────────────────────
 // Service priority:
 //   1. Google Address Validation (GOOGLE_ADDRESS_API_KEY) — no rate-limit ceiling, best for bulk
-//   2. USPS OAuth API  (USPS_CLIENT_ID + USPS_CLIENT_SECRET) — new REST API, 60 req/hour cap
-//   3. USPS Web Tools  (USPS_USER_ID)                        — legacy XML API
-//   4. Lob             (LOB_API_KEY)
-//   5. Census Bureau   (free fallback, no key needed)
+//   2. Census Bureau geocoder (free fallback, no key needed; confirms a match, not deliverability)
+// USPS (OAuth and Web Tools) and Lob were retired 2026-09-29: USPS Web Tools shut down in January
+// 2026, the USPS OAuth API caps at 60 requests/hour, and Lob was an unused paid fallback.
 // All helpers return a plain object: { ok, address1, address2, city, state, zip, zip4, dpvConfirmation, deliverable }
 // or { ok: false, error } on failure.
-
-function escXml(s) {
-  return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
 
 // Strip HTML tags and normalize whitespace from an address field
 function cleanAddrField(s) {
@@ -1709,125 +1704,6 @@ function cleanAddrField(s) {
 // Return a copy of addr with HTML stripped from address1/address2
 function cleanAddr(addr) {
   return { ...addr, address1: cleanAddrField(addr.address1), address2: cleanAddrField(addr.address2) };
-}
-
-// Fetch a USPS OAuth token (call once per bulk operation, share across addresses)
-async function getUspsToken(clientId, clientSecret) {
-  const tokenRes = await fetch('https://apis.usps.com/oauth2/v3/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: clientId,
-      client_secret: clientSecret,
-    }).toString(),
-  });
-  if (!tokenRes.ok) {
-    const err = await tokenRes.json().catch(() => ({}));
-    throw new Error('USPS token error: ' + (err.error_description || tokenRes.status));
-  }
-  const { access_token } = await tokenRes.json();
-  return access_token;
-}
-
-// New USPS OAuth 2.0 API — accepts a pre-fetched token to avoid re-authing per address
-async function validateUspsOAuth(addr, clientId, clientSecret, token) {
-  const access_token = token || await getUspsToken(clientId, clientSecret);
-
-  // Step 2: validate address
-  const params = new URLSearchParams();
-  params.set('streetAddress', (addr.address1 || '').trim());
-  if ((addr.address2 || '').trim()) params.set('secondaryAddress', addr.address2.trim());
-  if ((addr.city    || '').trim()) params.set('city',  addr.city.trim());
-  if ((addr.state   || '').trim()) params.set('state', addr.state.trim());
-  if ((addr.zip     || '').trim()) params.set('ZIPCode', addr.zip.replace(/[^0-9]/g, '').slice(0, 5));
-
-  const addrRes = await fetch('https://apis.usps.com/addresses/v3/address?' + params.toString(), {
-    headers: { Authorization: 'Bearer ' + access_token },
-  });
-  if (!addrRes.ok) {
-    const err = await addrRes.json().catch(() => ({}));
-    const msg = err.apiMessage || err.detail || ('USPS error ' + addrRes.status);
-    return { ok: false, error: msg };
-  }
-  const data = await addrRes.json();
-  const addr2 = data.address || {};
-  const addInfo = data.additionalInfo || {};
-  const dpvMap = { Y: 'Y', S: 'S', D: 'D', N: 'N' };
-  const dpv = dpvMap[addInfo.DPVConfirmation] || (data.firm ? 'Y' : 'N');
-  return {
-    ok: true,
-    address1: addr2.streetAddress || (addr.address1 || ''),
-    address2: addr2.secondaryAddress || (addr.address2 || ''),
-    city: addr2.city || (addr.city || ''),
-    state: addr2.state || (addr.state || ''),
-    zip: addr2.ZIPCode || (addr.zip || ''),
-    zip4: addr2.ZIPPlus4 || '',
-    dpvConfirmation: dpv,
-    deliverable: dpv === 'Y' || dpv === 'S' || dpv === 'D',
-    deliverability: dpv === 'Y' ? 'deliverable' : dpv === 'S' ? 'deliverable_missing_unit'
-                  : dpv === 'D' ? 'deliverable_incorrect_unit' : 'undeliverable',
-  };
-}
-
-// Legacy USPS Web Tools XML API (single user ID)
-async function validateUspsWebTools(addr, userId) {
-  const street = (addr.address1 || '').trim();
-  const unit   = (addr.address2 || '').trim();
-  const city   = (addr.city    || '').trim();
-  const state  = (addr.state   || '').trim();
-  const zip    = (addr.zip     || '').replace(/[^0-9]/g, '').slice(0, 5);
-  // USPS quirk: Address1 = apt/unit, Address2 = street number + name
-  const xml = `<AddressValidateRequest USERID="${escXml(userId)}"><Revision>1</Revision><Address>`
-    + `<Address1>${escXml(unit)}</Address1><Address2>${escXml(street)}</Address2>`
-    + `<City>${escXml(city)}</City><State>${escXml(state)}</State>`
-    + `<Zip5>${zip}</Zip5><Zip4></Zip4></Address></AddressValidateRequest>`;
-  const res = await fetch('https://secure.shippingapis.com/ShippingAPI.dll?API=Verify&XML=' + encodeURIComponent(xml));
-  if (!res.ok) return { ok: false, error: 'USPS service error ' + res.status };
-  const text = await res.text();
-  const get = tag => { const m = text.match(new RegExp('<' + tag + '>([^<]*)</' + tag + '>')); return m ? m[1] : ''; };
-  if (text.includes('<Error>')) return { ok: false, error: get('Description') || 'USPS error' };
-  const dpv = get('DPVConfirmation') || 'N';
-  return {
-    ok: true,
-    address1: get('Address2'),  // USPS response: street is Address2
-    address2: get('Address1'),  // USPS response: unit is Address1
-    city: get('City'), state: get('State'),
-    zip: get('Zip5'), zip4: get('Zip4'),
-    dpvConfirmation: dpv,
-    deliverable: dpv === 'Y' || dpv === 'S' || dpv === 'D',
-    deliverability: dpv === 'Y' ? 'deliverable' : dpv === 'S' ? 'deliverable_missing_unit'
-                  : dpv === 'D' ? 'deliverable_incorrect_unit' : 'undeliverable',
-  };
-}
-
-async function validateLob(addr, lobKey) {
-  const body = { primary_line: (addr.address1 || '').trim() };
-  if (addr.address2?.trim()) body.secondary_line = addr.address2.trim();
-  if (addr.city?.trim())     body.city = addr.city.trim();
-  if (addr.state?.trim())    body.state = addr.state.trim();
-  if (addr.zip?.trim())      body.zip_code = addr.zip.replace(/[^0-9]/g, '').slice(0, 5);
-  const res = await fetch('https://api.lob.com/v1/us_verifications', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Basic ' + btoa(lobKey + ':') },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    return { ok: false, error: err.error?.message || ('Lob error ' + res.status) };
-  }
-  const data = await res.json();
-  const c = data.components || {};
-  const lobDpv = { deliverable: 'Y', deliverable_unnecessary_unit: 'Y',
-                   deliverable_missing_unit: 'S', deliverable_incorrect_unit: 'D', undeliverable: 'N' };
-  const dpv = lobDpv[data.deliverability] || 'N';
-  return {
-    ok: true,
-    address1: data.primary_line || '', address2: data.secondary_line || '',
-    city: c.city || '', state: c.state || '', zip: c.zip_code || '', zip4: c.zip_code_plus_4 || '',
-    dpvConfirmation: dpv, deliverable: dpv === 'Y' || dpv === 'S' || dpv === 'D',
-    deliverability: data.deliverability || '',
-  };
 }
 
 async function validateCensus(addr) {
@@ -1899,13 +1775,9 @@ async function validateGoogle(addr, apiKey) {
   };
 }
 
-async function validateAddressCore(addr, env, uspsToken) {
+async function validateAddressCore(addr, env) {
   const a = cleanAddr(addr);
   if (env.GOOGLE_ADDRESS_API_KEY) return validateGoogle(a, env.GOOGLE_ADDRESS_API_KEY);
-  if (env.USPS_CLIENT_ID && env.USPS_CLIENT_SECRET)
-    return validateUspsOAuth(a, env.USPS_CLIENT_ID, env.USPS_CLIENT_SECRET, uspsToken);
-  if (env.USPS_USER_ID)  return validateUspsWebTools(a, env.USPS_USER_ID);
-  if (env.LOB_API_KEY)   return validateLob(a, env.LOB_API_KEY);
   return validateCensus(a);
 }
 
@@ -1963,7 +1835,7 @@ export async function handleUtilsApi(req, env, url, method, seg, db, isAdmin, ca
 
   // POST /admin/api/utils/bulk-validate-addresses — validate + standardize active people with an address.
   // Processes 45 addresses per call to stay under Cloudflare's 50-subrequest limit
-  // (1 USPS token fetch + up to 45 address calls = 46 max per invocation).
+  // (up to 45 address calls per invocation).
   // Frontend loops until hasMore=false.
   if (seg === 'utils/bulk-validate-addresses' && method === 'POST') {
     if (!isAdmin) return json({ error: 'Access denied' }, 403);
@@ -1981,13 +1853,6 @@ export async function handleUtilsApi(req, env, url, method, seg, db, isAdmin, ca
        FROM people WHERE address1 != '' AND status = 'active'
        ORDER BY id LIMIT ? OFFSET ?`
     ).bind(PAGE, offset).all()).results || [];
-
-    // Fetch USPS token once for the whole page (avoids one token request per address)
-    let uspsToken = null;
-    if (env.USPS_CLIENT_ID && env.USPS_CLIENT_SECRET) {
-      try { uspsToken = await getUspsToken(env.USPS_CLIENT_ID, env.USPS_CLIENT_SECRET); }
-      catch (e) { return json({ error: 'USPS auth failed: ' + e.message }, 502); }
-    }
 
     // Missouri cities that commonly appear with a missing state field
     const MO_CITIES = new Set(['st. louis','saint louis','st louis','wentzville','fenton','crestwood',
@@ -2055,11 +1920,11 @@ export async function handleUtilsApi(req, env, url, method, seg, db, isAdmin, ca
               .bind(a1, a2, city, state, row.id).run();
           }
 
-          // ── Step 7: USPS validation ──────────────────────────────────
-          const r = await validateAddressCore(workRow, env, uspsToken);
+          // ── Step 7: address validation ───────────────────────────────
+          const r = await validateAddressCore(workRow, env);
           validated++;
           if (!r.ok) {
-            if (structChanged) updated++; // count structural cleanup as an update even if USPS fails
+            if (structChanged) updated++; // count structural cleanup as an update even if validation fails
             failed++;
             failures.push({ id: row.id, name: (row.first_name + ' ' + row.last_name).trim(), address: [a1, city, state].filter(Boolean).join(', '), error: r.error });
             return;
@@ -2069,10 +1934,10 @@ export async function handleUtilsApi(req, env, url, method, seg, db, isAdmin, ca
             return;
           }
           const newZip = r.zip + (r.zip4 ? '-' + r.zip4 : '');
-          const uspsChanged = r.address1 !== a1 || r.address2 !== a2
+          const validationChanged = r.address1 !== a1 || r.address2 !== a2
                            || r.city !== city || r.state !== state
                            || newZip !== (row.zip || '');
-          if (structChanged || uspsChanged) {
+          if (structChanged || validationChanged) {
             await db.prepare('UPDATE people SET address1=?,address2=?,city=?,state=?,zip=? WHERE id=?')
               .bind(r.address1, r.address2 || '', r.city, r.state, newZip, row.id).run();
             updated++;

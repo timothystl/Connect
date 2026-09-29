@@ -1054,7 +1054,7 @@ export const HTML_TABS_1 = String.raw`<!-- ═══ HOME / DASHBOARD TAB ══
     </div>
     <div class="import-card role-admin">
       <h3>Validate All Addresses</h3>
-      <p>Runs every active person with a street address through USPS address validation and standardizes the format. Undeliverable addresses are left unchanged. Uses USPS Web Tools if configured, otherwise falls back to Census Bureau geocoding (free, no key needed).</p>
+      <p>Runs every active person with a street address through address validation and standardizes the format. Undeliverable addresses are left unchanged. Uses Google Address Validation when it is configured, otherwise falls back to Census Bureau geocoding (free, no key needed).</p>
       <button class="btn-secondary" onclick="bulkValidateAddresses()" id="bulk-validate-addr-btn" style="font-size:.88rem;">Validate All Addresses</button>
       <div class="import-status" id="bulk-validate-addr-status"></div>
     </div>
