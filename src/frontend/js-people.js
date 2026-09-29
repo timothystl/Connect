@@ -1011,7 +1011,7 @@ function pvfSectionSave(secId) {
       if (saveBtn) { saveBtn.disabled = false; saveBtn.removeAttribute('aria-busy'); saveBtn.textContent = 'Save changes'; }
     });
 }
-// USPS / Census address check for the Contact section form (fills the fields; nothing is saved
+// Address check for the Contact section form (fills the fields; nothing is saved
 // until Save changes).
 function pvfValidateSectionAddress() {
   var btn = document.getElementById('pvse-validate-btn');
@@ -2741,20 +2741,20 @@ function formatPhoneOnBlur(el) {
   }
 }
 
-// ── USPS ADDRESS VALIDATION ───────────────────────────────────────────────
-// r.source is 'census' when no USPS/Lob key is configured and the server fell back to the
-// free Census geocoder (BUG2) — label results accordingly so a Census-sourced non-match
-// doesn't misleadingly read as "not found by USPS" when USPS was never actually queried.
+// ── ADDRESS VALIDATION ────────────────────────────────────────────────────
+// r.source is 'census' when no Google address key is configured and the server fell back to the
+// free Census geocoder — label results accordingly so a Census-sourced non-match
+// doesn't misleadingly read as "not found" by the stronger Google check, which was never queried.
 function validateAddrResultMsg(r) {
   var dpv = r.dpvConfirmation;
   var isCensus = r.source === 'census';
-  var note = isCensus ? ' (via Census geocoder — no USPS/Lob key configured; ask an admin to add one for confirmed deliverability)' : '';
+  var note = isCensus ? ' (via Census geocoder — no Google address key configured; ask an admin to add one for confirmed deliverability)' : '';
   if (dpv === 'Y') return '<span class="os-badge os-badge-success">Deliverable</span> <span>Confirmed deliverable' + note + '</span>';
   if (dpv === 'S') return '<span class="os-badge os-badge-warning">Needs review</span> <span>Street confirmed; add the apartment or suite' + note + '</span>';
   if (dpv === 'D') return '<span class="os-badge os-badge-warning">Needs review</span> <span>Street confirmed; the apartment or suite did not match' + note + '</span>';
   return isCensus
     ? '<span class="os-badge os-badge-neutral">Not matched</span> <span>The Census geocoder did not match this address' + note + '</span>'
-    : '<span class="os-badge os-badge-neutral">Not found</span> <span>USPS did not find this address</span>';
+    : '<span class="os-badge os-badge-neutral">Not found</span> <span>The address service did not find this address</span>';
 }
 function validatePersonAddress() {
   var btn = document.getElementById('pm-addr-validate-btn');
@@ -2788,7 +2788,7 @@ function validatePersonAddress() {
   }).catch(function(err) {
     if (btn) btn.disabled = false;
     var msg = err && err.message ? err.message : 'Request failed';
-    if (status) status.innerHTML = '<span style="color:var(--danger);">' + esc(msg) + ' — try again, or ask the admin to configure USPS API keys.</span>';
+    if (status) status.innerHTML = '<span style="color:var(--danger);">' + esc(msg) + ' — try again, or ask the admin to check the address service.</span>';
   });
 }
 
@@ -2825,7 +2825,7 @@ function validateContactAddress() {
   }).catch(function(err) {
     if (btn) btn.disabled = false;
     var msg = err && err.message ? err.message : 'Request failed';
-    if (status) status.innerHTML = '<span style="color:var(--danger);">' + esc(msg) + ' — try again, or ask the admin to configure USPS API keys.</span>';
+    if (status) status.innerHTML = '<span style="color:var(--danger);">' + esc(msg) + ' — try again, or ask the admin to check the address service.</span>';
   });
 }
 

@@ -5,8 +5,14 @@
 > and verify dated claims against current code, tests, configuration, and live behavior.
 
 
-All secrets are stored as Cloudflare Worker secrets (`wrangler secret put <NAME>`).
-**Never commit secret values to the repo.**
+Secrets are stored as Cloudflare Worker secrets (`wrangler secret put <NAME>`).
+**Never commit secret values to the repo.** Plain settings (not credentials) live in `wrangler.toml`
+`[vars]`; the tables at the end of this file mark which names are which.
+
+The cross-product reference (every Worker, Supabase function, and repository secret, with the pairs
+that must match) is
+[architecture/17-credentials-and-secrets-inventory.md](https://github.com/timothystl/digital-architecture/blob/main/architecture/17-credentials-and-secrets-inventory.md).
+This file covers Connect and Finance in detail.
 
 ---
 
@@ -28,6 +34,7 @@ All secrets are stored as Cloudflare Worker secrets (`wrangler secret put <NAME>
 
 ### `BREEZE_API_KEY`
 - **Purpose**: Authenticates calls to the Breeze ChMS REST API (`https://<subdomain>.breezechms.com/api/`). Used for people sync, giving sync, fund import, tag sync.
+- **Status (decided 2026-09-29): keep.** The church still gives through Breeze/Tithe.ly, so gifts must keep syncing into Connect. Remove only when that giving path is retired.
 - **Format**: API key string from Breeze → Account Settings → API.
 - **Rotation**: Generate a new key in Breeze, then `wrangler secret put BREEZE_API_KEY`. No app downtime — next sync uses the new key.
 - **Risk if leaked**: Read/write access to all Breeze ChMS data (people, giving, tags).
@@ -38,10 +45,10 @@ All secrets are stored as Cloudflare Worker secrets (`wrangler secret put <NAME>
 - **Rotation**: Only changes if the church switches Breeze accounts. `wrangler secret put BREEZE_SUBDOMAIN`.
 - **Risk if leaked**: Low on its own — just the subdomain, not the API key.
 
-### `EMAIL_FROM`
+### `EMAIL_FROM` (plain variable in `wrangler.toml`, not a secret)
 - **Purpose**: The `From:` address on every Resend email the Worker sends — birthday and anniversary greetings, scheduler assignments and reminders, Connect invites, password resets.
 - **Format**: RFC 5322 format, e.g. `Timothy Lutheran <noreply@timothystl.org>`. Domain must be verified in Resend.
-- **Rotation**: `wrangler secret put EMAIL_FROM`.
+- **Change**: edit `EMAIL_FROM` under `[vars]` in `wrangler.toml` (production and staging have different values) and redeploy.
 - **Risk if leaked**: Low — it's an email address, not a credential.
 - **⚠ This entry used to read `ADMIN_EMAIL`, which was wrong**: nothing has ever sent mail from `ADMIN_EMAIL`. `sendResend()` reads `EMAIL_FROM` and refuses outright without it, so following the old instruction produced a Worker that sent no email at all, with the one variable that mattered undocumented. See "Variables the Worker does not read" below.
 
@@ -104,7 +111,7 @@ All secrets are stored as Cloudflare Worker secrets (`wrangler secret put <NAME>
 These are not required for the app to function but unlock additional capabilities.
 
 ### `GOOGLE_ADDRESS_API_KEY`
-- **Purpose**: Google Address Validation API — first choice for address validation (used for both the single-person "Verify Address" button and bulk validation). No meaningful rate limit at church scale, unlike the USPS OAuth API's 60 req/hour cap. Falls back to USPS/Lob/Census if absent.
+- **Purpose**: Google Address Validation API — first choice for address validation (used for both the single-person "Verify Address" button and bulk validation). No meaningful rate limit at church scale. Falls back to the free Census Bureau geocoder if absent (a Census result confirms a street match but not deliverability). USPS and Lob were retired 2026-09-29; this key is now the only paid/keyed address check, so confirm it is set.
 - **Provision**: Google Cloud Console → create/select a project → enable billing → enable the "Address Validation API" → Credentials → Create API Key → restrict the key to the Address Validation API only. Free tier: 10,000 calls/month.
 - **Set**: `wrangler secret put GOOGLE_ADDRESS_API_KEY`.
 - **Risk if leaked**: Free-tier quota abuse; restrict the key server-side (API restriction) to limit blast radius.
@@ -115,25 +122,15 @@ These are not required for the app to function but unlock additional capabilitie
 - **Set**: `wrangler secret put GOOGLE_MAPS_API_KEY`.
 - **Risk if leaked**: Free-tier/quota abuse; restrict the key to the Maps Static API only.
 
-### `USPS_CLIENT_ID` + `USPS_CLIENT_SECRET`
-- **Purpose**: USPS OAuth 2.0 address validation. Used if `GOOGLE_ADDRESS_API_KEY` is absent. Note: as of the January 2026 Web Tools shutdown, this API is rate-limited to 60 requests/hour — fine for the single-person button, impractical for bulk validation at scale.
-- **Provision**: Register at https://developer.usps.com → create an app with the **Addresses (3.0)** API → copy Consumer Key and Consumer Secret.
-- **Set**: `wrangler secret put USPS_CLIENT_ID` then `wrangler secret put USPS_CLIENT_SECRET`.
-- **Risk if leaked**: Free-tier abuse of the church's USPS quota.
+### USPS and Lob (retired 2026-09-29)
+- `USPS_CLIENT_ID`, `USPS_CLIENT_SECRET`, `USPS_USER_ID`, and `LOB_API_KEY` are no longer read.
+  USPS Web Tools shut down in January 2026, the USPS OAuth API caps at 60 requests/hour, and Lob was
+  an unused fallback. If any are still set on `timothy-connect`, delete them
+  (`wrangler secret delete <NAME>`). Address validation is Google, then the Census geocoder.
 
-### `USPS_USER_ID`
-- **Purpose**: USPS Web Tools (legacy) — only used as a fallback if Google and USPS OAuth credentials are both absent. Shut down January 2026; kept only for reference.
-- **Provision**: https://www.usps.com/business/web-tools-apis/ (legacy registration; new signups disabled).
-- **Set**: `wrangler secret put USPS_USER_ID`.
-
-### `LOB_API_KEY`
-- **Purpose**: Lob address verification — fallback if no Google/USPS credentials present.
-- **Provision**: https://dashboard.lob.com → API Keys → live secret key.
-- **Set**: `wrangler secret put LOB_API_KEY`.
-
-### `REPLY_TO_EMAIL`
+### `REPLY_TO_EMAIL` (plain variable in `wrangler.toml`, not a secret)
 - **Purpose**: Overrides the `office@timothystl.org` default used in Resend `reply_to` for scheduler and ChMS emails.
-- **Set**: `wrangler secret put REPLY_TO_EMAIL`.
+- **Change**: edit `REPLY_TO_EMAIL` under `[vars]` in `wrangler.toml` and redeploy.
 
 ### `ESV_API_KEY`
 - **Purpose**: Lets the Scheduler send the **full ESV text** of each reading — either as an attached PDF sheet (the default, and what keeps the email short) or inline in the body. Entirely optional — with no key the readings are still named and linked to esv.org, which needs no setup at all. The mode is chosen per send on the Email Assignments panel. Read server-side only, via `/esv/passage` (`src/api-scheduler.js`); the key never reaches a browser, and it could not be used from one anyway (the embedded scheduler runs under CSP `connect-src 'self'`).
@@ -165,6 +162,38 @@ These are not required for the app to function but unlock additional capabilitie
   - **Known limitation**: Payroll actual can't account for staff who left mid-window (no termination date tracked on the daycare side), so it may run slightly high for months after someone departs.
 - **Set**: `wrangler secret put DAYCARE_API_URL` (the full Supabase function URL above) then `wrangler secret put DAYCARE_API_KEY` (same value as the daycare app's `FINANCE_API_KEY`).
 - **Risk if leaked**: Read-only access to the daycare app's financial summary endpoint (as scoped by whatever the daycare app itself enforces on that key).
+
+---
+
+## Other names Connect and Finance read (previously undocumented)
+
+### Connect Worker
+| Name | Kind | Purpose |
+|---|---|---|
+| `DAYCARE_ROOMS_API_URL` | secret | Second myMDO endpoint (rooms), used with `DAYCARE_API_KEY`. |
+| `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY` | secret / public | Web-push signing keys for member-portal push (the daily cron also uses them). Must be a matching pair. |
+| `VAPID_CONTACT` | secret or var | The `sub:` contact on the push signature; defaults to an info@ address. |
+| `STAX_SANDBOX_API_KEY`, `STAX_SANDBOX_WEB_PAYMENTS_TOKEN`, `STAX_GIVING_WEBHOOK_SECRET` | secret | Stax giving **sandbox**: server key, browser tokenization token, webhook check. |
+| `STAX_LIVE` | var | `"1"` leaves sandbox mode. Leave unset until live giving is approved. Production also sets `STAX_SANDBOX_REFUSED = "1"`, so it ignores sandbox gifts. |
+| `CONNECT_ACCESS_TEAM_DOMAIN`, `CONNECT_ACCESS_AUD` | var or secret | Cloudflare Access identity for the shared staff sign-in. Not in `wrangler.toml`; if missing, that route answers 503 and normal login still works. |
+| `FINANCE_ACCESS_TEAM_DOMAIN`, `FINANCE_ACCESS_AUD` | var | Verify the Access token Finance forwards on contract calls (differ between production and staging). |
+| `FINANCE_STORAGE_MODE`, `TUITION_STORAGE_MODE` | var | `connect`, `copying`, or `finance`: where Finance-owned and Tuition Aid tables live. Production is `finance`. Staging sets neither, so it runs in `connect` mode. |
+| `FINANCE_DB` | D1 binding | `timothy-finance-db` (production only). |
+
+### Finance Worker (`timothy-finance-app`, staging `timothy-finance-app-staging`)
+| Name | Kind | Purpose |
+|---|---|---|
+| `FINANCE_DB` | D1 binding | Finance's own database. |
+| `FACILITY_FILES` | R2 binding | Private Facilities photos and documents. |
+| `CONNECT_SERVICE` | service binding | Calls to `timothy-connect` (staging: `timothy-connect-staging`). |
+| `PAYROLL_SERVICE` | service binding | Payroll and gym-income relay to `timothy-website-admin`. |
+| `ENVIRONMENT`, `RELEASE_SHA` | var | Environment label and release id (`RELEASE_SHA` is set at deploy). |
+| `FINANCE_ACCESS_TEAM_DOMAIN`, `FINANCE_ACCESS_AUD` | var | Verify the Cloudflare Access identity of the signed-in staff member. |
+| `FINANCE_QB_ENABLED`, `FINANCE_QB_ENVIRONMENT` | var | QuickBooks on/off and `production`/`sandbox` (off in staging). |
+| `FINANCE_QB_CLIENT_ID`, `FINANCE_QB_CLIENT_SECRET` | secret | Intuit OAuth client (see the retired-QuickBooks note above). |
+| `FINANCE_LOCAL_CONTRACT_READS` | var | `"1"`: reports read Finance's database directly instead of through Connect. |
+| `COMPENSATION_PLAN_WRITE_ENABLED`, `PROPERTY_LEDGER_WRITES_ENABLED`, `FINANCE_CSV_IMPORT_WRITES_ENABLED`, `FINANCE_XLSX_IMPORT_WRITES_ENABLED` | flag (set in no config file) | Each enables one writer. Default off; turning one on is a deliberate act. |
+| `FINANCE_CONTRACT_API_KEY`, `FINANCE_PAYROLL_CONTRACT_KEY` | secret | Described above. `FINANCE_PAYROLL_CONTRACT_KEY` is also used for gym income. |
 
 ---
 
@@ -204,6 +233,7 @@ login path.
 | `DB` | D1 | `timothy-connect-db` | Primary database |
 | `KV` | KV | `timothy-connect-kv` (renamed from `RSVP_STORE`) | Rate limiting + dedup store |
 | `PHOTOS` | R2 | `timothy-connect-photos` | Member and household photos |
+| `FINANCE_DB` | D1 | `timothy-finance-db` | Finance-owned accounting and Tuition Aid records (production only) |
 
 These are wired by resource ID, not by secret — they survive a Worker rename (IN1).
 
