@@ -158,7 +158,7 @@ export function reportGroups({ churchStaff, periodEntries, mdoStaff, mdoHoursMap
       hours: s.pay_type === 'salary' ? 0 : (mdoHoursMap.get(s.id) || 0),
       salaried: s.pay_type === 'salary',
       gross: calcMdoGross(s, mdoHoursMap.get(s.id), mdoPtoMap.get(s.id)),
-      lines: mdoLineItems(s, mdoPtoMap.get(s.id)),
+      lines: mdoLineItems(s, mdoHoursMap.get(s.id), mdoPtoMap.get(s.id)),
     }));
   return [
     { key: 'church', name: 'Church staff', people: church },
@@ -196,13 +196,18 @@ function churchLineItems(staff, entry) {
   return out;
 }
 
-function mdoLineItems(staff, mdoHoursForStaff) {
+// Hours worked from myMDO's clock and manual entries, and PTO taken, the two things the MDO
+// gross is paid on. (The PTO figure was once passed in as the hours, so every card read
+// "0.00 hrs" beside a correct gross.)
+function mdoLineItems(staff, mdoHoursForStaff, mdoPtoForStaff) {
   const isSalary = staff.pay_type === 'salary';
   const out = [];
   if (isSalary) out.push(lineItem('Base Salary', money(staff.salary_biweekly)));
   else {
+    const pto = Number(mdoPtoForStaff || 0);
     out.push(lineItem('Pay Rate', `${money(staff.hourly_rate)}/hr`));
     out.push(lineItem('Hours Worked', hrs(mdoHoursForStaff || 0)));
+    out.push(lineItem('PTO used', hrs(pto), { muted: pto === 0 }));
   }
   return out;
 }
