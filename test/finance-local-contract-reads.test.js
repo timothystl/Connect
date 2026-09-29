@@ -162,3 +162,29 @@ describe('Finance accounting writes to its own database', () => {
     expect(connect.calls).toEqual(['/api/contracts/finance-daycare-sync-v1', '/api/contracts/giving-fund-cleanup-write-v1']);
   });
 });
+
+describe('myMDO connection settings in Finance', () => {
+  it('runs the myMDO sync in Finance once MYMDO_API_URL and MYMDO_API_KEY are set', async () => {
+    const { daycareConfigured, makeDaycareClient } = await import('../apps/finance/accounting/daycare-client.js');
+    expect(daycareConfigured({})).toBe(false);
+    expect(daycareConfigured({ MYMDO_API_URL: 'https://mdo.example/finance-summary', MYMDO_API_KEY: 'k' })).toBe(true);
+    expect(daycareConfigured({ DAYCARE_API_URL: 'https://mdo.example/finance-summary', DAYCARE_API_KEY: 'k' })).toBe(true);
+    expect(makeDaycareClient({ MYMDO_API_URL: 'https://mdo.example/finance-summary', MYMDO_API_KEY: 'k' }).rooms).toBeUndefined();
+    const connect = roleConnect('admin');
+    const env = withLocalContractReads({
+      FINANCE_LOCAL_CONTRACT_READS: '1', FINANCE_DB: makeSettingsDb(), CONNECT_SERVICE: connect.binding, FINANCE_CONTRACT_API_KEY: 'key',
+      MYMDO_API_URL: 'https://mdo.example/finance-summary', MYMDO_API_KEY: 'k',
+    });
+    const realFetch = globalThis.fetch;
+    const seen = [];
+    globalThis.fetch = async (u, init) => { seen.push([String(u), init?.headers?.['X-Api-Key']]); return Response.json({ updated_at: '2026-09-29T00:00:00Z', accounts: [] }); };
+    try {
+      // The test database lacks the daycare tables; what matters is that Finance itself asked myMDO.
+      await post(env, 'finance-daycare-sync-v1', {}).catch(() => {});
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(seen).toEqual([['https://mdo.example/finance-summary', 'k']]);
+    expect(connect.calls).toEqual(['/api/contracts/staff-role-v1']);
+  });
+});
