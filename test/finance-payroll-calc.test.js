@@ -199,3 +199,19 @@ describe('exportReport — MDO first, then Church (deliberately not reportGroups
     expect(report.incomplete).toBe(false);
   });
 });
+
+describe('MDO report cards show the hours myMDO recorded', () => {
+  it('lists hours worked and PTO on each hourly MDO card, not the PTO as hours', async () => {
+    const { reportGroups } = await import('../apps/finance/payroll-calc.js');
+    const groups = reportGroups({
+      churchStaff: [], periodEntries: new Map(),
+      mdoStaff: [{ id: 'a', name: 'Test Teacher', pay_type: 'hourly', hourly_rate: 16 }],
+      mdoHoursMap: new Map([['a', 36.77]]), mdoPtoMap: new Map([['a', 0.6]]),
+      mdoRateSnapshot: new Map(), periodApproved: false,
+    });
+    const card = groups.find((g) => g.key === 'mdo').people[0];
+    expect(card.lines.find((l) => l.label === 'Hours Worked').value).toContain('36.77');
+    expect(card.lines.find((l) => l.label === 'PTO used').value).toContain('0.60');
+    expect(card.gross).toBe(597.92);
+  });
+});
