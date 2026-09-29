@@ -107,7 +107,7 @@ describe('Daycare Report — "Sync now" (money) form and relay route', () => {
     const shownEnv = roleEnv('finance', async () => new Response('not found', { status: 404 }));
     const shown = await worker.fetch(new Request(location.toString(), { headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' } }), shownEnv);
     const html = await shown.text();
-    expect(html).toContain('Synced in Connect.');
+    expect(html).toContain('Synced from myMDO.');
   });
 
   // The legacy finance/daycare/sync route itself surfaces "not configured" as an ordinary error
@@ -133,5 +133,48 @@ describe('Daycare Report — "Sync now" (money) form and relay route', () => {
     expect(res.status).toBe(303);
     const location = new URL(res.headers.get('location'), 'https://finance.test');
     expect(location.searchParams.get('reason')).toBe('network_error');
+  });
+});
+
+describe('myMDO check (tuition and payroll against QuickBooks)', () => {
+  it('sums myMDO’s monthly actuals for the year beside the report’s own figures', async () => {
+    const { buildMymdoCheck } = await import('../apps/finance/daycare-pages.js');
+    const entries = [
+      { period: '2026-01', category: 'Tuition Income', entryType: 'actual', amountCents: 4000000, source: 'daycare_api' },
+      { period: '2026-02', category: 'Tuition Income', entryType: 'actual', amountCents: 4100000, source: 'daycare_api' },
+      { period: '2026-01', category: 'Payroll', entryType: 'actual', amountCents: 2500000, source: 'daycare_api' },
+      { period: '2026', category: 'Tuition Income', entryType: 'actual', amountCents: 9999, source: 'church_budget_import' },
+      { period: '2026-01', category: 'Payroll Taxes', entryType: 'actual', amountCents: 1, source: 'daycare_api' },
+    ];
+    const categories = [{ category: 'Tuition Income', actualCents: 8100000 }, { category: 'Payroll', actualCents: 2600000 }];
+    expect(buildMymdoCheck(entries, categories)).toEqual([
+      { category: 'Tuition Income', label: 'Tuition income', mymdoCents: 8100000, booksCents: 8100000, months: 2, differenceCents: 0 },
+      { category: 'Payroll', label: 'Staff payroll', mymdoCents: 2500000, booksCents: 2600000, months: 1, differenceCents: 100000 },
+    ]);
+  });
+
+  it('keeps only myMDO’s tuition and payroll actuals when syncing', async () => {
+    const { syncDaycareFromApi } = await import('../apps/finance/accounting/finance-api.js');
+    const inserted = [];
+    const db = {
+      prepare: (sql) => ({
+        bind: (...args) => ({ sql, args, run: async () => ({}) }),
+      }),
+      batch: async (ops) => { for (const op of ops) if (/^\s*INSERT INTO finance_daycare_entries/.test(op.sql)) inserted.push(op.args); },
+    };
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => Response.json({ budget: [
+      { period: '2026-09', category: 'Tuition Income', type: 'actual', amount_cents: 100 },
+      { period: '2026-09', category: 'Tuition Income', type: 'budget', amount_cents: 200 },
+      { period: '2026-09', category: 'Payroll', type: 'actual', amount_cents: 300 },
+      { period: '2026-09', category: 'Workers Comp', type: 'actual', amount_cents: 400 },
+    ] });
+    try {
+      const result = await syncDaycareFromApi({ MYMDO_API_URL: 'https://mdo.example/finance-summary', MYMDO_API_KEY: 'k' }, db);
+      expect(result.imported).toBe(2);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(inserted).toEqual([['2026-09', 'Tuition Income', 'actual', 100], ['2026-09', 'Payroll', 'actual', 300]]);
   });
 });

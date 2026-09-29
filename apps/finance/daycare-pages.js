@@ -96,32 +96,51 @@ function renderDaycareBudgetOverrideForm(period, overrideStatus, overrideMessage
   </section>`;
 }
 
-// Two "Sync now" triggers -- relayed live to Connect, which itself pulls from the daycare app's
-// own finance API (see finance-daycare-sync-v1/finance-daycare-rooms-sync-v1 in
-// src/api-contracts-service.js). Neither takes any fields; a bare POST triggers the pull. Money
-// sync uses the same looser gate as the entry/bulk forms above (the legacy finance/daycare/sync
-// route carries no role check of its own beyond the blanket ACCESS_GATE); room sync is admin-only,
-// matching finance/daycare/rooms/sync's own explicit isAdmin check exactly. If the daycare app
-// itself isn't configured on Connect's side, the error message shown here is Connect's own "not
-// configured" message, passed straight through rather than reworded into a relay-specific failure.
-function renderDaycareSyncForms({
-  canSyncDaycare, syncStatus, syncMessage,
-  canSyncDaycareRooms, roomsSyncStatus, roomsSyncMessage,
-}) {
-  if (!canSyncDaycare && !canSyncDaycareRooms) return '';
-  return `<section aria-label="Sync Daycare Report data from the daycare app">
-    ${renderSectionHeading({ eyebrow: 'Daycare Report', heading: 'Sync from the daycare app', badge: 'Relayed live to Connect' })}
-    ${canSyncDaycare ? `<form method="POST" action="/api/v1/connect-daycare-sync">
-      ${syncStatus === 'ok' ? '<p class="status">Synced in Connect.</p>' : ''}
+// myMDO sync (Andrew, 2026-09-29): Finance takes only myMDO's high-level tuition income and staff
+// payroll, to double-check QuickBooks; myMDO keeps the fine detail. One button, no room data.
+function renderDaycareSyncForms({ canSyncDaycare, syncStatus, syncMessage }) {
+  if (!canSyncDaycare) return '';
+  return `<section aria-label="Sync tuition and payroll from myMDO">
+    ${renderSectionHeading({ eyebrow: 'Daycare Report', heading: 'Sync from myMDO' })}
+    <form method="POST" action="/api/v1/connect-daycare-sync">
+      ${syncStatus === 'ok' ? '<p class="status">Synced from myMDO.</p>' : ''}
       ${syncStatus === 'error' ? `<p class="status status-error">Not synced: ${escapeHtml(syncMessage || 'unknown error')}</p>` : ''}
-      <button type="submit">Sync money data now</button>
-    </form>` : ''}
-    ${canSyncDaycareRooms ? `<form method="POST" action="/api/v1/connect-daycare-rooms-sync">
-      ${roomsSyncStatus === 'ok' ? '<p class="status">Room data synced in Connect.</p>' : ''}
-      ${roomsSyncStatus === 'error' ? `<p class="status status-error">Not synced: ${escapeHtml(roomsSyncMessage || 'unknown error')}</p>` : ''}
-      <button type="submit">Sync room data now</button>
-    </form>` : ''}
-    <p><small>Pulls the latest figures from the daycare app's own finance API and wholesale-replaces the daycare-app-sourced rows for the periods it returns. Hand-entered and Church-Budget-derived rows are never touched by this.</small></p>
+      <button type="submit">Sync tuition and payroll now</button>
+    </form>
+    <p><small>Brings in myMDO's monthly tuition income and staff payroll for the check above. The Daycare Report's own figures come from QuickBooks; these never change them.</small></p>
+  </section>`;
+}
+
+// myMDO's tuition and payroll for the year beside the Daycare Report's own (QuickBooks) figures, so
+// a gap shows at a glance. `entries` is the year's finance_daycare_entries (myMDO's rows are
+// monthly, source 'daycare_api'); `categories` is the report's counted categories.
+export function buildMymdoCheck(entries, categories) {
+  const mymdo = { 'Tuition Income': 0, Payroll: 0 };
+  const months = { 'Tuition Income': new Set(), Payroll: new Set() };
+  for (const e of entries || []) {
+    if (e.source !== 'daycare_api' || e.entryType !== 'actual' || !(e.category in mymdo)) continue;
+    mymdo[e.category] += e.amountCents || 0;
+    months[e.category].add(e.period);
+  }
+  const books = Object.fromEntries((categories || []).map((c) => [c.category, c.actualCents || 0]));
+  return ['Tuition Income', 'Payroll'].map((category) => ({
+    category, label: category === 'Payroll' ? 'Staff payroll' : 'Tuition income',
+    mymdoCents: mymdo[category], booksCents: books[category] || 0, months: months[category].size,
+    differenceCents: (books[category] || 0) - mymdo[category],
+  }));
+}
+
+function renderMymdoCheck(daycareEntries, categories, year) {
+  if (!daycareEntries || !daycareEntries.ok) return '';
+  const rows = buildMymdoCheck(daycareEntries.entries, categories);
+  if (!rows.some((r) => r.months)) {
+    return `<section aria-label="myMDO check">${renderSectionHeading({ eyebrow: 'Daycare Report', heading: 'myMDO check' })}<p>No myMDO figures for ${escapeHtml(String(year))} yet. Sync from myMDO below to compare its tuition and payroll with QuickBooks.</p></section>`;
+  }
+  const body = rows.map((r) => `<tr><td>${escapeHtml(r.label)}<br><small>${r.months} month${r.months === 1 ? '' : 's'} from myMDO</small></td><td>${formatCents(r.booksCents)}</td><td>${formatCents(r.mymdoCents)}</td><td>${r.differenceCents === 0 ? 'Matches' : formatSignedCents(r.differenceCents)}</td></tr>`).join('');
+  return `<section class="report" aria-label="myMDO check">
+    ${renderSectionHeading({ eyebrow: 'Daycare Report', heading: `myMDO check · ${escapeHtml(String(year))}` })}
+    ${renderTable({ head: ['', 'QuickBooks', 'myMDO', 'Difference'], rows: body })}
+    <p><small>myMDO tracks tuition and staff payroll; every other daycare expense is in QuickBooks. A difference usually means timing (a month myMDO has that QuickBooks does not yet, or the reverse) or an entry to look at in QuickBooks.</small></p>
   </section>`;
 }
 
@@ -184,7 +203,6 @@ export function renderDaycarePage(pageId, {
   daycareChurchBudgetImportEntryStatus, daycareChurchBudgetImportEntryMessage,
   daycarePreviewYear = null, daycarePreview = null,
   canSyncDaycare, daycareSyncStatus, daycareSyncMessage,
-  canSyncDaycareRooms, daycareRoomsSyncStatus, daycareRoomsSyncMessage,
 }) {
   const isLive = daycareReport.source === 'live';
   const report = isLive
@@ -247,8 +265,7 @@ export function renderDaycarePage(pageId, {
     ])}
     <p>See Actuals detail, Budget comparison, and Shared costs for the full breakdown behind these totals.</p>
     ${fallbackNote}
-  </section>${renderDaycareSyncForms({
+  </section>${isLive ? renderMymdoCheck(daycareEntries, report.categories, report.period) : ''}${renderDaycareSyncForms({
     canSyncDaycare, syncStatus: daycareSyncStatus, syncMessage: daycareSyncMessage,
-    canSyncDaycareRooms, roomsSyncStatus: daycareRoomsSyncStatus, roomsSyncMessage: daycareRoomsSyncMessage,
   })}`;
 }

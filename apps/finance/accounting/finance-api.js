@@ -4079,6 +4079,7 @@ export async function removeDaycareEntry(db, idInput) {
 // makeDaycareClient) as well as db. Wholesale-replaces only source='daycare_api' rows for the
 // periods present in the response, leaving any hand-entered rows untouched, exactly as the legacy
 // route already does.
+export const MYMDO_CHECK_CATEGORIES = ['Tuition Income', 'Payroll'];
 export async function syncDaycareFromApi(env, db) {
   const client = makeDaycareClient(env);
   // makeDaycareClient can now also be built from the rooms URL alone, so check for the method
@@ -4089,10 +4090,15 @@ export async function syncDaycareFromApi(env, db) {
   catch (e) { return { error: 'Could not reach the daycare app: ' + e.message, status: 502 }; }
   if (!res.ok) return { error: `Daycare app returned HTTP ${res.status}`, status: 502 };
   let data; try { data = await res.json(); } catch { return { error: 'Daycare app returned invalid JSON', status: 502 }; }
-  const rows = Array.isArray(data.budget) ? data.budget : [];
+  // Only myMDO's tuition income and staff payroll actuals, the two figures it really tracks (Andrew,
+  // 2026-09-29): every other daycare expense is in QuickBooks, and myMDO's budget and other lines are
+  // just its annual settings divided by twelve. Finance uses these to double-check QuickBooks.
+  const rows = (Array.isArray(data.budget) ? data.budget : [])
+    .filter((r) => r && r.type === 'actual' && MYMDO_CHECK_CATEGORIES.includes(String(r.category || '').trim()));
   const periods = [...new Set(rows.map(r => r.period).filter(p => /^\d{4}-\d{2}$/.test(p)))];
   const ops = [];
   if (periods.length) {
+    // Every earlier myMDO row for these months goes, including budget and other lines older syncs kept.
     const placeholders = periods.map(() => '?').join(',');
     ops.push(db.prepare(`DELETE FROM finance_daycare_entries WHERE source='daycare_api' AND period IN (${placeholders})`).bind(...periods));
   }

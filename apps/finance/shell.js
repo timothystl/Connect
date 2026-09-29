@@ -1594,10 +1594,9 @@ function renderSectionBody(ctx) {
     // finance-daycare-*-write-v1 contract's own role check on Connect's side.
     const canManageDaycareAllocation = roleResult.ok && roleResult.role === 'admin';
     const canManageDaycareBudgetOverride = roleResult.ok && roleResult.role === 'admin';
-    // Money sync uses the SAME looser gate as canRecordDaycareEntry above -- the legacy
-    // finance/daycare/sync route also carries no isAdmin check of its own. Room sync stays
-    // admin-only, matching finance/daycare/rooms/sync's own explicit isAdmin check exactly.
-    const canSyncDaycareRooms = roleResult.ok && roleResult.role === 'admin';
+    // The myMDO sync uses the SAME looser gate as canRecordDaycareEntry above -- the legacy
+    // finance/daycare/sync route also carries no isAdmin check of its own. There is no room sync:
+    // Finance takes only myMDO's tuition and payroll (Andrew, 2026-09-29).
     return renderDaycarePage(page.id, {
       daycareReport: daycareReportLive, daycareEntries, daycareEditId, canRecordDaycareEntry, daycareEntryStatus, daycareEntryMessage,
       // Admin-only like every import (Andrew, 2026-09-25); Connect's relay enforces the same rule.
@@ -1608,7 +1607,6 @@ function renderSectionBody(ctx) {
       daycareChurchBudgetImportEntryStatus, daycareChurchBudgetImportEntryMessage,
       daycarePreviewYear, daycarePreview,
       canSyncDaycare: canRecordDaycareEntry, daycareSyncStatus, daycareSyncMessage,
-      canSyncDaycareRooms, daycareRoomsSyncStatus, daycareRoomsSyncMessage,
     });
   }
   if (section.id === 'property') {
@@ -4119,7 +4117,8 @@ export default {
           ? safeSyntheticRead(() => resolveDaycareReport(env, env.FINANCE_DB)) : null;
         // Actuals detail lists the individual entries behind the live report (edit/remove parity with
         // legacy finRenderDaycare). A failed read just omits the list; the report still renders.
-        let daycareEntries = section.id === 'daycare' && resolveFinancePage(section, pageId).id === 'actuals'
+        // The overview reads them too, for the myMDO check (myMDO's tuition and payroll against QuickBooks).
+        let daycareEntries = section.id === 'daycare' && ['actuals', 'overview'].includes(resolveFinancePage(section, pageId).id)
           ? after(daycareReportLive, (report) => (report && report.source === 'live'
             ? fetchLiveFinanceDaycareEntries(env, report.fiscalYear) : null)) : null;
         const daycareEditId = section.id === 'daycare' ? Number(url.searchParams.get('edit')) || null : null;
