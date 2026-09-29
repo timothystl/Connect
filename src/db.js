@@ -550,6 +550,19 @@ export async function backfillPassThroughFunds(db) {
   } catch {}
 }
 
+// One-time: PNG Mission Society is also money passed on to another organization (Andrew,
+// 2026-09-29). Only a fund still in the restricted category moves; marker-gated like the above.
+export async function backfillPngPassThrough(db) {
+  try {
+    const marker = await db.prepare("SELECT value FROM chms_config WHERE key='fund_passthrough_png_backfilled'").first();
+    if (marker) return;
+    await db.batch([
+      db.prepare("UPDATE funds SET category='passthrough' WHERE category='restricted' AND LOWER(name) LIKE '%png%'"),
+      db.prepare("INSERT INTO chms_config (key,value) VALUES ('fund_passthrough_png_backfilled','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value"),
+    ]);
+  } catch {}
+}
+
 export async function seedChmsDefaults(db) {
   try {
     const existing = await db.prepare('SELECT COUNT(*) as n FROM funds').first();
@@ -2448,6 +2461,7 @@ async function _doInitDb(db) {
   await seedChmsDefaults(db);
   await backfillFundCategories(db);
   await backfillPassThroughFunds(db);
+  await backfillPngPassThrough(db);
 
   // Transportation folded into Acceptance (Care Ministry) as a sub-category — re-tag any
   // roles already seeded/added under the old 'transportation' ministry. This MUST run

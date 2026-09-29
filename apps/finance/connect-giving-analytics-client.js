@@ -20,6 +20,11 @@ export function fetchGivingAnalyticsPeople(env, accessJwt, { asOf } = {}) {
   return callConnectContract(env, accessJwt, 'giving-analytics-people-v1', asOf ? { query: { as_of: asOf } } : {});
 }
 
+// Marks designated funds pass-through or back to restricted (Giving edit; Connect re-checks).
+export function postGivingFundPassThrough(env, accessJwt, body) {
+  return callConnectContract(env, accessJwt, 'giving-fund-passthrough-write-v1', { method: 'POST', body });
+}
+
 export function postGivingFollowupWrite(env, accessJwt, body) {
   return callConnectContract(env, accessJwt, 'giving-followup-write-v1', { method: 'POST', body });
 }
