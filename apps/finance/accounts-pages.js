@@ -4,7 +4,7 @@ import {
 import { escapeHtml, formatSignedCents, renderKpiCards, renderSectionHeading, renderTable } from './render-helpers.js';
 import {
   BOARD_EXPENSE_ORDER, BOARD_REVENUE_ORDER, DONOR_WRAPPER_DEFAULT_LABEL, BOARD_EXPENSE_DEFAULT_LABELS,
-  BOARD_REVENUE_DEFAULT_LABELS, boardCategoryFor, boardLabelFor, buildBoardSections, defaultBoardCategory,
+  BOARD_REVENUE_DEFAULT_LABELS, boardCategoryFor, boardLabelFor, buildBoardSections, defaultBoardCategory, isHiddenAccount,
 } from './board-layout.js';
 
 // Mirrors REVENUE_STREAM_DEFAULT_LABELS (src/api-contracts.js) and BOARD_EXPENSE_CATEGORIES
@@ -134,18 +134,20 @@ export function renderLayoutEditor(rows, layout, entryStatus, entryMessage, { re
     const { key, assigned } = boardCategoryFor(layout, row.category_path, row.account_name, isRevenue);
     const customName = layout.accountLabels[row.category_path] || '';
     const tag = layout.tagCategories[row.category_path] || '';
-    return `<tr>
+    const hidden = isHiddenAccount(layout, row.category_path);
+    return `<tr${hidden ? ' class="coa-hidden"' : ''}>
       <td><input type="checkbox" name="select_${i}" value="1" aria-label="Select ${e(row.account_name)}"></td>
       <td><input type="hidden" name="path_${i}" value="${e(row.category_path)}"><input type="hidden" name="side_${i}" value="${isRevenue ? 'revenue' : 'expense'}">
-        <input type="hidden" name="orig_cat_${i}" value="${assigned ? key : ''}"><input type="hidden" name="orig_name_${i}" value="${e(customName)}"><input type="hidden" name="orig_tag_${i}" value="${e(tag)}">
+        <input type="hidden" name="orig_cat_${i}" value="${assigned ? key : ''}"><input type="hidden" name="orig_name_${i}" value="${e(customName)}"><input type="hidden" name="orig_tag_${i}" value="${e(tag)}"><input type="hidden" name="orig_hide_${i}" value="${hidden ? '1' : ''}">
         <input type="text" name="name_${i}" value="${e(customName)}" placeholder="${e(row.account_name)}" aria-label="Display name for ${e(row.account_name)}" style="width:100%"><br><small>${e(row.category_path)}</small></td>
       <td><select name="cat_${i}" aria-label="Board category for ${e(row.account_name)}">${catOptions(isRevenue, row)}</select></td>
       <td><select name="tag_${i}" aria-label="Purpose tag for ${e(row.account_name)}">${tagOptions(tag)}</select></td>
+      <td><input type="checkbox" name="hide_${i}" value="1"${hidden ? ' checked' : ''} aria-label="Hide ${e(row.account_name)}" title="Hide this old line from the Budget planner and Budget vs actual"></td>
     </tr>`;
   };
-  const group = (g, cls) => `<tr class="${cls}"><td colspan="4"><b>${e(g.label)}</b> <small>${g.items.length} account${g.items.length === 1 ? '' : 's'}</small></td></tr>${g.items.map((r) => accountRow(r, g.isRevenue)).join('')}`;
-  const side = (label, list) => `<tr class="coa-side"><td colspan="4">${label}</td></tr>${list.map((s) => (s.kind === 'wrapper'
-    ? `<tr class="coa-wrapper"><td colspan="4"><b>${e(s.label)}</b></td></tr>${s.groups.map((g) => group(g, 'coa-sub')).join('')}`
+  const group = (g, cls) => `<tr class="${cls}"><td colspan="5"><b>${e(g.label)}</b> <small>${g.items.length} account${g.items.length === 1 ? '' : 's'}</small></td></tr>${g.items.map((r) => accountRow(r, g.isRevenue)).join('')}`;
+  const side = (label, list) => `<tr class="coa-side"><td colspan="5">${label}</td></tr>${list.map((s) => (s.kind === 'wrapper'
+    ? `<tr class="coa-wrapper"><td colspan="5"><b>${e(s.label)}</b></td></tr>${s.groups.map((g) => group(g, 'coa-sub')).join('')}`
     : group(s, 'coa-cat'))).join('')}`;
   const bulkOptions = `<option value="">— keep each row’s choice</option><optgroup label="Revenue accounts">${BOARD_REVENUE_ORDER.map((k) => `<option value="revenue:${k}">${e(boardLabelFor(layout, k, true))}</option>`).join('')}<option value="revenue:">Automatic</option></optgroup><optgroup label="Expense accounts">${BOARD_EXPENSE_ORDER.map((k) => `<option value="expense:${k}">${e(boardLabelFor(layout, k, false))}</option>`).join('')}<option value="expense:">Automatic</option></optgroup>`;
   const headingField = (name, value, placeholder, label) => `<div class="field"><label>${e(label)}<input type="text" name="${name}" value="${e(value || '')}" placeholder="${e(placeholder)}"></label></div>`;
@@ -153,7 +155,7 @@ export function renderLayoutEditor(rows, layout, entryStatus, entryMessage, { re
     ${renderSectionHeading({ eyebrow: 'Chart of Accounts', heading: 'Budget layout', badge: 'Relayed live to Connect' })}
     ${entryStatus === 'ok' ? '<p class="status">Saved in Connect.</p>' : ''}
     ${entryStatus === 'error' ? `<p class="status status-error">Not saved: ${e(entryMessage || 'unknown error')}</p>` : ''}
-    <p>This is how the Budget planner groups its lines. Rename a heading, move accounts between categories, rename an account for display, or give it a purpose tag. QuickBooks account numbers, names and groups are untouched.</p>
+    <p>This is how the Budget planner groups its lines. Rename a heading, move accounts between categories, rename an account for display, give it a purpose tag, or hide an old line that is no longer used. QuickBooks account numbers, names and groups are untouched.</p>
     <details class="panel panel-spaced"><summary>Category headings</summary>
       <form method="POST" action="/api/v1/connect-board-categories-write">
         <input type="hidden" name="form_kind" value="headings">${returnTo ? `<input type="hidden" name="return_to" value="${e(returnTo)}">` : ''}
@@ -168,12 +170,12 @@ export function renderLayoutEditor(rows, layout, entryStatus, entryMessage, { re
     </details>
     <form method="POST" action="/api/v1/connect-board-categories-write">
       <input type="hidden" name="form_kind" value="accounts">${returnTo ? `<input type="hidden" name="return_to" value="${e(returnTo)}">` : ''}
-      <div class="table-wrap"><table class="coa-layout"><thead><tr><th></th><th>Account (display name)</th><th>Board category</th><th>Purpose</th></tr></thead>
+      <div class="table-wrap"><table class="coa-layout"><thead><tr><th></th><th>Account (display name)</th><th>Board category</th><th>Purpose</th><th>Hide</th></tr></thead>
         <tbody>${side('Revenue', sections.revenue)}${side('Expenses', sections.expense)}</tbody></table></div>
       <div class="grid form-grid">
         <div class="field"><label for="coa-bulk">Move the selected accounts to</label><select id="coa-bulk" name="bulk_category">${bulkOptions}</select></div>
       </div>
-      <p><small>Selected revenue accounts only move to a revenue category, and expense accounts to an expense category. “Automatic” places an account by its QuickBooks name.</small></p>
+      <p><small>Selected revenue accounts only move to a revenue category, and expense accounts to an expense category. “Automatic” places an account by its QuickBooks name. A hidden line drops out of the Budget planner and Budget vs actual while it has no money in the year shown; if money is ever posted to it, it appears again so no total is off.</small></p>
       <button type="submit">Save layout changes</button>
     </form>
   </section>`;

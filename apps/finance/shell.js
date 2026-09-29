@@ -1524,6 +1524,8 @@ function renderSectionBody(ctx) {
       canImportChurchMultiYear,
       churchActivityXlsxImportStatus, churchActivityXlsxImportMessage,
       churchBudgetMultiYearXlsxImportStatus, churchBudgetMultiYearXlsxImportMessage,
+      // Budget vs actual groups its lines the Budget planner's way (Chart of Accounts layout).
+      boardLayout: ctx.boardLayout || null, showHidden: ctx.searchParams?.get('hidden') === '1',
     });
   }
   if (section.id === 'balance') {
@@ -4152,7 +4154,8 @@ export default {
         // the Budget planner and scenarios, and is what the Chart of Accounts editor (also on
         // QuickBooks › Account mapping) edits.
         let boardLayoutResult = (['builder', 'scenarios', 'multi-year'].includes(planningPageId) || section.id === 'accounts'
-          || (section.id === 'quickbooks' && resolveFinancePage(section, pageId).id === 'account-mapping')) ? fetchBoardLayout(env) : null;
+          || (section.id === 'quickbooks' && resolveFinancePage(section, pageId).id === 'account-mapping')
+          || (section.id === 'church' && resolveFinancePage(section, pageId).id === 'budget-actual')) ? fetchBoardLayout(env) : null;
         let boardLayout = after(boardLayoutResult, (result) => (result && result.ok ? normalizeBoardLayout(result.layout) : null));
         const planningLoads = planningV3 ? Promise.all([
           fetchPlanningBasis(env, defaultLiveBudgetFiscalYear()),

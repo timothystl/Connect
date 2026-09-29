@@ -49,6 +49,7 @@ export function normalizeBoardLayout(payload) {
     expenseLabels: isObject(c.expenseLabels) ? c.expenseLabels : {},
     donorWrapperLabel: typeof c.donorWrapperLabel === 'string' ? c.donorWrapperLabel : '',
     accountLabels: isObject(c.accountLabels) ? c.accountLabels : {},
+    hidden: isObject(c.hiddenAccounts) ? Object.fromEntries(Object.entries(c.hiddenAccounts).filter(([, v]) => v === true)) : {},
     tags: Array.isArray(t.tags) ? t.tags.filter((x) => x && typeof x.id === 'string' && typeof x.label === 'string') : [],
     tagCategories: isObject(t.categories) ? t.categories : {},
   };
@@ -81,6 +82,12 @@ export function accountDisplayName(layout, path, name) {
   return layout.accountLabels[path] || name;
 }
 
+// A defunct line Andrew hid from Chart of Accounts › Budget layout. Callers leave it out only when
+// it carries no money in the figures they show, so hiding never changes a total.
+export function isHiddenAccount(layout, path) {
+  return Boolean(layout && layout.hidden && layout.hidden[path]);
+}
+
 // Lays out items (budget lines or accounts) the way legacy's Board view does. `pick` reads an item's
 // path, QuickBooks name and side. Returns { revenue, expense }: each a list of sections, where a
 // section is { kind: 'group', key, label, items } or, for revenue, one { kind: 'wrapper', label,
@@ -109,7 +116,7 @@ export function buildBoardSections(items, layout, pick) {
 // The Chart of Accounts Budget layout editor's two forms, turned into merge bodies for Connect's
 // finance-board-categories-write-v1 and finance-purpose-tags-write-v1 contracts. Headings send all
 // fifteen names (a blank one resets that heading). The account table sends only rows whose
-// category, display name or tag differs from what the page was rendered with, so an account on its
+// category, display name, hidden flag or tag differs from what the page was rendered with, so an account on its
 // automatic category is not pinned to it by saving a neighbor. A bulk move applies to selected rows
 // on its own side only. Returns null for a body with nothing to send.
 export function buildBoardLayoutWrites(form, kind) {
@@ -119,7 +126,7 @@ export function buildBoardLayoutWrites(form, kind) {
     return { boardBody: { revenueLabels, expenseLabels, donorWrapperLabel: String(form.get('donor_wrapper_label') || '').trim() }, tagsBody: null };
   }
   const [bulkSide, bulkKey] = String(form.get('bulk_category') || '').split(':');
-  const revenue = {}, expense = {}, accountLabels = {}, categories = {};
+  const revenue = {}, expense = {}, accountLabels = {}, hiddenAccounts = {}, categories = {};
   for (let i = 0; form.has(`path_${i}`); i++) {
     const path = String(form.get(`path_${i}`) || '');
     if (!path) continue;
@@ -131,6 +138,8 @@ export function buildBoardLayoutWrites(form, kind) {
     if (cat !== String(form.get(`orig_cat_${i}`) || '')) (side === 'revenue' ? revenue : expense)[path] = cat;
     const name = String(form.get(`name_${i}`) || '').trim();
     if (name !== String(form.get(`orig_name_${i}`) || '').trim()) accountLabels[path] = name;
+    const hide = form.get(`hide_${i}`) === '1';
+    if (hide !== (form.get(`orig_hide_${i}`) === '1')) hiddenAccounts[path] = hide;
     const tag = String(form.get(`tag_${i}`) || '');
     if (tag !== String(form.get(`orig_tag_${i}`) || '')) categories[path] = tag;
   }
@@ -138,6 +147,7 @@ export function buildBoardLayoutWrites(form, kind) {
   if (Object.keys(revenue).length) boardBody.revenue = revenue;
   if (Object.keys(expense).length) boardBody.expense = expense;
   if (Object.keys(accountLabels).length) boardBody.accountLabels = accountLabels;
+  if (Object.keys(hiddenAccounts).length) boardBody.hiddenAccounts = hiddenAccounts;
   return {
     boardBody: Object.keys(boardBody).length ? boardBody : null,
     tagsBody: Object.keys(categories).length ? { categories } : null,

@@ -16,7 +16,7 @@
 //     form attribute), so leaving lines out never submits the edit form;
 //   - Export CSV is a GET route returning the current view, and Print is print=1.
 import { escapeHtml as e } from './render-helpers.js';
-import { accountDisplayName, buildBoardSections } from './board-layout.js';
+import { accountDisplayName, buildBoardSections, isHiddenAccount } from './board-layout.js';
 import { csvNum, csvText } from './payroll-report-render.js';
 
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -53,7 +53,7 @@ export function plannerParams(params, now = new Date()) {
   const tab = TABS.some(([k]) => k === get('tab')) ? get('tab') : '';
   return {
     target, base, view: get('view') === 'qb' ? 'qb' : 'board', cols, exclude, pick: get('pick') === '1', tab,
-    printMode: get('print_mode') === 'thisyear' ? 'thisyear' : 'plan', draft: get('draft') === '1',
+    printMode: get('print_mode') === 'thisyear' ? 'thisyear' : 'plan', draft: get('draft') === '1', showHidden: get('hidden') === '1',
     outExp: rate(get('out_exp'), OUTLOOK_DEFAULTS.expense), outRev: rate(get('out_rev'), OUTLOOK_DEFAULTS.revenue),
   };
 }
@@ -75,6 +75,7 @@ export function plannerQuery(p, overrides = {}, omit = []) {
   if (v.cols.length !== PLANNER_COLUMNS.length) pairs.push(['cols', v.cols.length ? v.cols.join(',') : 'none']);
   for (const x of v.exclude) pairs.push(['x', x]);
   if (v.pick) pairs.push(['pick', '1']);
+  if (v.showHidden) pairs.push(['hidden', '1']);
   if (v.tab) pairs.push(['tab', v.tab]);
   if (v.outExp !== OUTLOOK_DEFAULTS.expense) pairs.push(['out_exp', String(v.outExp)]);
   if (v.outRev !== OUTLOOK_DEFAULTS.revenue) pairs.push(['out_rev', String(v.outRev)]);
@@ -172,15 +173,24 @@ function leavesOf(node) {
   return node.kind === 'leaf' ? [node.line] : node.children.flatMap(leavesOf);
 }
 
+// A line hidden in Chart of Accounts › Budget layout that has nothing in any column: dropped from
+// the table, the export and the print unless the view asks for hidden lines. One with money stays.
+function isQuietHiddenLine(l, layout) {
+  return isHiddenAccount(layout, l.category) && !l.baseBudgetCents && !l.baseActualCents && !l.projectedCents && !l.plan?.plannedAmountCents;
+}
+
 export function buildPlannerModel(builder, { layout = null, params }) {
   const excluded = new Set(params.exclude);
   const kept = (l) => !excluded.has(l.category);
   const boardView = Boolean(layout) && params.view !== 'qb';
-  const tree = boardView ? boardTree(builder.lines, layout) : qbTree(builder.lines);
-  const keptLines = builder.lines.filter(kept);
+  const quiet = layout ? builder.lines.filter((l) => isQuietHiddenLine(l, layout)) : [];
+  const shown = quiet.length && !params.showHidden ? builder.lines.filter((l) => !isQuietHiddenLine(l, layout)) : builder.lines;
+  const tree = boardView ? boardTree(shown, layout) : qbTree(shown);
+  const keptLines = shown.filter(kept);
   return {
     builder, layout, boardView, tree, kept,
-    excludedCount: builder.lines.length - keptLines.length,
+    hiddenCount: quiet.length,
+    excludedCount: shown.length - keptLines.length,
     revenue: sumLines(keptLines.filter((l) => l.classification === 'Income')),
     expense: sumLines(keptLines.filter((l) => l.classification !== 'Income')),
   };
@@ -480,6 +490,9 @@ function toolbar(model, p, { pickFormId }) {
       <span class="bp-label">Columns</span><div class="chip-row bp-chips">${PLANNER_COLUMNS.map(chip).join('')}</div>
       ${pick}
       ${model.excludedCount ? `<span class="muted-line">${model.excludedCount} line${model.excludedCount === 1 ? '' : 's'} left out</span><a href="${href(p, { exclude: [], pick: false })}">Include all lines</a>` : ''}
+      ${model.hiddenCount ? (p.showHidden
+    ? `<a href="${href(p, { showHidden: false })}">Hide the ${model.hiddenCount} old line${model.hiddenCount === 1 ? '' : 's'} again</a>`
+    : `<span class="muted-line">${model.hiddenCount} old line${model.hiddenCount === 1 ? '' : 's'} hidden</span><a href="${href(p, { showHidden: true })}">Show hidden lines</a>`) : ''}
       <span class="bp-spacer"></span>
       <a class="button-outline bp-button" href="${csv}">Export CSV</a>
       <form method="GET" action="/" class="bp-print">${hiddenView(p, ['pick', 'tab'])}<input type="hidden" name="print" value="1">
@@ -510,7 +523,7 @@ function leafRow(r, ctx) {
   const pickBox = p.pick ? `<input type="checkbox" form="${ctx.pickFormId}" name="x" value="${e(l.category)}"${r.excluded ? ' checked' : ''} aria-label="Leave out ${e(shown)}" title="Tick to leave this line out of the totals, the export and the printed sheet">` : '';
   const remove = ctx.canManage && l.plan && !l.plan.draft && ctx.form
     ? `<button type="submit" class="link-button bp-remove" formaction="/api/v1/connect-budget-plan-remove" formnovalidate name="category" value="${e(l.category)}" title="Remove this line from the FY${p.target} plan">Remove</button>` : '';
-  const sub = `${shown !== l.name ? `${e(l.name)} · ` : ''}${e(basisNote(l))}${l.plan?.notes ? ` · ${e(l.plan.notes)}` : ''}`;
+  const sub = `${layout && isHiddenAccount(layout, l.category) ? 'Hidden old line · ' : ''}${shown !== l.name ? `${e(l.name)} · ` : ''}${e(basisNote(l))}${l.plan?.notes ? ` · ${e(l.plan.notes)}` : ''}`;
   const label = `<td class="bp-name" style="padding-left:${10 + r.depth * 16}px">${pickBox}${ids}<b>${e(shown)}</b><small>${sub}${remove}</small></td>`;
   const f = r.fig;
   const input = (name, value, extra, aria) => `<input type="text" inputmode="${extra.inputmode}" name="${name}_${i}" value="${e(value)}" class="bp-input${extra.cls ? ` ${extra.cls}` : ''}" aria-label="${e(aria)}"${extra.title ? ` title="${e(extra.title)}"` : ''}><input type="hidden" name="orig_${name}_${i}" value="${e(value)}">`;
@@ -731,6 +744,7 @@ export const BUDGET_BUILDER_STYLES = `
     .coa-side td { font-weight:700; background:#F4F6F9; }
     .coa-cat td, .coa-wrapper td { padding-top:12px; color:var(--navy); }
     .coa-sub td { padding-left:20px; color:#374151; }
+    .coa-hidden td { opacity:.6; }
     .bb-result td { font-weight:700; background:#FBF5E6; border-top:2px solid var(--navy); }
     .bp-head { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-top:8px; }
     .bp-head h2 { margin:0; font-size:26px; }

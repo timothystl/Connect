@@ -3443,7 +3443,7 @@ export const BOARD_EXPENSE_CATEGORIES = [
 export const BOARD_EXPENSE_KEYS = BOARD_EXPENSE_CATEGORIES.map(c => c.key);
 export async function readPlanningBoardCategories(db) {
   const row = await db.prepare("SELECT value FROM finance_settings WHERE key='finance_planning_board_categories'").first();
-  const empty = { revenue: {}, expense: {}, revenueLabels: {}, expenseLabels: {}, donorWrapperLabel: '', accountLabels: {} };
+  const empty = { revenue: {}, expense: {}, revenueLabels: {}, expenseLabels: {}, donorWrapperLabel: '', accountLabels: {}, hiddenAccounts: {} };
   if (!row) return empty;
   try {
     const v = JSON.parse(row.value) || {};
@@ -3462,6 +3462,10 @@ export async function readPlanningBoardCategories(db) {
       // above (any non-empty path is a valid key; category_path is already unique across the
       // whole chart of accounts, so no fixed allowlist is needed here either).
       accountLabels: v.accountLabels && typeof v.accountLabels === 'object' ? v.accountLabels : {},
+      // Defunct lines (Easter egg hunt, an old VBS account) Andrew has hidden from the Budget
+      // builder and Budget vs actual, keyed by category_path -> true. Display only: a hidden line
+      // that still carries money is shown anyway, so no total ever changes.
+      hiddenAccounts: v.hiddenAccounts && typeof v.hiddenAccounts === 'object' ? v.hiddenAccounts : {},
     };
   } catch { return empty; }
 }
@@ -3483,6 +3487,7 @@ export async function applyBoardCategoryMerge(db, body) {
     revenueLabels: { ...current.revenueLabels }, expenseLabels: { ...current.expenseLabels },
     donorWrapperLabel: current.donorWrapperLabel,
     accountLabels: { ...current.accountLabels },
+    hiddenAccounts: { ...current.hiddenAccounts },
   };
   if (b.revenue && typeof b.revenue === 'object') {
     for (const [path, key] of Object.entries(b.revenue)) {
@@ -3522,6 +3527,12 @@ export async function applyBoardCategoryMerge(db, body) {
       if (!path) continue;
       const clean = String(label || '').trim();
       if (clean) merged.accountLabels[path] = clean; else delete merged.accountLabels[path];
+    }
+  }
+  if (b.hiddenAccounts && typeof b.hiddenAccounts === 'object') {
+    for (const [path, hide] of Object.entries(b.hiddenAccounts)) {
+      if (!path) continue;
+      if (hide === true) merged.hiddenAccounts[path] = true; else delete merged.hiddenAccounts[path];
     }
   }
   await db.prepare(
