@@ -8,7 +8,7 @@ import { acceptConnectGivingSummaryV1 } from '../../contracts/validators/connect
 import { reconcileSyntheticGivingDelivery } from './connect-giving-transport.js';
 import { fetchLiveConnectGivingSummary, defaultLiveGivingPeriod } from './connect-giving-client.js';
 import { fetchVerifiedRole, roleCanAccessSection } from './connect-role-client.js';
-import { callPayrollProxy } from './payroll-proxy-client.js';
+import { callPayrollProxy, describePayrollFailure } from './payroll-proxy-client.js';
 import {
   buildPayrollSectionBundle, renderPayrollSection, saveAllHours, approvePeriod,
   saveStaffFromForm, deactivateStaffFromForm, buildCsvForPeriod, resolvePayrollPeriod, loadPayrollWorkspace,
@@ -3448,7 +3448,7 @@ export default {
       const result = await saveAllHours(env, accessJwt, period.start, workspace.churchStaff, workspace.periodEntries, form);
       const params = new URLSearchParams({ section: 'payroll', page: 'run', period: period.start });
       params.set('status', result.ok ? 'saved' : 'error');
-      if (!result.ok && result.message) params.set('message', String(result.message).slice(0, 200));
+      if (!result.ok) params.set('message', String(result.message || describePayrollFailure(result)).slice(0, 200));
       return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
     }
 
@@ -3477,7 +3477,7 @@ export default {
       const result = await approvePeriod(env, accessJwt, period.start, approvedBy, workspace);
       const params = new URLSearchParams({ section: 'payroll', page: 'run', period: period.start });
       params.set('status', result.ok ? (wantsApprove ? 'approved' : 'unapproved') : 'error');
-      if (!result.ok && result.message) params.set('message', String(result.message).slice(0, 200));
+      if (!result.ok) params.set('message', String(result.message || describePayrollFailure(result)).slice(0, 200));
       return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
     }
 

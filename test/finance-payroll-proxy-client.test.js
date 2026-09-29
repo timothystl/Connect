@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { callPayrollProxy } from '../apps/finance/payroll-proxy-client.js';
+import { callPayrollProxy, describePayrollFailure } from '../apps/finance/payroll-proxy-client.js';
 import { PAYROLL_RPC_FNS } from '../apps/finance/payroll-rpc-fns.js';
 
 function envWith(fetchImpl) {
@@ -83,6 +83,21 @@ describe('callPayrollProxy', () => {
     const env = envWith(async () => new Response(JSON.stringify({ message: 'This period is approved and locked.' }), { status: 409 }));
     const result = await callPayrollProxy(env, 'signed.jwt.here', 'payroll_save_hours', { p_period_start: '2026-01-01' });
     expect(result).toEqual({ ok: false, reason: 'http_error', status: 409, message: 'This period is approved and locked.' });
+  });
+
+  // payroll_approve_period returns void: PostgREST answers 204 with no body. That saved,
+  // and used to read as "That did not save: unknown error" (found live, 2026-09-29).
+  it('treats an empty success response (a function that returns nothing) as saved', async () => {
+    const env = envWith(async () => new Response(null, { status: 204 }));
+    expect(await callPayrollProxy(env, 'signed.jwt.here', 'payroll_approve_period', { p_period_start: '2026-09-14' }))
+      .toEqual({ ok: true, result: null });
+    const empty200 = envWith(async () => new Response('', { status: 200 }));
+    expect((await callPayrollProxy(empty200, 'signed.jwt.here', 'payroll_unapprove_period', {})).ok).toBe(true);
+  });
+
+  it('describes a failure in plain words when the payroll service sent no message', () => {
+    expect(describePayrollFailure({ ok: false, reason: 'http_error', status: 500 })).toBe('the payroll service refused it (HTTP 500)');
+    expect(describePayrollFailure({ ok: false, reason: 'network_error' })).toContain('reload to check whether it saved');
   });
 
   it('fails closed on malformed JSON instead of assuming success or failure, keeping a preview of the real body', async () => {
