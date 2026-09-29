@@ -190,7 +190,9 @@ function renderBudgetActualBoard(board, fiscalYear, showHidden) {
     if (r.kind === 'side') return `<tr class="bb-group"><td colspan="4">${e(r.label)}</td></tr>`;
     if (r.kind === 'header') return `<tr class="bp-header"><td colspan="4" ${pad}>${e(r.label)}</td></tr>`;
     if (r.kind === 'leaf') {
-      const sub = [r.hidden ? 'Hidden old line' : '', r.label !== r.qbName ? e(r.qbName) : ''].filter(Boolean).join(' · ');
+      // Only the display name shows (Andrew, 2026-09-29): the QuickBooks name under a renamed line
+      // read as a repeat. The rename itself is managed in Chart of Accounts › Budget layout.
+      const sub = r.hidden ? 'Hidden old line' : '';
       return `<tr${r.hidden ? ' class="coa-hidden"' : ''}><td ${pad}>${e(r.label)}${sub ? `<small>${sub}</small>` : ''}</td>${figures(r)}</tr>`;
     }
     if (r.kind === 'total') return `<tr class="bb-subtotal"><td ${pad}>${e(r.label)}</td>${figures(r)}</tr>`;
