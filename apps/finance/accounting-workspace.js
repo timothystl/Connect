@@ -6,6 +6,8 @@ import { CONNECT_PLANNER_JS, CONNECT_PLANNER_CSS, CONNECT_PLANNER_CSP } from './
 import { fetchVerifiedRole } from './connect-role-client.js';
 import { isSameOriginPost } from './form-post.js';
 import { accountingWorkspaceTarget } from '../../contracts/accounting-workspace.js';
+import { localContractReadsEnabled } from './local-contract-reads.js';
+import { answersLocally, runWorkspaceOperation } from './accounting/workspace.js';
 
 export { CONNECT_PLANNER_JS as ACCOUNTING_JS, CONNECT_PLANNER_CSS as ACCOUNTING_CSS, CONNECT_PLANNER_CSP as ACCOUNTING_CSP };
 const start = HTML_TABS_2.indexOf('<div id="tab-finance"');
@@ -70,11 +72,27 @@ export function renderAccountingWorkspace(viewer, url, version) {
 export async function relayAccountingWorkspace(request, env, url) {
   const json = (error, status) => new Response(JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
   const path = url.searchParams.get('path');
-  if (!accountingWorkspaceTarget(path, request.method)) return json('Unknown accounting operation', 404);
+  const target = accountingWorkspaceTarget(path, request.method);
+  if (!target) return json('Unknown accounting operation', 404);
   if (request.method !== 'GET' && !isSameOriginPost(request, url)) return json('Cross-site request refused', 403);
   const jwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
   // Live checks on every operation: role-cache fallback must never authorize a save.
-  if (!accountingViewer(await fetchVerifiedRole(env, jwt))) return json('Access denied: accounting role could not be verified', 403);
+  const verified = await fetchVerifiedRole(env, jwt);
+  if (!accountingViewer(verified)) return json('Access denied: accounting role could not be verified', 403);
+  // Finance's own records are read and saved here (accounting/workspace.js; Andrew, 2026-09-29).
+  // Reads that mix in Giving, and the myMDO syncs while Finance lacks that connection, still go
+  // to Connect below.
+  if (localContractReadsEnabled(env) && answersLocally(path, env)) {
+    const actor = { email: verified.identity || '', user: { username: verified.username || '', role: verified.role }, permissions: verified.permissions || {} };
+    try {
+      const res = await runWorkspaceOperation(request, env, target, actor);
+      return new Response(res.body, { status: res.status, headers: {
+        'Content-Type': res.headers.get('Content-Type') || 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+      } });
+    } catch (e) {
+      return json(`That accounting operation failed: ${String(e?.message || e).slice(0, 200)}`, 500);
+    }
+  }
   const headers = new Headers({ 'X-Contract-Key': env.FINANCE_CONTRACT_API_KEY, 'Cf-Access-Jwt-Assertion': jwt });
   if (request.headers.has('Content-Type')) headers.set('Content-Type', request.headers.get('Content-Type'));
   try {
