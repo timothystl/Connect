@@ -209,7 +209,18 @@ function renderAssets(view, params, canEdit) {
     ? `<ul class="row-list">${list.map((a) => `<li><a class="row-link" href="${link('assets', { asset: String(a.id) })}"><div><b>${e(a.name)}</b><small>${e([a.category, a.location].filter(Boolean).join(' · '))}</small></div><div class="right"><span class="tone-${lifeTone(a.life)} strong-small">${lifeLabel(a.life)}</span><small>Installed ${formatMonth(a.installed_month)}${fileCount(view, 'asset', a.id) ? ` · ${fileCount(view, 'asset', a.id)}` : ''}</small></div></a></li>`).join('')}</ul>`
     : emptyNote(view.assets.length ? 'No assets in this category.' : 'No assets on record yet. Add the building systems, roofs, vehicles, and equipment you want to track.')}</div>
     ${retired.length ? `<p class="muted-line">${retired.length} retired asset${retired.length === 1 ? '' : 's'} kept for history: ${retired.map((a) => `<a href="${link('assets', { asset: String(a.id) })}">${e(a.name)}</a>`).join(', ')}.</p>` : ''}
-    ${canEdit ? `<details class="panel panel-spaced edit-panel"${view.assets.length ? '' : ' open'}><summary>Add an asset</summary>${assetForm()}</details>` : ''}`;
+    ${canEdit ? `<details class="panel panel-spaced edit-panel"${view.assets.length ? '' : ' open'}><summary>Add an asset</summary>${assetForm()}</details>` : ''}
+    ${canEdit ? importPanel() : ''}`;
+}
+
+// A prepared bundle (manifest.json and its PDFs or photos) loaded in one step; see docs/FACILITIES_IMPORT.md.
+function importPanel() {
+  return `<details class="panel panel-spaced edit-panel"><summary>Import a prepared bundle of records and documents</summary>
+    <form method="POST" action="/api/v1/facilities/import" enctype="multipart/form-data" class="form-grid facility-form upload-form">
+      ${field('manifest.json', '<input type="file" name="manifest" accept="application/json,.json" required>')}
+      ${field('The PDFs and photos it lists', '<input type="file" name="files" accept="image/*,application/pdf" multiple>', true)}
+      <div class="form-actions"><button type="submit">Import</button><p class="muted-line">Everything is checked first; if anything is wrong nothing is saved. Records already on file are reused, so running it twice adds nothing twice.</p></div>
+    </form></details>`;
 }
 
 // ── Service history ───────────────────────────────────────────────────────────────────────────

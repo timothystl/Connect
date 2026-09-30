@@ -7,6 +7,7 @@ import { FormValidationError, day, int, month, oneOf, optionalId, parseDollarsTo
 import {
   MAX_UPLOAD_REQUEST_BYTES, attachFacilityFiles, groupFilesByRecord, recordReturn, removeFacilityFile, removeRecordFiles, uploadFacilityFiles,
 } from './facility-files.js';
+import { importFacilityBundle } from './facility-import.js';
 
 export const FACILITY_CATEGORIES = Object.freeze([
   'HVAC', 'Boilers', 'Elevator', 'Roofs', 'Electrical', 'Kitchen', 'Fire & security', 'Plumbing',
@@ -291,4 +292,5 @@ export const FACILITIES_WRITERS = Object.freeze({
   'facilities-project-save-v1': { run: saveFacilityProject, page: 'capital-projects' },
   'facilities-file-upload-v1': { run: uploadFacilityFiles, page: 'overview', maxBytes: MAX_UPLOAD_REQUEST_BYTES },
   'facilities-file-remove-v1': { run: removeFacilityFile, page: 'overview' },
+  'facilities-import-v1': { run: importFacilityBundle, page: 'assets', maxBytes: MAX_UPLOAD_REQUEST_BYTES },
 });
