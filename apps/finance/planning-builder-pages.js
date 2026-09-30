@@ -173,18 +173,20 @@ function leavesOf(node) {
   return node.kind === 'leaf' ? [node.line] : node.children.flatMap(leavesOf);
 }
 
-// A line hidden in Chart of Accounts › Budget layout that has nothing in any column: dropped from
-// the table, the export and the print unless the view asks for hidden lines. One with money stays.
-function isQuietHiddenLine(l, layout) {
-  return isHiddenAccount(layout, l.category) && !l.baseBudgetCents && !l.baseActualCents && !l.projectedCents && !l.plan?.plannedAmountCents;
+// A line with nothing in any column this year (no budget, actual, projection or plan): dropped from
+// the table, the export and the print unless the view asks for unused lines, so the budget lists only
+// what is in use. Chart of Accounts › Budget layout still lists every account ever used, and a line
+// hidden there is labeled as such. A line with money always stays.
+function isQuietHiddenLine(l) {
+  return !l.baseBudgetCents && !l.baseActualCents && !l.projectedCents && !l.plan?.plannedAmountCents;
 }
 
 export function buildPlannerModel(builder, { layout = null, params }) {
   const excluded = new Set(params.exclude);
   const kept = (l) => !excluded.has(l.category);
   const boardView = Boolean(layout) && params.view !== 'qb';
-  const quiet = layout ? builder.lines.filter((l) => isQuietHiddenLine(l, layout)) : [];
-  const shown = quiet.length && !params.showHidden ? builder.lines.filter((l) => !isQuietHiddenLine(l, layout)) : builder.lines;
+  const quiet = builder.lines.filter(isQuietHiddenLine);
+  const shown = quiet.length && !params.showHidden ? builder.lines.filter((l) => !isQuietHiddenLine(l)) : builder.lines;
   const tree = boardView ? boardTree(shown, layout) : qbTree(shown);
   const keptLines = shown.filter(kept);
   return {
@@ -261,17 +263,20 @@ function cellText(key, f, net = false) {
 function figureCell(key, f, kind) {
   if (kind === 'net' && key === 'delta') return '<td></td>';
   if (kind === 'net' && key === 'change') return '<td></td>';
+  // data-col marks the figure columns for budget-planner-live.js, which redraws totals as a cell is
+  // typed in; a line's own cells also carry the stored cents so the script can re-add them.
+  const attrs = ` data-col="${key}"${kind === 'leaf' && key !== 'delta' ? ` data-c="${f[key] ?? 0}" data-has="${key === 'bud' ? (f.hasBud ? 1 : 0) : key === 'plan' ? (f.hasPlan ? 1 : 0) : 1}"` : ''}`;
   if (kind === 'net') {
     const v = { bud: f.bud, act: f.act, proj: f.proj, plan: f.plan }[key];
-    if ((key === 'bud' && !f.hasBud) || (key === 'plan' && !f.hasPlan)) return '<td class="tone-muted">—</td>';
-    return `<td class="${v < 0 ? 'bp-down-net' : 'bp-up-net'}">${cellText(key, f, true)}</td>`;
+    if ((key === 'bud' && !f.hasBud) || (key === 'plan' && !f.hasPlan)) return `<td class="tone-muted"${attrs}>—</td>`;
+    return `<td class="${v < 0 ? 'bp-down-net' : 'bp-up-net'}"${attrs}>${cellText(key, f, true)}</td>`;
   }
   if (key === 'delta') {
     const pct = f.hasBud && f.hasPlan ? deltaPct(f.bud, f.plan) : null;
-    return `<td class="${deltaTone(pct)}">${cellText(key, f)}</td>`;
+    return `<td class="${deltaTone(pct)}"${attrs}>${cellText(key, f)}</td>`;
   }
   const text = cellText(key, f);
-  return `<td${text === '—' ? ' class="tone-muted"' : ''}>${text}</td>`;
+  return `<td${text === '—' ? ' class="tone-muted"' : ''}${attrs}>${text}</td>`;
 }
 
 // ── CSV ──────────────────────────────────────────────────────────────────────────────────────
@@ -468,11 +473,11 @@ function summaryStrip(model, p) {
   const change = planExp - baseExp;
   const pct = baseExp ? (change / Math.abs(baseExp)) * 100 : null;
   const gap = planExp - model.revenue.proj;
-  return `<div class="bb-banner bp-strip">
-      <div><small>FY${p.base} projected expenses</small><strong>${money(baseExp)}</strong></div>
-      <div><small>FY${p.target} planned</small><strong class="bp-gold">${money(planExp)}</strong></div>
-      <div><small>Change</small><strong>${signed(change)}</strong><span>${pct == null ? '' : pctText(pct)}</span></div>
-      <div class="bp-strip-last"><small>Revenue needed to balance</small><strong class="bp-green">${money(planExp)}</strong><span>${gap >= 0 ? '+' : '−'}${money(Math.abs(gap))} on this year’s revenue (FY${p.base} projected ${money(model.revenue.proj)})</span></div>
+  return `<div class="bb-banner bp-strip" data-base="${p.base}">
+      <div><small>FY${p.base} projected expenses</small><strong data-bp-strip="baseExp">${money(baseExp)}</strong></div>
+      <div><small>FY${p.target} planned</small><strong class="bp-gold" data-bp-strip="planExp">${money(planExp)}</strong></div>
+      <div><small>Change</small><strong data-bp-strip="change">${signed(change)}</strong><span data-bp-strip="changePct">${pct == null ? '' : pctText(pct)}</span></div>
+      <div class="bp-strip-last"><small>Revenue needed to balance</small><strong class="bp-green" data-bp-strip="needed">${money(planExp)}</strong><span data-bp-strip="gap">${gap >= 0 ? '+' : '−'}${money(Math.abs(gap))} on this year’s revenue (FY${p.base} projected ${money(model.revenue.proj)})</span></div>
     </div>`;
 }
 
@@ -491,8 +496,8 @@ function toolbar(model, p, { pickFormId }) {
       ${pick}
       ${model.excludedCount ? `<span class="muted-line">${model.excludedCount} line${model.excludedCount === 1 ? '' : 's'} left out</span><a href="${href(p, { exclude: [], pick: false })}">Include all lines</a>` : ''}
       ${model.hiddenCount ? (p.showHidden
-    ? `<a href="${href(p, { showHidden: false })}">Hide the ${model.hiddenCount} old line${model.hiddenCount === 1 ? '' : 's'} again</a>`
-    : `<span class="muted-line">${model.hiddenCount} old line${model.hiddenCount === 1 ? '' : 's'} hidden</span><a href="${href(p, { showHidden: true })}">Show hidden lines</a>`) : ''}
+    ? `<a href="${href(p, { showHidden: false })}">Hide the ${model.hiddenCount} unused line${model.hiddenCount === 1 ? '' : 's'} again</a>`
+    : `<span class="muted-line">${model.hiddenCount} unused line${model.hiddenCount === 1 ? '' : 's'} hidden (nothing in them this year)</span><a href="${href(p, { showHidden: true })}">Show unused lines</a>`) : ''}
       <span class="bp-spacer"></span>
       <a class="button-outline bp-button" href="${csv}">Export CSV</a>
       <form method="GET" action="/" class="bp-print">${hiddenView(p, ['pick', 'tab'])}<input type="hidden" name="print" value="1">
@@ -523,18 +528,18 @@ function leafRow(r, ctx) {
   const pickBox = p.pick ? `<input type="checkbox" form="${ctx.pickFormId}" name="x" value="${e(l.category)}"${r.excluded ? ' checked' : ''} aria-label="Leave out ${e(shown)}" title="Tick to leave this line out of the totals, the export and the printed sheet">` : '';
   const remove = ctx.canManage && l.plan && !l.plan.draft && ctx.form
     ? `<button type="submit" class="link-button bp-remove" formaction="/api/v1/connect-budget-plan-remove" formnovalidate name="category" value="${e(l.category)}" title="Remove this line from the FY${p.target} plan">Remove</button>` : '';
-  const sub = `${layout && isHiddenAccount(layout, l.category) ? 'Hidden old line · ' : ''}${shown !== l.name ? `${e(l.name)} · ` : ''}${e(basisNote(l))}${l.plan?.notes ? ` · ${e(l.plan.notes)}` : ''}`;
+  const sub = `${layout && isHiddenAccount(layout, l.category) ? 'Hidden in Chart of Accounts · ' : (isQuietHiddenLine(l) ? 'Unused this year · ' : '')}${shown !== l.name ? `${e(l.name)} · ` : ''}${e(basisNote(l))}${l.plan?.notes ? ` · ${e(l.plan.notes)}` : ''}`;
   const label = `<td class="bp-name" style="padding-left:${10 + r.depth * 16}px">${pickBox}${ids}<b>${e(shown)}</b><small>${sub}${remove}</small></td>`;
   const f = r.fig;
   const input = (name, value, extra, aria) => `<input type="text" inputmode="${extra.inputmode}" name="${name}_${i}" value="${e(value)}" class="bp-input${extra.cls ? ` ${extra.cls}` : ''}" aria-label="${e(aria)}"${extra.title ? ` title="${e(extra.title)}"` : ''}><input type="hidden" name="orig_${name}_${i}" value="${e(value)}">`;
   const cells = p.cols.map((key) => {
     if (!editable) return figureCell(key, f, 'leaf');
-    if (key === 'plan' && canEditPlan) return `<td>${input('plan', dollars(l.plan?.plannedAmountCents), { inputmode: 'numeric', cls: l.plan?.draft ? 'is-draft' : '' }, `FY${p.target} plan for ${shown}`)}</td>`;
-    if (key === 'proj' && canEditActuals) return `<td>${input('proj', dollars(l.projectedCents), { inputmode: 'numeric', cls: l.projectedOverridden ? 'is-corrected' : '', title: 'Whole dollars. Clear the box to go back to the computed projection.' }, `FY${p.base} projection for ${shown}`)}</td>`;
-    if (key === 'act' && canEditActuals) return `<td>${input('act', String((l.baseActualCents || 0) / 100), { inputmode: 'decimal', title: 'Corrects this account’s imported or synced actual. Clear the box to go back to the real figure.' }, `FY${p.base} actual for ${shown}`)}</td>`;
+    if (key === 'plan' && canEditPlan) return `<td data-col="plan" data-c="${l.plan ? l.plan.plannedAmountCents || 0 : 0}" data-has="${l.plan ? 1 : 0}">${input('plan', dollars(l.plan?.plannedAmountCents), { inputmode: 'numeric', cls: l.plan?.draft ? 'is-draft' : '' }, `FY${p.target} plan for ${shown}`)}</td>`;
+    if (key === 'proj' && canEditActuals) return `<td data-col="proj" data-c="${l.projectedCents || 0}" data-has="1">${input('proj', dollars(l.projectedCents), { inputmode: 'numeric', cls: l.projectedOverridden ? 'is-corrected' : '', title: 'Whole dollars. Clear the box to go back to the computed projection.' }, `FY${p.base} projection for ${shown}`)}</td>`;
+    if (key === 'act' && canEditActuals) return `<td data-col="act" data-c="${l.baseActualCents || 0}" data-has="1">${input('act', String((l.baseActualCents || 0) / 100), { inputmode: 'decimal', title: 'Corrects this account’s imported or synced actual. Clear the box to go back to the real figure.' }, `FY${p.base} actual for ${shown}`)}</td>`;
     return figureCell(key, f, 'leaf');
   }).join('');
-  return `<tr class="${r.excluded ? 'bp-excluded' : ''}">${label}${cells}</tr>`;
+  return `<tr class="${r.excluded ? 'bp-excluded' : ''}" data-bp="leaf" data-side="${r.side}">${label}${cells}</tr>`;
 }
 
 function tableRows(model, ctx) {
@@ -544,10 +549,10 @@ function tableRows(model, ctx) {
   return rows.map((r) => {
     if (r.kind === 'leaf') return leafRow(r, ctx);
     if (r.kind === 'side') return `<tr class="bb-group"><td colspan="${span}">${e(r.label)}</td></tr>`;
-    if (r.kind === 'header') return `<tr class="bp-header"><td colspan="${span}" style="padding-left:${10 + r.depth * 16}px">${e(r.label)}</td></tr>`;
+    if (r.kind === 'header') return `<tr class="bp-header" data-bp="header" data-side="${r.side}"><td colspan="${span}" style="padding-left:${10 + r.depth * 16}px">${e(r.label)}</td></tr>`;
     const cls = r.kind === 'net' ? 'bb-result' : r.kind === 'sidetotal' ? 'bb-total' : 'bb-subtotal';
     const pad = r.kind === 'total' ? ` style="padding-left:${10 + r.depth * 16}px"` : '';
-    return `<tr class="${cls}"><td${pad}>${e(r.label)}</td>${ctx.p.cols.map((k) => figureCell(k, r.fig, r.kind)).join('')}</tr>`;
+    return `<tr class="${cls}" data-bp="${r.kind}" data-side="${r.side}"><td${pad}>${e(r.label)}</td>${ctx.p.cols.map((k) => figureCell(k, r.fig, r.kind)).join('')}</tr>`;
   }).join('');
 }
 
@@ -613,7 +618,7 @@ function outlook(model, p) {
 
 // ── The page ─────────────────────────────────────────────────────────────────────────────────
 
-export function renderBudgetBuilderPage({ builder: rawBuilder, params, canEditPlan = false, canEditActuals = false, canManageBudgetPlan = false, statuses = {}, councilViewer = false, councilDraft = null, councilDraftFailed = false, layout = null, now = new Date() }) {
+export function renderBudgetBuilderPage({ liveVersion = 'local', builder: rawBuilder, params, canEditPlan = false, canEditActuals = false, canManageBudgetPlan = false, statuses = {}, councilViewer = false, councilDraft = null, councilDraftFailed = false, layout = null, now = new Date() }) {
   const p = plannerYears(plannerParams(params, now), rawBuilder);
   const builder = councilDraft ? applyCouncilDraft(rawBuilder, councilDraft) : rawBuilder;
   const model = buildPlannerModel(builder, { layout, params: p });
@@ -631,7 +636,8 @@ export function renderBudgetBuilderPage({ builder: rawBuilder, params, canEditPl
     ? `Plan, FY${p.base} Projected and FY${p.base} Actual are editable; only the cells you change are saved. A blank Projected or Actual goes back to the computed or imported figure.`
     : 'Your Plan figures are saved as your own draft in Connect; the shared plan is not changed.';
   const body = form
-    ? `<form method="POST" action="/api/v1/budget-planner-save" class="bp-form">
+    ? `<script src="/budget-planner/live.js?v=${encodeURIComponent(liveVersion)}" defer></script>
+      <form method="POST" action="/api/v1/budget-planner-save" class="bp-form">
         <button type="submit" class="bp-default-submit" tabindex="-1" aria-hidden="true">Save changes</button>
         <input type="hidden" name="target_year" value="${p.target}"><input type="hidden" name="base_year" value="${p.base}"><input type="hidden" name="fiscal_year" value="${p.target}">
         <input type="hidden" name="back" value="${e(new URLSearchParams(plannerQuery(p, {}, ['pick', 'tab'])).toString())}">

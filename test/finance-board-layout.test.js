@@ -108,8 +108,8 @@ describe('Budget builder and Chart of Accounts board layout', () => {
   it('groups the Budget planner by board category with subtotals, and offers QuickBooks order', async () => {
     const html = await (await get(makeEnv().env, 'section=planning&page=builder')).text();
     expect(html).toContain('<tr class="bb-group"><td colspan="6">Revenue</td></tr>');
-    expect(html).toContain('<tr class="bp-header"><td colspan="6" style="padding-left:10px">Donor Income</td></tr>');
-    expect(html).toContain('<tr class="bp-header"><td colspan="6" style="padding-left:26px">General Offerings</td></tr>');
+    expect(html).toContain('<tr class="bp-header" data-bp="header" data-side="revenue"><td colspan="6" style="padding-left:10px">Donor Income</td></tr>');
+    expect(html).toContain('<tr class="bp-header" data-bp="header" data-side="revenue"><td colspan="6" style="padding-left:26px">General Offerings</td></tr>');
     expect(html).toContain('<td style="padding-left:26px">Total General Offerings</td>');
     expect(html).toContain('<td style="padding-left:10px">Total Donor Income</td>');
     expect(html).toContain('<td colspan="6" style="padding-left:10px">Worship &amp; Music</td>');

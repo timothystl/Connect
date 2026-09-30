@@ -141,7 +141,7 @@ describe('Finance staging route manifest', () => {
       '/api/v1/qb/connect', '/api/v1/qb/callback', '/api/v1/qb/disconnect', '/api/v1/qb/sync', '/api/v1/qb/sync-years', '/api/v1/qb/restore',
       '/accounting', '/accounting/app.js', '/accounting/app.css', '/api/v1/accounting-workspace',
       '/tuition-planner/app.js', '/api/v1/tuition', '/tuition-aid',
-      '/compensation-planner/app.js',
+      '/budget-planner/live.js', '/compensation-planner/app.js',
       '/api/v1/connect-planner/salary', '/api/v1/connect-planner/church-year', '/api/v1/connect-planner/board-categories', '/api/v1/connect-planner/purpose-tags',
       '/api/v1/connect-planner/salary-save',
     ]);

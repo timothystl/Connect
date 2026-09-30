@@ -75,10 +75,10 @@ describe('Budget planner (Finance)', () => {
     expect(html).toContain(`<h2>Budget FY${FY}</h2>`);
     expect(html).toContain(`<option value="${FY - 1}" selected>${FY - 1}</option>`);
     // Strip: base projected expenses, planned, change, revenue needed vs this year's revenue.
-    expect(html).toContain(`<small>FY${FY - 1} projected expenses</small><strong>$227,940</strong>`);
-    expect(html).toContain('<strong class="bp-gold">$188,452</strong>');
-    expect(html).toContain('<strong>−$39,488</strong><span>−17.3%</span>');
-    expect(html).toContain('<small>Revenue needed to balance</small><strong class="bp-green">$188,452</strong>');
+    expect(html).toContain(`<small>FY${FY - 1} projected expenses</small><strong data-bp-strip="baseExp">$227,940</strong>`);
+    expect(html).toContain('<strong class="bp-gold" data-bp-strip="planExp">$188,452</strong>');
+    expect(html).toContain('<strong data-bp-strip="change">−$39,488</strong><span data-bp-strip="changePct">−17.3%</span>');
+    expect(html).toContain('<small>Revenue needed to balance</small><strong class="bp-green" data-bp-strip="needed">$188,452</strong>');
     // Three builder tools stay on top.
     expect(html).toContain('Grow every line');
     expect(html).toContain('Generate all: apply to every grown line');
@@ -88,15 +88,17 @@ describe('Budget planner (Finance)', () => {
     expect(html).toContain('name="orig_plan_0" value="946004"');
     expect(html).toContain('name="proj_1" value="84240" class="bp-input is-corrected"');
     expect(html).toContain('name="act_2" value="70000"');
-    expect(html).toContain('<td class="bp-up">+11.9%</td>');
-    expect(html).toContain('<td class="bp-down">−6.3%</td>');
+    expect(html).toContain('<td class="bp-up" data-col="delta">+11.9%</td>');
+    expect(html).toContain('<td class="bp-down" data-col="delta">−6.3%</td>');
     expect(html).toContain('Net (Revenue − Expenses)');
     expect(html).toContain('formaction="/api/v1/connect-budget-plan-remove"');
     expect(html).toContain('<button type="submit">Save changes</button>');
     expect(html).toContain('Five-year outlook');
     expect(html).toContain('<svg viewBox="0 0 480 180"');
     expect(html).not.toContain('<iframe');
-    expect(html).not.toContain('<script');
+    // The one script is the live-totals file from this Worker; no inline script.
+    expect(html.match(/<script/g)).toHaveLength(1);
+    expect(html).toContain('<script src="/budget-planner/live.js?v=t" defer></script>');
   });
 
   it('reads another base year, hides columns and leaves chosen lines out of every total', async () => {
@@ -114,11 +116,11 @@ describe('Budget planner (Finance)', () => {
     const left = await (await get(makeEnv().env, '&view=qb&x=Expenses%3AOffice')).text();
     expect(left).not.toContain('<b>Office</b>');
     expect(left).toContain('1 line left out');
-    expect(left).toContain(`<td style="padding-left:10px">Total Expenses</td><td>$184,000</td>`);
+    expect(left).toContain(`<td style="padding-left:10px">Total Expenses</td><td data-col="bud">$184,000</td>`);
     const pick = await (await get(makeEnv().env, '&view=qb&pick=1&x=Expenses%3AOffice')).text();
     expect(pick).toContain('<form method="GET" action="/" id="bp-pick"');
     expect(pick).toContain('<input type="checkbox" form="bp-pick" name="x" value="Expenses:Office" checked');
-    expect(pick).toContain('<tr class="bp-excluded">');
+    expect(pick).toContain('<tr class="bp-excluded" data-bp="leaf" data-side="');
     expect(pick).toContain('Done choosing rows');
   });
 
