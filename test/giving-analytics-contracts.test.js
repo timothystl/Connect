@@ -31,6 +31,7 @@ function makeTestDb() {
         async all() { return { results: sqlite.prepare(sql).all() }; },
       };
     },
+    async batch(stmts) { const out = []; for (const st of stmts) out.push(await st.run()); return out; },
     _raw: sqlite,
   };
 }
@@ -283,6 +284,39 @@ describe('Giving analytics contracts (giving-analytics-*-v1, giving-followup-wri
     expect(designated).toContain(gathering); // retired, but given to this year
     expect((await post({ op: 'restore', fund_ids: [egg] })).status).toBe(200);
     expect(raw.prepare('SELECT active FROM funds WHERE id=?').get(egg).active).toBe(1);
+  });
+
+  it('lets a Connect admin edit fund names, categories, budgets and account codes, and add a fund', async () => {
+    const { db, building, general } = setup();
+    const raw = db._raw;
+    const admin = 'pastor@timothystl.org';
+    const post = (body, email = admin) => call(db, '/api/contracts/giving-fund-cleanup-write-v1', { method: 'POST', body, email });
+    const row = (id) => raw.prepare('SELECT name, category, budget_annual_cents, gl_code FROM funds WHERE id=?').get(id);
+    raw.prepare('UPDATE funds SET budget_annual_cents=777 WHERE id=?').run(general);
+    const list = await (await call(db, '/api/contracts/giving-fund-cleanup-v1', { email: admin })).json();
+    expect(list.funds.find((f) => f.id === general)).toMatchObject({ budget_annual_cents: 777, gl_code: '' });
+    const saved = await post({ op: 'settings', funds: [{ id: building, name: 'Building Fund 2026', category: 'restricted', budget_annual_cents: 1250000, gl_code: '25004' }] });
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({ ok: true, changed: 1 });
+    expect(row(building)).toMatchObject({ name: 'Building Fund 2026', budget_annual_cents: 1250000, gl_code: '25004' });
+    // A fund not in the submission keeps its budget; an unchanged row writes nothing.
+    expect(row(general).budget_annual_cents).toBe(777);
+    expect(await (await post({ op: 'settings', funds: [{ id: building, category: 'restricted', budget_annual_cents: 1250000 }] })).json()).toMatchObject({ changed: 0 });
+    // Bad input is refused whole: a duplicate name, a negative budget, an unknown fund.
+    expect((await post({ op: 'settings', funds: [{ id: building, name: row(general).name }] })).status).toBe(400);
+    expect((await post({ op: 'settings', funds: [{ id: building, budget_annual_cents: -5 }] })).status).toBe(400);
+    expect((await post({ op: 'settings', funds: [{ id: 99999, name: 'Ghost' }] })).status).toBe(404);
+    expect(row(building).budget_annual_cents).toBe(1250000);
+    const added = await post({ op: 'add', name: '  Mission   Trip ', category: 'earned', budget_annual_cents: 50000, gl_code: '47000' });
+    expect(added.status).toBe(200);
+    const { id } = await added.json();
+    expect(row(id)).toMatchObject({ name: 'Mission Trip', category: 'earned', budget_annual_cents: 50000, gl_code: '47000' });
+    expect(raw.prepare('SELECT active FROM funds WHERE id=?').get(id).active).toBe(1);
+    expect((await post({ op: 'add', name: 'mission trip' })).status).toBe(400);
+    // Only an admin may change fund settings.
+    expect((await post({ op: 'settings', funds: [{ id: building, budget_annual_cents: 1 }] }, 'sarah@timothystl.org')).status).toBe(403);
+    expect((await post({ op: 'add', name: 'Nope' }, 'sarah@timothystl.org')).status).toBe(403);
+    expect(row(building).budget_annual_cents).toBe(1250000);
   });
 
   it('leaves pass-through funds out of donor giving and revenue but reports them as their own category', async () => {
