@@ -25,5 +25,7 @@ export async function handleFacilitiesWrite(request, env, routeId, url) {
 }
 
 export function describeFacilitiesStatus(params) {
-  return describeFormStatus(params, 'Facilities');
+  const status = describeFormStatus(params, 'Facilities');
+  const note = params.get('note');
+  return status?.ok && note ? { ok: true, message: note.slice(0, 300) } : status;
 }

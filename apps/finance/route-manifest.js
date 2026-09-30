@@ -234,6 +234,8 @@ const ROUTES = [
   // Finance's own R2 bucket to a viewer who may see Facilities.
   { id: 'facilities-file-upload-v1', paths: ['/api/v1/facilities/file-upload'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.facilities-file-upload.v1' },
   { id: 'facilities-file-remove-v1', paths: ['/api/v1/facilities/file-remove'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.facilities-file-remove.v1' },
+  // One-time bundle import (facility-import.js): a manifest.json plus its PDFs and photos.
+  { id: 'facilities-import-v1', paths: ['/api/v1/facilities/import'], methods: WRITE_METHODS, dataSource: 'finance-db-write', writer: true, contract: 'finance.facilities-import.v1' },
   { id: 'facilities-file-v1', paths: ['/api/v1/facilities/file'], dataSource: 'finance-files-read', contract: 'finance.facilities-file.v1' },
   // HR & Staff (v3 design): admin-only personnel records in Finance's own tables (migration 0011,
   // hr-service.js). Form posts that redirect back.
