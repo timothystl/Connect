@@ -1179,7 +1179,8 @@ async function handleBudgetPlannerSave(request, env, url) {
   if (!isAdmin && !isCouncilEditor) return back('error', 'Not saved: changing the budget plan needs admin access, or budget edit access for council.');
   const parsed = parsePlannerForm(form, { canEditActuals: isAdmin });
   if (parsed.errors.length) return back('error', `Not saved: ${parsed.errors.slice(0, 3).join(' ')}`);
-  if (!parsed.plan.length && !parsed.projections.length && !parsed.actuals.length) return back('ok', 'No changes to save.');
+  const renamed = Object.values(parsed.renames).reduce((n, v) => n + (typeof v === 'string' ? 1 : Object.keys(v).length), 0);
+  if (!parsed.plan.length && !parsed.projections.length && !parsed.actuals.length && !renamed) return back('ok', 'No changes to save.');
   const saved = [];
   const failed = [];
   const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -1197,6 +1198,11 @@ async function handleBudgetPlannerSave(request, env, url) {
   if (parsed.actuals.length) {
     const r = await postConnectFinanceChurchActualOverride(env, accessJwt, { year: parsed.baseYear, rows: parsed.actuals });
     const what = count(parsed.actuals.length, `FY${parsed.baseYear} actual correction`, `FY${parsed.baseYear} actual corrections`);
+    (r.ok ? saved : failed).push(r.ok ? what : `${what}: ${why(r)}`);
+  }
+  if (renamed) {
+    const r = await postConnectBoardCategoriesWrite(env, accessJwt, parsed.renames);
+    const what = count(renamed, 'name', 'names');
     (r.ok ? saved : failed).push(r.ok ? what : `${what}: ${why(r)}`);
   }
   if (!failed.length) return back('ok', `Saved in Connect: ${saved.join(', ')}.`);

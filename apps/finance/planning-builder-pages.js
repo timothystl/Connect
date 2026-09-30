@@ -137,9 +137,9 @@ function lineFigures(l) {
 // under the Donor Income wrapper.
 function boardTree(lines, layout) {
   const sections = buildBoardSections(lines, layout, (l) => ({ path: l.category, name: l.name, isRevenue: l.classification === 'Income' }));
-  const group = (g, depth) => ({ kind: 'group', label: g.label, depth, children: g.items.map((line) => ({ kind: 'leaf', line, depth: depth + 1 })) });
+  const group = (g, depth) => ({ kind: 'group', key: g.key, isRevenue: g.isRevenue, label: g.label, depth, children: g.items.map((line) => ({ kind: 'leaf', line, depth: depth + 1 })) });
   const side = (list) => list.map((s) => (s.kind === 'wrapper'
-    ? { kind: 'group', label: s.label, depth: 0, children: s.groups.map((g) => group(g, 1)) } : group(s, 0)));
+    ? { kind: 'group', wrapper: true, label: s.label, depth: 0, children: s.groups.map((g) => group(g, 1)) } : group(s, 0)));
   return { revenue: side(sections.revenue), expense: side(sections.expense) };
 }
 
@@ -213,7 +213,7 @@ export function plannerRows(model, { includeExcluded = false } = {}) {
     }
     const keptLeaves = leavesOf(node).filter(model.kept);
     if (!keptLeaves.length && !includeExcluded) return;
-    push({ kind: 'header', label: node.label, depth: node.depth });
+    push({ kind: 'header', label: node.label, depth: node.depth, key: node.key, isRevenue: node.isRevenue, wrapper: node.wrapper });
     node.children.forEach(walk);
     push({ kind: 'total', label: `Total ${node.label}`, depth: node.depth, fig: sumLines(keptLeaves) });
   };
@@ -315,6 +315,8 @@ const sameNumber = (a, b) => a === b || (a !== '' && b !== '' && Number(a) === N
 // correction; a blank Plan cell is left alone (Remove takes a line out of the plan). Only an admin's
 // Projected and Actual cells are read at all.
 export function parsePlannerForm(form, { canEditActuals = false } = {}) {
+  // Display names and headings renamed in place (admin only, like the corrections below).
+  const names = { accountLabels: {}, revenueLabels: {}, expenseLabels: {} };
   const errors = [];
   const year = (v) => { const n = Number(v); return Number.isInteger(n) && n >= 2000 && n <= 2100 ? n : null; };
   const targetYear = year(form.get('target_year'));
@@ -335,6 +337,10 @@ export function parsePlannerForm(form, { canEditActuals = false } = {}) {
         else plan.push({ category, classification, fiscal_year: targetYear, planned_amount: String(Math.round(Number(v))), notes: String(form.get(`notes_${i}`) || '') });
       }
     }
+    if (canEditActuals && form.has(`lname_${i}`)) {
+      const v = String(form.get(`lname_${i}`) || '').trim();
+      if (v !== String(form.get(`orig_lname_${i}`) || '').trim()) names.accountLabels[category] = v;
+    }
     if (canEditActuals && form.has(`proj_${i}`)) {
       const v = clean(form.get(`proj_${i}`));
       if (!sameNumber(v, clean(form.get(`orig_proj_${i}`)))) {
@@ -350,7 +356,21 @@ export function parsePlannerForm(form, { canEditActuals = false } = {}) {
       }
     }
   }
-  return { targetYear, baseYear, plan, projections, actuals, errors };
+  if (canEditActuals) {
+    for (const [field, value] of form.entries()) {
+      const m = /^hl_(wrapper|revenue_[a-z_]+|expense_[a-z_]+)$/.exec(field);
+      if (!m) continue;
+      const v = String(value || '').trim().slice(0, 80);
+      if (v === String(form.get(`orig_${field}`) || '').trim()) continue;
+      if (m[1] === 'wrapper') names.donorWrapperLabel = v;
+      else if (m[1].startsWith('revenue_')) names.revenueLabels[m[1].slice(8)] = v;
+      else names.expenseLabels[m[1].slice(8)] = v;
+    }
+  }
+  const renames = {};
+  for (const key of ['accountLabels', 'revenueLabels', 'expenseLabels']) if (Object.keys(names[key]).length) renames[key] = names[key];
+  if (names.donorWrapperLabel !== undefined) renames.donorWrapperLabel = names.donorWrapperLabel;
+  return { targetYear, baseYear, plan, projections, actuals, renames, errors };
 }
 
 // The view to return to after a save: only the planner's own view keys survive.
@@ -509,14 +529,6 @@ function toolbar(model, p, { pickFormId }) {
     </div>`;
 }
 
-function basisNote(l) {
-  const plan = l.plan;
-  if (!plan) return 'Not planned';
-  if (plan.draft) return 'Your draft';
-  if (plan.basis === 'grown') return `Grown${plan.growthPct != null ? ` ${plan.growthPct >= 0 ? '+' : ''}${(plan.growthPct * 100).toFixed(1).replace(/\.0$/, '')}%` : ''}`;
-  return 'Manual';
-}
-
 // One account line. Editable cells carry their original value so only changes are saved.
 function leafRow(r, ctx) {
   const l = r.line;
@@ -526,10 +538,18 @@ function leafRow(r, ctx) {
   const i = editable ? ctx.counter++ : null;
   const ids = editable ? `<input type="hidden" name="p_${i}" value="${e(l.category)}"><input type="hidden" name="c_${i}" value="${l.classification === 'Income' ? 'Income' : 'Expenses'}"><input type="hidden" name="n_${i}" value="${e(l.name || shown)}"><input type="hidden" name="notes_${i}" value="${e(l.plan?.notes || '')}">` : '';
   const pickBox = p.pick ? `<input type="checkbox" form="${ctx.pickFormId}" name="x" value="${e(l.category)}"${r.excluded ? ' checked' : ''} aria-label="Leave out ${e(shown)}" title="Tick to leave this line out of the totals, the export and the printed sheet">` : '';
-  const remove = ctx.canManage && l.plan && !l.plan.draft && ctx.form
-    ? `<button type="submit" class="link-button bp-remove" formaction="/api/v1/connect-budget-plan-remove" formnovalidate name="category" value="${e(l.category)}" title="Remove this line from the FY${p.target} plan">Remove</button>` : '';
-  const sub = `${layout && isHiddenAccount(layout, l.category) ? 'Hidden in Chart of Accounts · ' : (isQuietHiddenLine(l) ? 'Unused this year · ' : '')}${shown !== l.name ? `${e(l.name)} · ` : ''}${e(basisNote(l))}${l.plan?.notes ? ` · ${e(l.plan.notes)}` : ''}`;
-  const label = `<td class="bp-name" style="padding-left:${10 + r.depth * 16}px">${pickBox}${ids}<b>${e(shown)}</b><small>${sub}${remove}</small></td>`;
+  const sub = [
+    layout && isHiddenAccount(layout, l.category) ? 'Hidden in Chart of Accounts' : (isQuietHiddenLine(l) ? 'Unused this year' : ''),
+    shown !== l.name ? e(l.name) : '',
+    l.plan?.draft ? 'Your draft' : '',
+    l.plan?.notes ? e(l.plan.notes) : '',
+  ].filter(Boolean).join(' · ');
+  // An admin renames a line in place; it saves with the rest of the table, to the same display names
+  // Chart of Accounts keeps. A blank name goes back to the QuickBooks name.
+  const nameCell = editable && ctx.canManage && layout
+    ? `<input type="text" name="lname_${i}" value="${e(shown)}" class="bp-name-input" aria-label="Name of ${e(shown)}" maxlength="120"><input type="hidden" name="orig_lname_${i}" value="${e(shown)}">`
+    : `<b>${e(shown)}</b>`;
+  const label = `<td class="bp-name" style="padding-left:${10 + r.depth * 16}px">${pickBox}${ids}${nameCell}${sub ? `<small>${sub}</small>` : ''}</td>`;
   const f = r.fig;
   const input = (name, value, extra, aria) => `<input type="text" inputmode="${extra.inputmode}" name="${name}_${i}" value="${e(value)}" class="bp-input${extra.cls ? ` ${extra.cls}` : ''}" aria-label="${e(aria)}"${extra.title ? ` title="${e(extra.title)}"` : ''}><input type="hidden" name="orig_${name}_${i}" value="${e(value)}">`;
   const cells = p.cols.map((key) => {
@@ -549,7 +569,13 @@ function tableRows(model, ctx) {
   return rows.map((r) => {
     if (r.kind === 'leaf') return leafRow(r, ctx);
     if (r.kind === 'side') return `<tr class="bb-group"><td colspan="${span}">${e(r.label)}</td></tr>`;
-    if (r.kind === 'header') return `<tr class="bp-header" data-bp="header" data-side="${r.side}"><td colspan="${span}" style="padding-left:${10 + r.depth * 16}px">${e(r.label)}</td></tr>`;
+    if (r.kind === 'header') {
+      const field = r.wrapper ? 'hl_wrapper' : r.key ? `hl_${r.isRevenue ? 'revenue' : 'expense'}_${r.key}` : '';
+      const text = ctx.form && ctx.canManage && ctx.layout && field
+        ? `<input type="text" name="${field}" value="${e(r.label)}" class="bp-name-input bp-heading-input" aria-label="Heading ${e(r.label)}" maxlength="80"><input type="hidden" name="orig_${field}" value="${e(r.label)}">`
+        : e(r.label);
+      return `<tr class="bp-header" data-bp="header" data-side="${r.side}"><td colspan="${span}" style="padding-left:${10 + r.depth * 16}px">${text}</td></tr>`;
+    }
     const cls = r.kind === 'net' ? 'bb-result' : r.kind === 'sidetotal' ? 'bb-total' : 'bb-subtotal';
     const pad = r.kind === 'total' ? ` style="padding-left:${10 + r.depth * 16}px"` : '';
     return `<tr class="${cls}" data-bp="${r.kind}" data-side="${r.side}"><td${pad}>${e(r.label)}</td>${ctx.p.cols.map((k) => figureCell(k, r.fig, r.kind)).join('')}</tr>`;
@@ -767,6 +793,10 @@ export const BUDGET_BUILDER_STYLES = `
     .bp-pick, .bp-print { display:inline-flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0; }
     .bp-pick button, .bp-print button { margin:0; }
     .bp-print label { display:inline-flex; gap:4px; align-items:center; font-weight:600; color:#4B5563; }
+    .bp-name-input { width:100%; max-width:420px; font:inherit; font-weight:700; color:inherit; background:transparent; border:1px solid transparent; border-radius:6px; padding:2px 6px; margin-left:-7px; }
+    .bp-name-input:hover { border-color:#D5DBE5; background:#fff; }
+    .bp-name-input:focus { border-color:#B98B2E; background:#fff; outline:none; }
+    .bp-heading-input { font-size:13px; }
     .bp-table .bp-name small { display:block; color:#6B7280; font-size:11px; }
     .bp-table .bp-name input[type=checkbox] { margin-right:8px; vertical-align:middle; }
     .bp-excluded td { opacity:.45; }

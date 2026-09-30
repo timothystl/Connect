@@ -91,7 +91,9 @@ describe('Budget planner (Finance)', () => {
     expect(html).toContain('<td class="bp-up" data-col="delta">+11.9%</td>');
     expect(html).toContain('<td class="bp-down" data-col="delta">−6.3%</td>');
     expect(html).toContain('Net (Revenue − Expenses)');
-    expect(html).toContain('formaction="/api/v1/connect-budget-plan-remove"');
+    // No per-line "Manual" label or Remove link: lines are edited, not removed, here.
+    expect(html).not.toContain('formaction="/api/v1/connect-budget-plan-remove"');
+    expect(html).not.toContain('>Manual');
     expect(html).toContain('<button type="submit">Save changes</button>');
     expect(html).toContain('Five-year outlook');
     expect(html).toContain('<svg viewBox="0 0 480 180"');
