@@ -89,6 +89,8 @@ describe('Budget planner live totals', () => {
     const html = await page.text();
     expect(html).toContain('<script src="/budget-planner/live.js?v=t" defer></script>');
     expect(html).toContain('data-bp="leaf"');
+    // The actual as a share of the budget, per line (Offerings: $660,000 of $960,000).
+    expect(html).toContain('data-col="used">69%</td>');
     const other = await worker.fetch(new Request('https://finance.test/?section=planning&page=scenarios', { headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }), env);
     expect(other.headers.get('Content-Security-Policy')).not.toContain('script-src');
   });

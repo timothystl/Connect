@@ -78,6 +78,7 @@ const DOM_GLUE = `
   function cellText(col, f) {
     if (col === 'bud') return f.hasBud ? money(f.bud) : '\\u2014';
     if (col === 'act') return money(f.act);
+    if (col === 'used') return f.hasBud && f.bud ? Math.round((f.act / f.bud) * 100) + '%' : '\u2014';
     if (col === 'proj') return money(f.proj);
     if (col === 'plan') return f.hasPlan ? money(f.plan) : '\\u2014';
     var pct = f.hasBud && f.hasPlan && f.bud ? ((f.plan - f.bud) / Math.abs(f.bud)) * 100 : null;

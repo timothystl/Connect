@@ -107,9 +107,9 @@ const get = (env, q) => worker.fetch(new Request(`https://finance.test/?${q}`, {
 describe('Budget builder and Chart of Accounts board layout', () => {
   it('groups the Budget planner by board category with subtotals, and offers QuickBooks order', async () => {
     const html = await (await get(makeEnv().env, 'section=planning&page=builder')).text();
-    expect(html).toContain('<tr class="bb-group"><td colspan="6">Revenue</td></tr>');
-    expect(html).toContain('<tr class="bp-header" data-bp="header" data-side="revenue"><td colspan="6" style="padding-left:10px"><input type="text" name="hl_wrapper" value="Donor Income"');
-    expect(html).toContain('<tr class="bp-header" data-bp="header" data-side="revenue"><td colspan="6" style="padding-left:26px"><input type="text" name="hl_revenue_donor" value="General Offerings"');
+    expect(html).toContain('<tr class="bb-group"><td colspan="7">Revenue</td></tr>');
+    expect(html).toContain('<tr class="bp-header" data-bp="header" data-side="revenue"><td colspan="7" style="padding-left:10px"><input type="text" name="hl_wrapper" value="Donor Income"');
+    expect(html).toContain('<tr class="bp-header" data-bp="header" data-side="revenue"><td colspan="7" style="padding-left:26px"><input type="text" name="hl_revenue_donor" value="General Offerings"');
     expect(html).toContain('<td style="padding-left:26px">Total General Offerings</td>');
     expect(html).toContain('<td style="padding-left:10px">Total Donor Income</td>');
     expect(html).toContain('name="hl_expense_worship" value="Worship &amp; Music"');
@@ -120,7 +120,7 @@ describe('Budget builder and Chart of Accounts board layout', () => {
     expect(html).toContain('<span class="is-on">Board view</span>');
     const qb = await (await get(makeEnv().env, 'section=planning&page=builder&view=qb')).text();
     expect(qb).not.toContain('Donor Income');
-    expect(qb).toContain('<td colspan="6" style="padding-left:26px">40 Giving</td>');
+    expect(qb).toContain('<td colspan="7" style="padding-left:26px">40 Giving</td>');
     expect(qb).toContain('<td style="padding-left:26px">Total 40 Giving</td>');
     expect(qb).toContain('<span class="is-on">QuickBooks order</span>');
     const missing = await (await get(makeEnv({ layoutStatus: 500 }).env, 'section=planning&page=builder')).text();

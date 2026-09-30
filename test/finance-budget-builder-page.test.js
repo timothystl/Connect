@@ -83,7 +83,7 @@ describe('Budget planner (Finance)', () => {
     expect(html).toContain('Grow every line');
     expect(html).toContain('Generate all: apply to every grown line');
     // Columns, editable cells with their originals, and Δ% tones.
-    expect(html).toContain(`<th>FY${FY - 1} Budget</th><th>FY${FY - 1} Actual</th><th>FY${FY - 1} Projected</th><th>FY${FY} Plan</th><th>Δ%</th>`);
+    expect(html).toContain(`<th>FY${FY - 1} Budget</th><th>FY${FY - 1} Actual</th><th>FY${FY - 1} % of budget</th><th>FY${FY - 1} Projected</th><th>FY${FY} Plan</th><th>Δ%</th>`);
     expect(html).toContain('name="plan_0" value="946004"');
     expect(html).toContain('name="orig_plan_0" value="946004"');
     expect(html).toContain('name="proj_1" value="84240" class="bp-input is-corrected"');

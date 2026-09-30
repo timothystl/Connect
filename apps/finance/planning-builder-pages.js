@@ -27,8 +27,8 @@ const pctText = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}%`;
 const TABS = [['grow', 'Grow every line'], ['project', 'Project one category'], ['commit', 'Commit to Church report']];
 
 // Screen columns, in Connect's order. 'change' is print-only (plan less base budget).
-export const PLANNER_COLUMNS = Object.freeze(['bud', 'act', 'proj', 'plan', 'delta']);
-const COLUMN_LABELS = { bud: (p) => `FY${p.base} Budget`, act: (p) => `FY${p.base} Actual`, proj: (p) => `FY${p.base} Projected`, plan: (p) => `FY${p.target} Plan`, change: () => 'Change', delta: () => 'Δ%' };
+export const PLANNER_COLUMNS = Object.freeze(['bud', 'act', 'used', 'proj', 'plan', 'delta']);
+const COLUMN_LABELS = { bud: (p) => `FY${p.base} Budget`, act: (p) => `FY${p.base} Actual`, used: (p) => `FY${p.base} % of budget`, proj: (p) => `FY${p.base} Projected`, plan: (p) => `FY${p.target} Plan`, change: () => 'Change', delta: () => 'Δ%' };
 export const OUTLOOK_DEFAULTS = Object.freeze({ expense: 3, revenue: 0 });
 
 // ── View parameters ──────────────────────────────────────────────────────────────────────────
@@ -249,10 +249,16 @@ function deltaTone(pct) {
   return pct == null ? 'tone-muted' : pct > 4 ? 'bp-up' : pct < 0 ? 'bp-down' : 'bp-flat';
 }
 
+// How much of the base-year budget the actual has used: what the year-to-date view is read against.
+function usedText(f) {
+  return f.hasBud && f.bud ? `${Math.round((f.act / f.bud) * 100)}%` : '—';
+}
+
 function cellText(key, f, net = false) {
   const m = net ? (c) => (c < 0 ? `−${USD.format(Math.abs(Math.round(c / 100)))}` : USD.format(Math.round(c / 100))) : money;
   if (key === 'bud') return f.hasBud ? m(f.bud) : '—';
   if (key === 'act') return m(f.act);
+  if (key === 'used') return usedText(f);
   if (key === 'proj') return m(f.proj);
   if (key === 'plan') return f.hasPlan ? m(f.plan) : '—';
   if (key === 'change') return f.hasBud && f.hasPlan ? signed(f.plan - f.bud) : '—';
@@ -261,11 +267,11 @@ function cellText(key, f, net = false) {
 }
 
 function figureCell(key, f, kind) {
-  if (kind === 'net' && key === 'delta') return '<td></td>';
+  if (kind === 'net' && (key === 'delta' || key === 'used')) return '<td></td>';
   if (kind === 'net' && key === 'change') return '<td></td>';
   // data-col marks the figure columns for budget-planner-live.js, which redraws totals as a cell is
   // typed in; a line's own cells also carry the stored cents so the script can re-add them.
-  const attrs = ` data-col="${key}"${kind === 'leaf' && key !== 'delta' ? ` data-c="${f[key] ?? 0}" data-has="${key === 'bud' ? (f.hasBud ? 1 : 0) : key === 'plan' ? (f.hasPlan ? 1 : 0) : 1}"` : ''}`;
+  const attrs = ` data-col="${key}"${kind === 'leaf' && key !== 'delta' && key !== 'used' ? ` data-c="${f[key] ?? 0}" data-has="${key === 'bud' ? (f.hasBud ? 1 : 0) : key === 'plan' ? (f.hasPlan ? 1 : 0) : 1}"` : ''}`;
   if (kind === 'net') {
     const v = { bud: f.bud, act: f.act, proj: f.proj, plan: f.plan }[key];
     if ((key === 'bud' && !f.hasBud) || (key === 'plan' && !f.hasPlan)) return `<td class="tone-muted"${attrs}>—</td>`;
@@ -290,6 +296,7 @@ export function plannerCsv(model, p) {
   const value = (key, f, kind) => {
     if (key === 'bud') return f.hasBud ? d(f.bud) : '';
     if (key === 'act') return d(f.act);
+    if (key === 'used') return f.hasBud && f.bud ? `${((f.act / f.bud) * 100).toFixed(1)}%` : '';
     if (key === 'proj') return d(f.proj);
     if (key === 'plan') return f.hasPlan ? d(f.plan) : '';
     if (kind === 'net') return '';
@@ -476,7 +483,7 @@ function header(builder, p, now) {
   for (let y = p.target - 6; y < p.target; y += 1) bases.push(y);
   const opt = (y, sel) => `<option value="${y}"${y === sel ? ' selected' : ''}>${y}</option>`;
   return `<div class="bp-head">
-      <div><h2>Budget FY${p.target}</h2><p class="muted-line">Base year ${p.base}${builder.prorated ? ` (annualized from ${Math.round(builder.throughWeek)} weeks of actuals)` : ''} · independent of QuickBooks until you commit</p></div>
+      <div><h2>Budget FY${p.target}</h2><p class="muted-line">Base year ${p.base}${builder.prorated ? ` (annualized from ${Math.round(builder.throughWeek)} weeks of actuals, ${Math.round((builder.throughWeek / 52) * 100)}% of the year)` : ''} · independent of QuickBooks until you commit</p></div>
       <form method="GET" action="/" class="bp-years">${hiddenView(p, ['target', 'base', 'x', 'pick', 'tab'])}
         <label class="field"><span>Base year</span><select name="base">${bases.map((y) => opt(y, p.base)).join('')}</select></label>
         <label class="field"><span>Projecting for</span><select name="target">${targets.map((y) => opt(y, p.target)).join('')}</select></label>
@@ -706,7 +713,7 @@ export function renderPlannerPrint({ builder: rawBuilder, params, councilDraft =
   const builder = councilDraft ? applyCouncilDraft(rawBuilder, councilDraft) : rawBuilder;
   const model = buildPlannerModel(builder, { layout, params: p });
   const showPlan = p.printMode !== 'thisyear';
-  const cols = showPlan ? ['bud', 'act', 'proj', 'plan', 'change', 'delta'] : ['bud', 'act', 'proj'];
+  const cols = showPlan ? ['bud', 'act', 'used', 'proj', 'plan', 'change', 'delta'] : ['bud', 'act', 'used', 'proj'];
   const today = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
   const r = model.revenue;
   const x = model.expense;
