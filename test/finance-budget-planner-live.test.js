@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import worker from '../apps/finance/shell.js';
-import { buildPlannerModel, plannerParams, plannerRows } from '../apps/finance/planning-builder-pages.js';
+import { buildPlannerModel, outlookYears, plannerParams, plannerRows } from '../apps/finance/planning-builder-pages.js';
 import { BUDGET_PLANNER_LIVE_JS, computeBudgetTotals } from '../apps/finance/budget-planner-live.js';
 
 const FY = new Date().getUTCFullYear() + 1;
@@ -112,5 +112,28 @@ describe('Budget planner lists only lines in use', () => {
     expect(names('')).not.toContain('48030 Grants');
     expect(names('')).toContain('Offerings');
     expect(names('&hidden=1')).toContain('48030 Grants');
+  });
+});
+
+describe('Five-year outlook grows only the lines you pick', () => {
+  it('compounds the growing part and leaves the held-flat part where the plan puts it', () => {
+    const all = outlookYears({ firstYear: 2027, revenueCents: 1000000, expenseCents: 1000000, revenuePct: 0, expensePct: 10 });
+    expect(all.map((y) => y.expenseCents)).toEqual([1000000, 1100000, 1210000, 1331000, 1464100]);
+    const some = outlookYears({ firstYear: 2027, revenueCents: 1000000, expenseCents: 1000000, revenuePct: 0, expensePct: 10, expenseFixedCents: 400000 });
+    expect(some.map((y) => y.expenseCents)).toEqual([1000000, 1060000, 1126000, 1198600, 1278460]);
+    expect(some[0].gapCents).toBe(0);
+  });
+
+  it('offers a tick per line, keeps the choice in the address, and says what is held flat', async () => {
+    const { env } = makeEnv();
+    const choosing = await (await get(env, '&fpick=1')).text();
+    expect(choosing).toMatch(/type="checkbox" form="bp-flat" name="f" value="Expenses:Utilities"/);
+    expect(choosing).toContain('Done choosing growing lines');
+    const chosen = await (await get(env, '&f=Expenses:Utilities&f=Expenses:Missions')).text();
+    expect(chosen).toContain('2 lines held flat in the outlook');
+    expect(chosen).toContain('with the 2 lines you chose held flat');
+    const plain = await (await get(env, '')).text();
+    expect(plain).toContain('Choose lines that grow');
+    expect(plain).not.toContain('held flat');
   });
 });

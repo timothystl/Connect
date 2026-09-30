@@ -19,6 +19,7 @@ import { escapeHtml as e } from './render-helpers.js';
 import { accountDisplayName, buildBoardSections, isHiddenAccount } from './board-layout.js';
 import { csvNum, csvText } from './payroll-report-render.js';
 
+const FLAT_FORM_ID = 'bp-flat';
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 const money = (cents) => (cents == null ? '—' : `${cents < 0 ? '−' : ''}${USD.format(Math.abs(Math.round(cents / 100)))}`);
 const signed = (cents) => `${cents < 0 ? '−' : '+'}${USD.format(Math.abs(Math.round(cents / 100)))}`;
@@ -50,9 +51,10 @@ export function plannerParams(params, now = new Date()) {
   const rawCols = get('cols');
   const cols = rawCols === 'none' ? [] : rawCols ? PLANNER_COLUMNS.filter((c) => rawCols.split(',').includes(c)) : [...PLANNER_COLUMNS];
   const exclude = [...new Set((params && params.getAll ? params.getAll('x') : []).map((x) => String(x).slice(0, 200)).filter(Boolean))].slice(0, 400);
+  const flat = [...new Set((params && params.getAll ? params.getAll('f') : []).map((x) => String(x).slice(0, 200)).filter(Boolean))].slice(0, 400);
   const tab = TABS.some(([k]) => k === get('tab')) ? get('tab') : '';
   return {
-    target, base, view: get('view') === 'qb' ? 'qb' : 'board', cols, exclude, pick: get('pick') === '1', tab,
+    target, base, view: get('view') === 'qb' ? 'qb' : 'board', cols, exclude, pick: get('pick') === '1', flat, flatPick: get('fpick') === '1', tab,
     printMode: get('print_mode') === 'thisyear' ? 'thisyear' : 'plan', draft: get('draft') === '1', showHidden: get('hidden') === '1',
     outExp: rate(get('out_exp'), OUTLOOK_DEFAULTS.expense), outRev: rate(get('out_rev'), OUTLOOK_DEFAULTS.revenue),
   };
@@ -74,7 +76,9 @@ export function plannerQuery(p, overrides = {}, omit = []) {
   if (v.view === 'qb') pairs.push(['view', 'qb']);
   if (v.cols.length !== PLANNER_COLUMNS.length) pairs.push(['cols', v.cols.length ? v.cols.join(',') : 'none']);
   for (const x of v.exclude) pairs.push(['x', x]);
+  for (const f of v.flat) pairs.push(['f', f]);
   if (v.pick) pairs.push(['pick', '1']);
+  if (v.flatPick) pairs.push(['fpick', '1']);
   if (v.showHidden) pairs.push(['hidden', '1']);
   if (v.tab) pairs.push(['tab', v.tab]);
   if (v.outExp !== OUTLOOK_DEFAULTS.expense) pairs.push(['out_exp', String(v.outExp)]);
@@ -189,12 +193,16 @@ export function buildPlannerModel(builder, { layout = null, params }) {
   const shown = quiet.length && !params.showHidden ? builder.lines.filter((l) => !isQuietHiddenLine(l)) : builder.lines;
   const tree = boardView ? boardTree(shown, layout) : qbTree(shown);
   const keptLines = shown.filter(kept);
+  const flat = new Set(params.flat || []);
+  const flatPlan = (list) => list.filter((l) => flat.has(l.category)).reduce((t, l) => t + (l.plan?.plannedAmountCents || 0), 0);
   return {
     builder, layout, boardView, tree, kept,
     hiddenCount: quiet.length,
     excludedCount: shown.length - keptLines.length,
-    revenue: sumLines(keptLines.filter((l) => l.classification === 'Income')),
-    expense: sumLines(keptLines.filter((l) => l.classification !== 'Income')),
+    flat,
+    flatCount: keptLines.filter((l) => flat.has(l.category)).length,
+    revenue: { ...sumLines(keptLines.filter((l) => l.classification === 'Income')), flatPlan: flatPlan(keptLines.filter((l) => l.classification === 'Income')) },
+    expense: { ...sumLines(keptLines.filter((l) => l.classification !== 'Income')), flatPlan: flatPlan(keptLines.filter((l) => l.classification !== 'Income')) },
   };
 }
 
@@ -384,7 +392,7 @@ export function parsePlannerForm(form, { canEditActuals = false } = {}) {
 export function plannerBackQuery(raw) {
   const src = new URLSearchParams(String(raw || '').slice(0, 4000));
   const out = new URLSearchParams([['section', 'planning'], ['page', 'builder']]);
-  for (const [k, v] of src) if (['target', 'base', 'view', 'cols', 'x', 'out_exp', 'out_rev'].includes(k)) out.append(k, v.slice(0, 200));
+  for (const [k, v] of src) if (['target', 'base', 'view', 'cols', 'x', 'f', 'out_exp', 'out_rev'].includes(k)) out.append(k, v.slice(0, 200));
   return out;
 }
 
@@ -516,11 +524,16 @@ function toolbar(model, p, { pickFormId }) {
   };
   const pick = p.pick
     ? `<form method="GET" action="/" id="${pickFormId}" class="bp-pick">${hiddenView(p, ['x', 'pick'])}<button type="submit" class="button-outline">Done choosing rows</button></form>`
-    : `<a class="button-outline bp-button" href="${href(p, { pick: true })}">Choose rows</a>`;
+    : `<a class="button-outline bp-button" href="${href(p, { pick: true, flatPick: false })}">Choose rows</a>`;
+  const flatPick = p.flatPick
+    ? `<form method="GET" action="/" id="${FLAT_FORM_ID}" class="bp-pick">${hiddenView(p, ['f', 'fpick'])}<button type="submit" class="button-outline">Done choosing growing lines</button></form>`
+    : `<a class="button-outline bp-button" href="${href(p, { flatPick: true, pick: false })}" title="Pick which lines grow in the five-year outlook">Choose lines that grow</a>`;
   const csv = `/api/v1/budget-planner-csv?${new URLSearchParams(plannerQuery(p, {}, ['pick', 'tab'])).toString().replace(/&/g, '&amp;')}`;
   return `<div class="bp-toolbar">
       <span class="bp-label">Columns</span><div class="chip-row bp-chips">${PLANNER_COLUMNS.map(chip).join('')}</div>
       ${pick}
+      ${flatPick}
+      ${p.flat.length && !p.flatPick ? `<span class="muted-line">${p.flat.length} line${p.flat.length === 1 ? '' : 's'} held flat in the outlook</span><a href="${href(p, { flat: [] })}">Let every line grow</a>` : ''}
       ${model.excludedCount ? `<span class="muted-line">${model.excludedCount} line${model.excludedCount === 1 ? '' : 's'} left out</span><a href="${href(p, { exclude: [], pick: false })}">Include all lines</a>` : ''}
       ${model.hiddenCount ? (p.showHidden
     ? `<a href="${href(p, { showHidden: false })}">Hide the ${model.hiddenCount} unused line${model.hiddenCount === 1 ? '' : 's'} again</a>`
@@ -545,6 +558,7 @@ function leafRow(r, ctx) {
   const i = editable ? ctx.counter++ : null;
   const ids = editable ? `<input type="hidden" name="p_${i}" value="${e(l.category)}"><input type="hidden" name="c_${i}" value="${l.classification === 'Income' ? 'Income' : 'Expenses'}"><input type="hidden" name="n_${i}" value="${e(l.name || shown)}"><input type="hidden" name="notes_${i}" value="${e(l.plan?.notes || '')}">` : '';
   const pickBox = p.pick ? `<input type="checkbox" form="${ctx.pickFormId}" name="x" value="${e(l.category)}"${r.excluded ? ' checked' : ''} aria-label="Leave out ${e(shown)}" title="Tick to leave this line out of the totals, the export and the printed sheet">` : '';
+  const flatBox = p.flatPick ? `<input type="checkbox" form="${FLAT_FORM_ID}" name="f" value="${e(l.category)}"${ctx.model.flat.has(l.category) ? ' checked' : ''} aria-label="Hold ${e(shown)} flat in the outlook" title="Tick to hold this line flat: it does not grow in the five-year outlook">` : '';
   const sub = [
     layout && isHiddenAccount(layout, l.category) ? 'Hidden in Chart of Accounts' : (isQuietHiddenLine(l) ? 'Unused this year' : ''),
     shown !== l.name ? e(l.name) : '',
@@ -556,7 +570,7 @@ function leafRow(r, ctx) {
   const nameCell = editable && ctx.canManage && layout
     ? `<input type="text" name="lname_${i}" value="${e(shown)}" class="bp-name-input" aria-label="Name of ${e(shown)}" maxlength="120"><input type="hidden" name="orig_lname_${i}" value="${e(shown)}">`
     : `<b>${e(shown)}</b>`;
-  const label = `<td class="bp-name" style="padding-left:${10 + r.depth * 16}px">${pickBox}${ids}${nameCell}${sub ? `<small>${sub}</small>` : ''}</td>`;
+  const label = `<td class="bp-name" style="padding-left:${10 + r.depth * 16}px">${pickBox}${flatBox}${ids}${nameCell}${sub ? `<small>${sub}</small>` : ''}</td>`;
   const f = r.fig;
   const input = (name, value, extra, aria) => `<input type="text" inputmode="${extra.inputmode}" name="${name}_${i}" value="${e(value)}" class="bp-input${extra.cls ? ` ${extra.cls}` : ''}" aria-label="${e(aria)}"${extra.title ? ` title="${e(extra.title)}"` : ''}><input type="hidden" name="orig_${name}_${i}" value="${e(value)}">`;
   const cells = p.cols.map((key) => {
@@ -591,12 +605,16 @@ function tableRows(model, ctx) {
 
 // ── Five-year outlook ────────────────────────────────────────────────────────────────────────
 
-export function outlookYears({ firstYear, revenueCents, expenseCents, revenuePct, expensePct, years = 5 }) {
+// Only the lines that grow compound at the rate; `...FixedCents` is the part of each side (the lines
+// chosen to hold flat) that stays where the plan puts it.
+export function outlookYears({ firstYear, revenueCents, expenseCents, revenuePct, expensePct, revenueFixedCents = 0, expenseFixedCents = 0, years = 5 }) {
   const out = [];
-  let rev = revenueCents;
-  let exp = expenseCents;
+  let rev = revenueCents - revenueFixedCents;
+  let exp = expenseCents - expenseFixedCents;
   for (let i = 0; i < years; i += 1) {
-    out.push({ year: firstYear + i, revenueCents: rev, expenseCents: exp, gapCents: exp - rev });
+    const revenue = rev + revenueFixedCents;
+    const expense = exp + expenseFixedCents;
+    out.push({ year: firstYear + i, revenueCents: revenue, expenseCents: expense, gapCents: expense - revenue });
     rev = Math.round(rev * (1 + revenuePct / 100));
     exp = Math.round(exp * (1 + expensePct / 100));
   }
@@ -631,9 +649,9 @@ export function outlookChart(years) {
 }
 
 function outlook(model, p) {
-  const years = outlookYears({ firstYear: p.target, revenueCents: model.revenue.plan, expenseCents: model.expense.plan, revenuePct: p.outRev, expensePct: p.outExp });
+  const years = outlookYears({ firstYear: p.target, revenueCents: model.revenue.plan, expenseCents: model.expense.plan, revenuePct: p.outRev, expensePct: p.outExp, revenueFixedCents: model.revenue.flatPlan, expenseFixedCents: model.expense.flatPlan });
   const last = years[years.length - 1];
-  const rates = `${p.outExp}% expense growth and ${p.outRev === 0 ? 'flat revenue' : `${p.outRev}% revenue growth`}`;
+  const rates = `${p.outExp}% expense growth and ${p.outRev === 0 ? 'flat revenue' : `${p.outRev}% revenue growth`}${model.flatCount ? `, with the ${model.flatCount} line${model.flatCount === 1 ? '' : 's'} you chose held flat` : ''}`;
   return `<div class="panel panel-spaced bp-outlook">
       <div class="panel-head"><h2>Five-year outlook</h2><span class="muted">From the FY${p.target} plan</span></div>
       <p class="muted-line">At ${rates}, the gap ${last.gapCents > 0 ? `compounds to ${money(last.gapCents)} by FY${last.year}` : `stays closed through FY${last.year}`}. Not a forecast so much as the question “if nothing changes on the revenue side, what does this plan cost us?”</p>
@@ -657,7 +675,7 @@ export function renderBudgetBuilderPage({ liveVersion = 'local', builder: rawBui
   const model = buildPlannerModel(builder, { layout, params: p });
   const pickFormId = 'bp-pick';
   const form = canEditPlan || canEditActuals;
-  const ctx = { p, canEditPlan, canEditActuals, canManage: canManageBudgetPlan, layout, counter: 0, pickFormId, form };
+  const ctx = { model, p, canEditPlan, canEditActuals, canManage: canManageBudgetPlan, layout, counter: 0, pickFormId, form };
   const rows = tableRows(model, ctx);
   const drafts = builder.lines.filter((l) => l.plan?.draft).length;
   const viewToggle = layout
@@ -673,7 +691,7 @@ export function renderBudgetBuilderPage({ liveVersion = 'local', builder: rawBui
       <form method="POST" action="/api/v1/budget-planner-save" class="bp-form">
         <button type="submit" class="bp-default-submit" tabindex="-1" aria-hidden="true">Save changes</button>
         <input type="hidden" name="target_year" value="${p.target}"><input type="hidden" name="base_year" value="${p.base}"><input type="hidden" name="fiscal_year" value="${p.target}">
-        <input type="hidden" name="back" value="${e(new URLSearchParams(plannerQuery(p, {}, ['pick', 'tab'])).toString())}">
+        <input type="hidden" name="back" value="${e(new URLSearchParams(plannerQuery(p, {}, ['pick', 'fpick', 'tab'])).toString())}">
         ${table}
         <div class="bp-actions"><button type="submit">Save changes</button><span class="muted-line">${editNote}</span></div>
       </form>`
@@ -689,6 +707,7 @@ export function renderBudgetBuilderPage({ liveVersion = 'local', builder: rawBui
     <div class="panel panel-spaced list-panel bp-panel">
       <div class="bp-panel-head"><h2>Category by category</h2>${viewToggle}</div>
       ${toolbar(model, p, { pickFormId })}
+      ${p.flatPick ? '<p class="muted-line">Tick the lines that will <b>not</b> grow. They stay where the plan puts them in the five-year outlook; every other line grows at the rates below. Then choose Done choosing growing lines.</p>' : ''}
       ${p.pick ? '<p class="muted-line">Tick the lines to leave out of the totals, the export and the printed sheet, then choose Done choosing rows.</p>' : ''}
       ${body}
     </div>
