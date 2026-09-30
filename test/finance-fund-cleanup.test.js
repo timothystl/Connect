@@ -5,8 +5,8 @@ import worker from '../apps/finance/shell.js';
 const CLEANUP = {
   contract: 'connect.giving-fund-cleanup.v1', year: 2026,
   funds: [
-    { id: 1, name: 'Building Fund', category: 'restricted', active: true, number: '', gift_count: 3, total_cents: 30000, year_cents: 0, last_month: '2024-05' },
-    { id: 2, name: '25004 Building Fund', category: 'restricted', active: true, number: '25004', gift_count: 9, total_cents: 90000, year_cents: 1000, last_month: '2026-08' },
+    { id: 1, name: 'Building Fund', description: '', budget_annual_cents: 0, gl_code: '', category: 'restricted', active: true, number: '', gift_count: 3, total_cents: 30000, year_cents: 0, last_month: '2024-05' },
+    { id: 2, name: '25004 Building Fund', description: '', budget_annual_cents: 1250050, gl_code: '25004', category: 'general', active: true, number: '25004', gift_count: 9, total_cents: 90000, year_cents: 1000, last_month: '2026-08' },
     { id: 3, name: 'Easter Egg Hunt', category: 'restricted', active: true, number: '', gift_count: 0, total_cents: 0, year_cents: 0, last_month: '' },
     { id: 4, name: 'VBS', category: 'restricted', active: false, number: '', gift_count: 1, total_cents: 500, year_cents: 0, last_month: '2019-06' },
   ],
@@ -25,6 +25,8 @@ function makeEnv(role = 'admin') {
         if (url.pathname.endsWith('/giving-fund-cleanup-write-v1')) {
           const body = await req.json();
           sent.push(body);
+          if (body.op === 'settings') return new Response(JSON.stringify({ ok: true, changed: 1 }));
+          if (body.op === 'add') return new Response(JSON.stringify({ ok: true, id: 9, name: body.name }));
           return new Response(JSON.stringify(body.op === 'merge' ? { ok: true, moved_gifts: 3, kept: '25004 Building Fund', removed: 1 } : { ok: true, changed: body.fund_ids.length }));
         }
         return new Response('{}', { status: 404 });
@@ -67,5 +69,33 @@ describe('Gift Entry › Funds › Clean up funds', () => {
     const retired = await post(env, [['op', 'retire'], ['fund_id', '3']]);
     expect(retired.headers.get('Location')).toContain('status=ok');
     expect(sent.at(-1)).toEqual({ op: 'retire', fund_ids: [3] });
+  });
+
+  it('shows each active fund’s settings and relays a save with budgets in cents', async () => {
+    const html = await (await page(makeEnv().env)).text();
+    expect(html).toContain('Fund settings');
+    expect(html).toContain('name="budget_2" value="12500.50"');
+    expect(html).toContain('<option value="general" selected>General Fund</option>');
+    expect(html).not.toContain('name="budget_4"');
+    const { env, sent } = makeEnv();
+    const saved = await post(env, [['op', 'settings'], ['fund_id', '1'], ['fund_id', '2'],
+      ['name_1', 'Building Fund'], ['category_1', 'restricted'], ['budget_1', '$1,200'], ['gl_1', ''],
+      ['name_2', '25004 Building Fund'], ['category_2', 'general'], ['budget_2', '12500.50'], ['gl_2', '25004']]);
+    expect(saved.headers.get('Location')).toContain('status=ok');
+    expect(saved.headers.get('Location')).toContain('#fund-settings');
+    expect(sent.at(-1)).toEqual({ op: 'settings', funds: [
+      { id: 1, name: 'Building Fund', category: 'restricted', budget_annual_cents: 120000, gl_code: '' },
+      { id: 2, name: '25004 Building Fund', category: 'general', budget_annual_cents: 1250050, gl_code: '25004' },
+    ] });
+  });
+
+  it('refuses a budget that is not a dollar amount and relays adding a fund', async () => {
+    const { env, sent } = makeEnv();
+    const bad = await post(env, [['op', 'settings'], ['fund_id', '1'], ['name_1', 'Building Fund'], ['category_1', 'restricted'], ['budget_1', 'lots'], ['gl_1', '']]);
+    expect(bad.headers.get('Location')).toContain('status=error');
+    expect(sent).toHaveLength(0);
+    const added = await post(env, [['op', 'add'], ['name', 'Mission Trip'], ['category', 'earned'], ['budget', '500'], ['gl_code', '47000']]);
+    expect(added.headers.get('Location')).toContain('status=ok');
+    expect(sent.at(-1)).toEqual({ op: 'add', name: 'Mission Trip', category: 'earned', budget_annual_cents: 50000, gl_code: '47000' });
   });
 });

@@ -1035,14 +1035,35 @@ async function handleGivingFundPassThrough(request, env, url) {
 // Gift Entry › Funds › Clean up funds: combine a duplicate group into the fund kept, or retire /
 // restore funds. Connect re-checks that the signed-in person is a Connect admin.
 async function handleGivingFundCleanup(request, env, url) {
-  const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving', page: 'funds', ...params }).toString()}#fund-cleanup` } });
+  const back = (params, anchor = '#fund-cleanup') => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'giving', page: 'funds', ...params }).toString()}${anchor}` } });
   if (!isSameOriginPost(request, url)) return back({ status: 'error', message: 'That form did not come from Timothy Finance.' });
   let form;
   try { form = await request.formData(); } catch { return back({ status: 'error', message: 'The form could not be read.' }); }
   const ids = (name) => [...new Set(form.getAll(name).map(String).filter((v) => /^\d{1,9}$/.test(v)).map(Number))];
   const op = String(form.get('op') || '');
   let body;
-  if (op === 'merge') {
+  // A dollar amount typed into a budget box: "$12,500" or "12500.50". Blank means none; anything
+  // else that isn't a plain amount returns null so the save is refused instead of guessed.
+  const toCents = (raw) => {
+    const text = String(raw ?? '').split(/[\s$,]+/).join('');
+    if (text === '') return 0;
+    if (!/^\d{1,10}(\.\d{1,2})?$/.test(text)) return null;
+    return Math.round(Number(text) * 100);
+  };
+  if (op === 'settings') {
+    const funds = [];
+    for (const id of ids('fund_id')) {
+      const budget = toCents(form.get(`budget_${id}`));
+      if (budget == null) return back({ status: 'error', message: 'A budget must be a dollar amount such as 12500 or 12,500.50.' }, '#fund-settings');
+      funds.push({ id, name: String(form.get(`name_${id}`) || ''), category: String(form.get(`category_${id}`) || ''), budget_annual_cents: budget, gl_code: String(form.get(`gl_${id}`) || '') });
+    }
+    if (!funds.length) return back({ status: 'error', message: 'There were no funds to save.' }, '#fund-settings');
+    body = { op, funds };
+  } else if (op === 'add') {
+    const budget = toCents(form.get('budget'));
+    if (budget == null) return back({ status: 'error', message: 'A budget must be a dollar amount such as 12500 or 12,500.50.' }, '#fund-settings');
+    body = { op, name: String(form.get('name') || ''), category: String(form.get('category') || ''), budget_annual_cents: budget, gl_code: String(form.get('gl_code') || '') };
+  } else if (op === 'merge') {
     const keep = Number(form.get('keep'));
     const remove = ids('remove').filter((id) => id !== keep);
     if (!Number.isInteger(keep) || keep <= 0) return back({ status: 'error', message: 'Choose the fund to keep.' });
@@ -1059,6 +1080,11 @@ async function handleGivingFundCleanup(request, env, url) {
   const result = await postGivingFundCleanup(env, request.headers.get('Cf-Access-Jwt-Assertion') || '', body);
   if (!result.ok) return back({ status: 'error', message: describeGivingBatchFailure(result).slice(0, 200) });
   const r = result.result || {};
+  if (op === 'settings' || op === 'add') {
+    const msg = op === 'add' ? `Added the fund ${r.name || body.name}.`
+      : r.changed ? `Saved. ${r.changed} fund${r.changed === 1 ? '' : 's'} changed.` : 'Nothing had changed.';
+    return back({ status: 'ok', msg }, '#fund-settings');
+  }
   const msg = op === 'merge'
     ? `Combined into ${r.kept || 'the kept fund'}: ${r.moved_gifts || 0} gift${r.moved_gifts === 1 ? '' : 's'} moved, ${r.removed || 0} fund${r.removed === 1 ? '' : 's'} removed.`
     : `${r.changed ?? body.fund_ids.length} fund${(r.changed ?? body.fund_ids.length) === 1 ? '' : 's'} ${op === 'retire' ? 'retired' : 'restored'}.`;
