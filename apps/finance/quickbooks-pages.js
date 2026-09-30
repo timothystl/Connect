@@ -292,7 +292,7 @@ export function renderQuickbooksPage(pageId, {
     const editable = canManageBoardCategories && boardLayout && isLive;
     const entryStatus = searchParams?.get('status') || null;
     const editor = editable
-      ? renderLayoutEditor(accountsReport.rows, boardLayout, entryStatus, mappingEntryMessage, { returnTo: 'account-mapping' })
+      ? renderLayoutEditor(accountsReport.layoutRows || accountsReport.rows, boardLayout, entryStatus, mappingEntryMessage, { returnTo: 'account-mapping' })
       : `<p class="muted">${canManageBoardCategories
         ? 'The saved board layout could not be read from Connect, so the mapping cannot be edited right now. Reload to try again.'
         : 'Only a Connect admin can change the mapping.'}</p>`;

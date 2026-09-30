@@ -2,6 +2,7 @@ import { ACCOUNTING_JS, ACCOUNTING_CSS, ACCOUNTING_CSP, accountingViewer, render
 import { handleTuitionApi, tuitionAidViewer } from './tuition-service.js';
 import { renderTuitionPage } from './tuition-pages.js';
 import { TUITION_PLANNER_JS } from './tuition-planner/bundle.generated.js';
+import { BUDGET_PLANNER_LIVE_JS } from './budget-planner-live.js';
 import { FINANCE_RELEASE_CHANNEL, FINANCE_VERSION } from './version.js';
 import givingFixture from '../../contracts/examples/giving-summary-v1.synthetic.json';
 import { acceptConnectGivingSummaryV1 } from '../../contracts/validators/connect-giving-consumer.js';
@@ -242,6 +243,8 @@ const SECURITY_HEADERS = Object.freeze({
 // Donor letters show the church's letterhead logo (served by Connect, so an emailed letter can load
 // it) and any image embedded in a letter template (a data: URL). Images only; still no script.
 const DONOR_LETTERS_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https://connect.timothystl.org; font-src 'self'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'";
+// The Budget planner's edit form loads one script from this Worker (live totals); nothing else.
+const BUDGET_PLANNER_PAGE_CSP = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'";
 const PLANNER_PAGE_CSP = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'";
 
 function response(body, init = {}, { cacheControl } = {}) {
@@ -1726,6 +1729,7 @@ function renderSectionBody(ctx) {
     const plannerOp = ctx.searchParams.get('op') === 'planner';
     return renderBudgetBuilderPage({
       ...shared,
+      liveVersion: ctx.metadata?.releaseSha || 'local',
       // Council with budget edit may change Plan cells only, saved to their own draft by Connect;
       // Projected and Actual corrections, and the plan tools, stay admin-only (Connect re-checks).
       canEditPlan: isAdmin || (!councilPreview && isCouncil && roleResult.permissions?.budget === 'edit' && Boolean(draft)),
@@ -2083,6 +2087,11 @@ export default {
       return response(request.method === 'HEAD' ? null : TUITION_PLANNER_JS, {
         headers: { 'Content-Type': 'text/javascript; charset=utf-8' },
       }, { cacheControl: 'private, max-age=86400' });
+    }
+    if (route.id === 'budget-planner-asset') {
+      return response(request.method === 'HEAD' ? null : BUDGET_PLANNER_LIVE_JS, {
+        headers: { 'Content-Type': 'text/javascript; charset=utf-8' },
+      }, { cacheControl: 'private, max-age=3600' });
     }
     if (route.id === 'tuition-api-v1') return handleTuitionApi(request, rawEnv, url);
     if (route.id === 'tuition-aid-legacy-page') {
@@ -4691,6 +4700,8 @@ export default {
         });
         if (plannerPage && !printMode) {
           shellResponse.headers.set('Content-Security-Policy', PLANNER_PAGE_CSP);
+        } else if (section.id === 'planning' && effectivePageId === 'builder' && !printMode) {
+          shellResponse.headers.set('Content-Security-Policy', BUDGET_PLANNER_PAGE_CSP);
         } else if (lettersPageId) {
           shellResponse.headers.set('Content-Security-Policy', DONOR_LETTERS_PAGE_CSP);
         }

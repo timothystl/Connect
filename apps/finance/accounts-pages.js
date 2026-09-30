@@ -303,7 +303,7 @@ export function renderAccountsPage(pageId, {
       ? `Fetched live from Connect's finance-chart-of-accounts contract${fiscalYear ? ` for FY${fiscalYear}` : ''}: account names, ledger paths and each account's year totals. No gift, donor, or person crosses this contract.`
       : `The committed synthetic fixture (the live endpoint is not configured or did not answer${accountsReport.fallbackReason ? `: ${escapeHtml(accountsReport.fallbackReason)}` : ''}).`}</small></p>
   </section>${canManageBoardCategories && boardLayout && isLive
-    ? renderLayoutEditor(report.rows, boardLayout, boardCategoryEntryStatus, boardCategoryEntryMessage)
+    ? renderLayoutEditor(accountsReport.layoutRows || report.rows, boardLayout, boardCategoryEntryStatus, boardCategoryEntryMessage)
     : (canManageBoardCategories ? renderBoardCategoryForm(boardCategoryEntryStatus, boardCategoryEntryMessage) : '')}${canManagePurposeTags
     ? renderPurposeTagsForms(boardLayout ? boardLayout.tags.map((t) => ({ id: t.id, label: t.label })) : deriveCurrentPurposeTags(report.rows), purposeTagsEntryStatus, purposeTagsEntryMessage, { listOnly: Boolean(boardLayout && isLive && canManageBoardCategories) })
     : ''}`;

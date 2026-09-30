@@ -102,6 +102,29 @@ function liveAccountToRow(account) {
   };
 }
 
+// The Budget layout editor lists every account the church has ever used, not only the year on
+// screen, so an old line (one the year shown no longer has) can still be hidden. The other years'
+// accounts are added with no figures; the shown year's own rows win. A year that cannot be read
+// is skipped, leaving the list as complete as it could be made.
+const LAYOUT_YEARS_LOOKED_BACK = 10;
+
+async function allYearsLayoutRows(env, rows, shownYear, availableYears) {
+  const others = (availableYears || []).filter((y) => y !== shownYear).sort((a, b) => b - a).slice(0, LAYOUT_YEARS_LOOKED_BACK);
+  if (!others.length) return rows;
+  const results = await Promise.all(others.map((y) => fetchLiveFinanceChartOfAccounts(env, y).catch(() => ({ ok: false }))));
+  const seen = new Set(rows.map((r) => r.category_path));
+  const extra = [];
+  for (const other of results) {
+    if (!other.ok) continue;
+    for (const account of other.chartOfAccounts.accounts) {
+      if (seen.has(account.categoryPath)) continue;
+      seen.add(account.categoryPath);
+      extra.push({ ...liveAccountToRow(account), actual_cents: 0, budget_cents: null });
+    }
+  }
+  return extra.length ? [...rows, ...extra] : rows;
+}
+
 // Tries the real connect.finance-chart-of-accounts.v1 endpoint for `fiscalYear`; falls back to the
 // existing synthetic fixture whenever the live call isn't configured yet or fails for any reason
 // -- same never-throws, always-labeled pattern as data-status-service.js's resolveDataStatus and
@@ -111,11 +134,14 @@ function liveAccountToRow(account) {
 export async function resolveAccountsReport(env, db, { fiscalYear = null } = {}) {
   const result = await fetchLiveFinanceChartOfAccounts(env, fiscalYear);
   if (result.ok) {
+    const rows = result.chartOfAccounts.accounts.map(liveAccountToRow);
+    const fiscalYears = result.chartOfAccounts.availableFiscalYears;
     return {
-      rows: result.chartOfAccounts.accounts.map(liveAccountToRow),
+      rows,
+      layoutRows: await allYearsLayoutRows(env, rows, result.chartOfAccounts.fiscalYear, fiscalYears),
       source: 'live',
       fiscalYear: result.chartOfAccounts.fiscalYear,
-      availableFiscalYears: result.chartOfAccounts.availableFiscalYears,
+      availableFiscalYears: fiscalYears,
     };
   }
   const rows = await readSyntheticAccountsReport(db);
