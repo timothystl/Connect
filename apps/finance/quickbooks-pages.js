@@ -284,24 +284,6 @@ export function renderQuickbooksPage(pageId, {
     return renderTransactionPage(pageId, quickbooksTransactions, searchParams);
   }
   if (pageId === 'import-history') return renderImportHistory(importHistory);
-  if (pageId === 'account-mapping') {
-    const isLive = accountsReport.source === 'live';
-    const report = buildAccountsReportView(accountsReport.rows);
-    // Admins edit the mapping right here: the same Budget layout editor as Chart of Accounts,
-    // saving to Connect's board-category and purpose-tag stores and returning to this page.
-    const editable = canManageBoardCategories && boardLayout && isLive;
-    const entryStatus = searchParams?.get('status') || null;
-    const editor = editable
-      ? renderLayoutEditor(accountsReport.layoutRows || accountsReport.rows, boardLayout, entryStatus, mappingEntryMessage, { returnTo: 'account-mapping' })
-      : `<p class="muted">${canManageBoardCategories
-        ? 'The saved board layout could not be read from Connect, so the mapping cannot be edited right now. Reload to try again.'
-        : 'Only a Connect admin can change the mapping.'}</p>`;
-    return `<section class="report" aria-label="QuickBooks account mapping">
-      ${renderSectionHeading({ eyebrow: 'QuickBooks', heading: 'Account mapping', badge: isLive ? 'Live from Connect' : 'Finance category mapping (synthetic)' })}
-      <p>How each QuickBooks account is grouped on the budget and board reports. Changing a board category, display name or purpose tag only changes that grouping; QuickBooks account names and numbers are untouched.</p>
-      ${editable ? '' : renderTable({ head: ['Ledger path', 'Board category', 'Purpose'], rows: renderMappingRows(report.hierarchy) })}
-    </section>${editor}`;
-  }
   // 'sync-status' (default) -- same underlying contract/status as Data & Imports. Finance's own
   // connection card (once enabled) must not depend on that status feed, so a status that cannot be
   // built only drops its own panel.

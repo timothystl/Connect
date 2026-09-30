@@ -1409,7 +1409,7 @@ describe('Finance alpha staging shell', () => {
 
   it('renders a reconciled synthetic Budget outlook with base and growth assumptions', async () => {
     statements.length = 0;
-    const res = await worker.fetch(new Request('https://finance.test/?section=planning&native=1'), env);
+    const res = await worker.fetch(new Request('https://finance.test/?section=planning'), env);
     const html = await res.text();
     expect(res.status).toBe(200);
     expect(html).toContain('Synthetic Budget Report');

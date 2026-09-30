@@ -43,7 +43,7 @@ function makeEnv({ role = 'admin', budget = 'edit', builderStatus = 200, draftSt
     },
   };
 }
-const get = (env, q = '') => worker.fetch(new Request(`https://finance.test/?section=planning&page=builder&native=1${q}`, { headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }), env);
+const get = (env, q = '') => worker.fetch(new Request(`https://finance.test/?section=planning&page=builder${q}`, { headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }), env);
 const post = (env, path, fields, site = 'same-origin') => worker.fetch(new Request(`https://finance.test${path}`, {
   method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'jwt', 'Sec-Fetch-Site': site }, body: new URLSearchParams(fields),
 }), env);
@@ -225,21 +225,11 @@ describe('Budget planner (Finance)', () => {
     expect(Number(writes(calls).find((c) => c.path.includes('generate-all')).body.growth_pct)).toBeCloseTo(0.03, 10);
   });
 
-  it('opens Connect’s own planner (framed) by default, keeps Finance’s version at native=1, and a failed read falls back', async () => {
-    const ask = (path) => worker.fetch(new Request(`https://finance.test/${path}`, { headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }), makeEnv().env).then((r) => r.text());
-    for (const path of ['?section=planning&page=builder', '?section=planning&page=connect']) {
-      const framed = await ask(path);
-      expect(framed).toContain('<h1 class="page-title">Budget planner</h1>');
-      expect(framed).toContain('<iframe src="/accounting?section=planning"');
-      expect(framed).toContain('page=builder&amp;native=1">Finance’s own version</a>');
-      expect(framed).not.toContain('class="bb-banner');
-    }
-    const own = await ask('?section=planning&page=builder&native=1');
-    expect(own).not.toContain('<iframe');
-    expect(own).toContain('class="bb-banner');
-    // After a save the person lands on Finance's page with its status line, and stays on it.
-    const saved = await ask('?section=planning&page=builder&op=planner&status=ok&msg=Saved');
-    expect(saved).not.toContain('<iframe');
+  it('replaces the framed Connect planner: its old address lands here, and a failed read falls back', async () => {
+    const old = await (await worker.fetch(new Request('https://finance.test/?section=planning&page=connect', { headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }), makeEnv().env)).text();
+    expect(old).toContain('<h1 class="page-title">Budget planner</h1>');
+    expect(old).not.toContain('<iframe');
+    expect(old).not.toContain('Connect budget planner');
     const fallback = await (await get(makeEnv({ builderStatus: 500 }).env)).text();
     expect(fallback).not.toContain('class="bb-banner');
   });

@@ -54,7 +54,7 @@ describe('Finance Budget Planner — edit form and relay route', () => {
   });
 
   it('does not show the edit form when the viewer role is not verified (fail-closed on the write UI, not just the write itself)', async () => {
-    const res = await worker.fetch(new Request('https://finance.test/?section=planning&native=1'), baseEnv);
+    const res = await worker.fetch(new Request('https://finance.test/?section=planning'), baseEnv);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).not.toContain('/api/v1/connect-budget-plan-write');
@@ -62,7 +62,7 @@ describe('Finance Budget Planner — edit form and relay route', () => {
 
   it('does not show the edit form for a finance-role viewer -- same admin/council-only gate as the legacy Budget Planner', async () => {
     const env = roleEnv('finance', async () => new Response('not found', { status: 404 }));
-    const res = await worker.fetch(new Request('https://finance.test/?section=planning&native=1', {
+    const res = await worker.fetch(new Request('https://finance.test/?section=planning', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), env);
     const html = await res.text();
@@ -71,7 +71,7 @@ describe('Finance Budget Planner — edit form and relay route', () => {
 
   it('shows the edit form for a verified admin viewer', async () => {
     const env = roleEnv('admin', async () => new Response('not found', { status: 404 }));
-    const res = await worker.fetch(new Request('https://finance.test/?section=planning&native=1', {
+    const res = await worker.fetch(new Request('https://finance.test/?section=planning', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), env);
     const html = await res.text();
@@ -83,7 +83,7 @@ describe('Finance Budget Planner — edit form and relay route', () => {
 
   it('shows the edit form for a council viewer explicitly granted budget edit access', async () => {
     const env = roleEnv('council', async () => new Response('not found', { status: 404 }), { budget: 'edit' });
-    const res = await worker.fetch(new Request('https://finance.test/?section=planning&native=1', {
+    const res = await worker.fetch(new Request('https://finance.test/?section=planning', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), env);
     const html = await res.text();
@@ -126,7 +126,7 @@ describe('Finance Budget Planner — edit form and relay route', () => {
     // Reloading the page after the redirect is a normal authenticated request too -- Cloudflare
     // Access attaches the same JWT header to every request once signed in, not just the POST.
     const shownEnv = roleEnv('admin', async () => new Response('not found', { status: 404 }));
-    const shown = await worker.fetch(new Request('https://finance.test/?section=planning&native=1&status=ok', {
+    const shown = await worker.fetch(new Request('https://finance.test/?section=planning&status=ok', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), shownEnv);
     const html = await shown.text();

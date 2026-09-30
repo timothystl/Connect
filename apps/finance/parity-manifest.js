@@ -203,7 +203,6 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     capabilities: ['connection status', 'account mapping'],
     pages: [
       { id: 'sync-status', label: 'Sync status', status: 'live' },
-      { id: 'account-mapping', label: 'Account mapping', status: 'live' },
       { id: 'transactions', label: 'Transactions', status: 'live' },
       { id: 'expense-drilldown', label: 'Expense drill-down', status: 'live' },
       { id: 'vendor-spend', label: 'Vendor spend', status: 'live' },

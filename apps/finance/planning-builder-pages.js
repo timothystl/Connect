@@ -53,7 +53,7 @@ export function plannerParams(params, now = new Date()) {
   const tab = TABS.some(([k]) => k === get('tab')) ? get('tab') : '';
   return {
     target, base, view: get('view') === 'qb' ? 'qb' : 'board', cols, exclude, pick: get('pick') === '1', tab,
-    printMode: get('print_mode') === 'thisyear' ? 'thisyear' : 'plan', draft: get('draft') === '1', showHidden: get('hidden') === '1', native: get('native') === '1',
+    printMode: get('print_mode') === 'thisyear' ? 'thisyear' : 'plan', draft: get('draft') === '1', showHidden: get('hidden') === '1',
     outExp: rate(get('out_exp'), OUTLOOK_DEFAULTS.expense), outRev: rate(get('out_rev'), OUTLOOK_DEFAULTS.revenue),
   };
 }
@@ -76,7 +76,6 @@ export function plannerQuery(p, overrides = {}, omit = []) {
   for (const x of v.exclude) pairs.push(['x', x]);
   if (v.pick) pairs.push(['pick', '1']);
   if (v.showHidden) pairs.push(['hidden', '1']);
-  if (v.native) pairs.push(['native', '1']);
   if (v.tab) pairs.push(['tab', v.tab]);
   if (v.outExp !== OUTLOOK_DEFAULTS.expense) pairs.push(['out_exp', String(v.outExp)]);
   if (v.outRev !== OUTLOOK_DEFAULTS.revenue) pairs.push(['out_rev', String(v.outRev)]);
@@ -358,7 +357,7 @@ export function parsePlannerForm(form, { canEditActuals = false } = {}) {
 export function plannerBackQuery(raw) {
   const src = new URLSearchParams(String(raw || '').slice(0, 4000));
   const out = new URLSearchParams([['section', 'planning'], ['page', 'builder']]);
-  for (const [k, v] of src) if (['target', 'base', 'view', 'cols', 'x', 'out_exp', 'out_rev', 'native'].includes(k)) out.append(k, v.slice(0, 200));
+  for (const [k, v] of src) if (['target', 'base', 'view', 'cols', 'x', 'out_exp', 'out_rev'].includes(k)) out.append(k, v.slice(0, 200));
   return out;
 }
 

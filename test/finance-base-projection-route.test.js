@@ -52,7 +52,7 @@ describe('Budget builder — Projected-column correction form and relay route', 
   });
 
   it('does not show the correction form when the viewer role is not verified', async () => {
-    const res = await worker.fetch(new Request('https://finance.test/?section=planning&native=1'), baseEnv);
+    const res = await worker.fetch(new Request('https://finance.test/?section=planning'), baseEnv);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).not.toContain('/api/v1/connect-base-projection-write');
@@ -60,7 +60,7 @@ describe('Budget builder — Projected-column correction form and relay route', 
 
   it('does not show the correction form for a council viewer -- admin-only, unlike the plain category edit form', async () => {
     const env = roleEnv('council', async () => new Response('not found', { status: 404 }));
-    const res = await worker.fetch(new Request('https://finance.test/?section=planning&native=1', {
+    const res = await worker.fetch(new Request('https://finance.test/?section=planning', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), env);
     const html = await res.text();
@@ -69,7 +69,7 @@ describe('Budget builder — Projected-column correction form and relay route', 
 
   it('shows the correction form for a verified admin viewer', async () => {
     const env = roleEnv('admin', async () => new Response('not found', { status: 404 }));
-    const res = await worker.fetch(new Request('https://finance.test/?section=planning&native=1', {
+    const res = await worker.fetch(new Request('https://finance.test/?section=planning', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), env);
     const html = await res.text();
