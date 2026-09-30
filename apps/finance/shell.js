@@ -1719,10 +1719,10 @@ function renderSectionBody(ctx) {
     return renderConnectWorkspaceFrame('accounts');
   }
   // The Budget planner is Connect's own planner, run inside Finance: it is the one the church
-  // prefers. Finance's rebuilt page stays reachable with native=1 (and is what a save, the print
-  // sheet and the CSV come back to).
+  // prefers. Finance's rebuilt page stays reachable with native=1, and is what any save (which comes
+  // back with a status), the print sheet and the CSV return to.
   if (section.id === 'planning' && page.id === 'builder' && ctx.searchParams.get('native') !== '1'
-    && ctx.searchParams.get('print') !== '1' && ctx.searchParams.get('op') !== 'planner') {
+    && ctx.searchParams.get('print') !== '1' && !ctx.searchParams.get('op') && !ctx.searchParams.get('status')) {
     return renderConnectWorkspaceFrame('planning', {
       label: 'Budget planner', alternateHref: '/?section=planning&amp;page=builder&amp;native=1', alternateLabel: 'Finance’s own version',
     });
