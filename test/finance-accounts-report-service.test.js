@@ -139,3 +139,43 @@ describe('resolveAccountsReport (live connect.finance-chart-of-accounts.v1 with 
     expect(result.rows).toEqual(rows);
   });
 });
+
+describe('resolveAccountsReport layoutRows (every account ever used, for the Budget layout)', () => {
+  const account = (path, name, actualCents) => ({
+    classification: 'Income', categoryPath: path, accountName: name, displayName: name, depth: 1, hasChildren: false,
+    actualCents, budgetCents: null, boardCategoryKey: 'unassigned', boardCategoryLabel: 'Unassigned', purposeTagId: null, purposeTagLabel: null,
+  });
+  const byYear = {
+    2026: [account('Income:46010 Market', '46010 Market', 500)],
+    2025: [account('Income:46010 Market', '46010 Market', 900), account('Income:48075 PPP', '48075 PPP', 0)],
+    2024: [account('Income:48030 Grants', '48030 Grants', 0)],
+  };
+  const envFor = (failYear) => ({
+    FINANCE_CONTRACT_API_KEY: 'test-secret',
+    CONNECT_SERVICE: {
+      async fetch(request) {
+        const year = Number(new URL(request.url).searchParams.get('fiscal_year'));
+        if (year === failYear) return new Response('no', { status: 500 });
+        return new Response(JSON.stringify({
+          contract: 'connect.finance-chart-of-accounts.v1', dataClassification: 'aggregate', sourceProduct: 'connect', consumerProduct: 'finance',
+          generatedAt: '2026-06-15T00:00:00Z', fiscalYear: year, availableFiscalYears: [2026, 2025, 2024], accounts: byYear[year],
+          reconciliation: { accountCount: byYear[year].length, incomeCount: byYear[year].length, expenseCount: 0, otherIncomeCount: 0, otherExpenseCount: 0, costOfGoodsSoldCount: 0, unassignedCount: byYear[year].length, revenueActualCents: byYear[year].reduce((t, a) => t + a.actualCents, 0), expenseActualCents: 0 },
+        }), { status: 200 });
+      },
+    },
+  });
+  const db = { prepare(sql) { return { sql }; }, async batch() { return [{ results: [] }]; } };
+
+  it('adds accounts from the other years, with no figures, and keeps the shown year as it is', async () => {
+    const result = await resolveAccountsReport(envFor(), db, { fiscalYear: 2026 });
+    expect(result.rows.map((r) => r.category_path)).toEqual(['Income:46010 Market']);
+    expect(result.layoutRows.map((r) => r.category_path)).toEqual(['Income:46010 Market', 'Income:48075 PPP', 'Income:48030 Grants']);
+    expect(result.layoutRows[0].actual_cents).toBe(500);
+    expect(result.layoutRows[1]).toMatchObject({ actual_cents: 0, budget_cents: null });
+  });
+
+  it('skips a year that cannot be read instead of failing the page', async () => {
+    const result = await resolveAccountsReport(envFor(2025), db, { fiscalYear: 2026 });
+    expect(result.layoutRows.map((r) => r.category_path)).toEqual(['Income:46010 Market', 'Income:48030 Grants']);
+  });
+});
