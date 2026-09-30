@@ -26,6 +26,11 @@ describe('Finance accounting workspace',()=>{
     for(const script of [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)])expect(()=>new vm.Script(script[1])).not.toThrow();
     expect(()=>new vm.Script(ACCOUNTING_JS)).not.toThrow();
   });
+  it('lets the page scroll: Connect\u2019s stylesheet locks html and body, which only works inside its own app frame',()=>{
+    const html = renderAccountingWorkspace({ role: 'admin', permissions: {} }, new URL('https://finance.test/accounting?section=accounts'), 'v');
+    expect(html).toContain('html,body{height:auto;overflow:auto}');
+  });
+
   it('denies unknown roles and roles with no accounting access',async()=>{
     for(const role of ['member','volunteer','unknown','staff','council'])expect((await call(env(role),'/accounting')).status).toBe(403);
     expect((await call(env('staff',{budget:'view'}),'/accounting')).status).toBe(200);
