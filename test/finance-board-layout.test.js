@@ -106,7 +106,7 @@ const get = (env, q) => worker.fetch(new Request(`https://finance.test/?${q}`, {
 
 describe('Budget builder and Chart of Accounts board layout', () => {
   it('groups the Budget planner by board category with subtotals, and offers QuickBooks order', async () => {
-    const html = await (await get(makeEnv().env, 'section=planning&page=builder')).text();
+    const html = await (await get(makeEnv().env, 'section=planning&page=builder&native=1')).text();
     expect(html).toContain('<tr class="bb-group"><td colspan="6">Revenue</td></tr>');
     expect(html).toContain('<tr class="bp-header" data-bp="header" data-side="revenue"><td colspan="6" style="padding-left:10px">Donor Income</td></tr>');
     expect(html).toContain('<tr class="bp-header" data-bp="header" data-side="revenue"><td colspan="6" style="padding-left:26px">General Offerings</td></tr>');
@@ -118,12 +118,12 @@ describe('Budget builder and Chart of Accounts board layout', () => {
     expect(html.indexOf('Salaries</td>')).toBeLessThan(html.indexOf('Benefits</td>'));
     expect(html).toContain('Edit the layout in Chart of Accounts');
     expect(html).toContain('<span class="is-on">Board view</span>');
-    const qb = await (await get(makeEnv().env, 'section=planning&page=builder&view=qb')).text();
+    const qb = await (await get(makeEnv().env, 'section=planning&page=builder&native=1&view=qb')).text();
     expect(qb).not.toContain('Donor Income');
     expect(qb).toContain('<td colspan="6" style="padding-left:26px">40 Giving</td>');
     expect(qb).toContain('<td style="padding-left:26px">Total 40 Giving</td>');
     expect(qb).toContain('<span class="is-on">QuickBooks order</span>');
-    const missing = await (await get(makeEnv({ layoutStatus: 500 }).env, 'section=planning&page=builder')).text();
+    const missing = await (await get(makeEnv({ layoutStatus: 500 }).env, 'section=planning&page=builder&native=1')).text();
     expect(missing).toContain('could not be read, so lines are listed in QuickBooks order');
   });
 

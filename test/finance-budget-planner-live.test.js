@@ -44,7 +44,7 @@ function makeEnv({ role = 'admin', budget = 'edit', builderStatus = 200, draftSt
     },
   };
 }
-const get = (env, q = '') => worker.fetch(new Request(`https://finance.test/?section=planning&page=builder${q}`, { headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }), env);
+const get = (env, q = '') => worker.fetch(new Request(`https://finance.test/?section=planning&page=builder&native=1${q}`, { headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }), env);
 
 
 describe('Budget planner live totals', () => {

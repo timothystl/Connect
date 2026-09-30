@@ -1233,10 +1233,10 @@ function renderEntityCards(entities) {
   return entities.map((entity) => (entity.available === false ? renderUnavailableCard(`${entity.label} · ${entity.periodLabel}`, entity.unavailableNote) : `<div class="card"><small>${escapeHtml(entity.label)} · ${escapeHtml(entity.periodLabel)}</small><strong>${formatSignedCents(entity.resultCents)}</strong><span>Income ${formatCents(entity.incomeCents)} · expenses ${formatCents(entity.expenseCents)} · ${entity.source === 'live' ? 'live from Connect' : 'synthetic fixture'}</span></div>`)).join('');
 }
 
-function renderConnectWorkspaceFrame(workspaceSection) {
-  const label = 'Chart of Accounts';
+function renderConnectWorkspaceFrame(workspaceSection, { label = 'Chart of Accounts', alternateHref = '', alternateLabel = '' } = {}) {
   const src = `/accounting?section=${workspaceSection}`;
-  return `<p class="muted-line">Connect’s ${label}, running in Finance with the same controls and autosave. It edits the same saved data as Finance’s own pages. <a href="${src}" target="_blank" rel="noopener">Open full screen</a></p>
+  const alternate = alternateHref ? ` · <a href="${alternateHref}">${alternateLabel}</a>` : '';
+  return `<p class="muted-line">Connect’s ${label}, running in Finance with the same controls and autosave. It edits the same saved data as Finance’s own pages. <a href="${src}" target="_blank" rel="noopener">Open full screen</a>${alternate}</p>
     <iframe src="${src}" title="${label} (Connect)" style="width:100%;height:calc(100vh - 150px);min-height:720px;border:1px solid #E3E7EE;border-radius:10px;background:#F3F7FA"></iframe>`;
 }
 
@@ -1717,6 +1717,15 @@ function renderSectionBody(ctx) {
   // Finance's own page now (Planning › Budget planner); its old page=connect address resolves to it.
   if (section.id === 'accounts' && page.id === 'connect') {
     return renderConnectWorkspaceFrame('accounts');
+  }
+  // The Budget planner is Connect's own planner, run inside Finance: it is the one the church
+  // prefers. Finance's rebuilt page stays reachable with native=1, and is what any save (which comes
+  // back with a status), the print sheet and the CSV return to.
+  if (section.id === 'planning' && page.id === 'builder' && ctx.searchParams.get('native') !== '1'
+    && ctx.searchParams.get('print') !== '1' && !ctx.searchParams.get('op') && !ctx.searchParams.get('status')) {
+    return renderConnectWorkspaceFrame('planning', {
+      label: 'Budget planner', alternateHref: '/?section=planning&amp;page=builder&amp;native=1', alternateLabel: 'Finance’s own version',
+    });
   }
   if (section.id === 'planning' && page.id === 'builder' && ctx.budgetBuilder?.ok) {
     const isAdmin = !councilPreview && roleResult.ok && roleResult.role === 'admin';

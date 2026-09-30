@@ -57,7 +57,7 @@ describe('Budget Plan generate/generate-all/commit/remove routes', () => {
 
   it('does not show the generate/commit forms or the per-row remove action for a council viewer -- these stay admin-only', async () => {
     const env = roleEnv('council', async () => new Response('not found', { status: 404 }), { budget: 'edit' });
-    const res = await worker.fetch(new Request('https://finance.test/?section=planning', {
+    const res = await worker.fetch(new Request('https://finance.test/?section=planning&native=1', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), env);
     const html = await res.text();
@@ -71,7 +71,7 @@ describe('Budget Plan generate/generate-all/commit/remove routes', () => {
 
   it('shows the generate/generate-all/commit forms and a per-row remove action for a verified admin viewer', async () => {
     const env = roleEnv('admin', async () => new Response('not found', { status: 404 }));
-    const res = await worker.fetch(new Request('https://finance.test/?section=planning', {
+    const res = await worker.fetch(new Request('https://finance.test/?section=planning&native=1', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), env);
     const html = await res.text();
