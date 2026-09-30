@@ -19,6 +19,7 @@ import { escapeHtml as e } from './render-helpers.js';
 import { accountDisplayName, buildBoardSections, isHiddenAccount } from './board-layout.js';
 import { csvNum, csvText } from './payroll-report-render.js';
 
+const FLAT_FORM_ID = 'bp-flat';
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 const money = (cents) => (cents == null ? '—' : `${cents < 0 ? '−' : ''}${USD.format(Math.abs(Math.round(cents / 100)))}`);
 const signed = (cents) => `${cents < 0 ? '−' : '+'}${USD.format(Math.abs(Math.round(cents / 100)))}`;
@@ -27,8 +28,8 @@ const pctText = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}%`;
 const TABS = [['grow', 'Grow every line'], ['project', 'Project one category'], ['commit', 'Commit to Church report']];
 
 // Screen columns, in Connect's order. 'change' is print-only (plan less base budget).
-export const PLANNER_COLUMNS = Object.freeze(['bud', 'act', 'proj', 'plan', 'delta']);
-const COLUMN_LABELS = { bud: (p) => `FY${p.base} Budget`, act: (p) => `FY${p.base} Actual`, proj: (p) => `FY${p.base} Projected`, plan: (p) => `FY${p.target} Plan`, change: () => 'Change', delta: () => 'Δ%' };
+export const PLANNER_COLUMNS = Object.freeze(['bud', 'act', 'used', 'proj', 'plan', 'delta']);
+const COLUMN_LABELS = { bud: (p) => `FY${p.base} Budget`, act: (p) => `FY${p.base} Actual`, used: (p) => `FY${p.base} % of budget`, proj: (p) => `FY${p.base} Projected`, plan: (p) => `FY${p.target} Plan`, change: () => 'Change', delta: () => 'Δ%' };
 export const OUTLOOK_DEFAULTS = Object.freeze({ expense: 3, revenue: 0 });
 
 // ── View parameters ──────────────────────────────────────────────────────────────────────────
@@ -50,10 +51,11 @@ export function plannerParams(params, now = new Date()) {
   const rawCols = get('cols');
   const cols = rawCols === 'none' ? [] : rawCols ? PLANNER_COLUMNS.filter((c) => rawCols.split(',').includes(c)) : [...PLANNER_COLUMNS];
   const exclude = [...new Set((params && params.getAll ? params.getAll('x') : []).map((x) => String(x).slice(0, 200)).filter(Boolean))].slice(0, 400);
+  const flat = [...new Set((params && params.getAll ? params.getAll('f') : []).map((x) => String(x).slice(0, 200)).filter(Boolean))].slice(0, 400);
   const tab = TABS.some(([k]) => k === get('tab')) ? get('tab') : '';
   return {
-    target, base, view: get('view') === 'qb' ? 'qb' : 'board', cols, exclude, pick: get('pick') === '1', tab,
-    printMode: get('print_mode') === 'thisyear' ? 'thisyear' : 'plan', draft: get('draft') === '1', showHidden: get('hidden') === '1', native: get('native') === '1',
+    target, base, view: get('view') === 'qb' ? 'qb' : 'board', cols, exclude, pick: get('pick') === '1', flat, flatPick: get('fpick') === '1', tab,
+    printMode: get('print_mode') === 'thisyear' ? 'thisyear' : 'plan', draft: get('draft') === '1', showHidden: get('hidden') === '1',
     outExp: rate(get('out_exp'), OUTLOOK_DEFAULTS.expense), outRev: rate(get('out_rev'), OUTLOOK_DEFAULTS.revenue),
   };
 }
@@ -74,9 +76,10 @@ export function plannerQuery(p, overrides = {}, omit = []) {
   if (v.view === 'qb') pairs.push(['view', 'qb']);
   if (v.cols.length !== PLANNER_COLUMNS.length) pairs.push(['cols', v.cols.length ? v.cols.join(',') : 'none']);
   for (const x of v.exclude) pairs.push(['x', x]);
+  for (const f of v.flat) pairs.push(['f', f]);
   if (v.pick) pairs.push(['pick', '1']);
+  if (v.flatPick) pairs.push(['fpick', '1']);
   if (v.showHidden) pairs.push(['hidden', '1']);
-  if (v.native) pairs.push(['native', '1']);
   if (v.tab) pairs.push(['tab', v.tab]);
   if (v.outExp !== OUTLOOK_DEFAULTS.expense) pairs.push(['out_exp', String(v.outExp)]);
   if (v.outRev !== OUTLOOK_DEFAULTS.revenue) pairs.push(['out_rev', String(v.outRev)]);
@@ -138,9 +141,9 @@ function lineFigures(l) {
 // under the Donor Income wrapper.
 function boardTree(lines, layout) {
   const sections = buildBoardSections(lines, layout, (l) => ({ path: l.category, name: l.name, isRevenue: l.classification === 'Income' }));
-  const group = (g, depth) => ({ kind: 'group', label: g.label, depth, children: g.items.map((line) => ({ kind: 'leaf', line, depth: depth + 1 })) });
+  const group = (g, depth) => ({ kind: 'group', key: g.key, isRevenue: g.isRevenue, label: g.label, depth, children: g.items.map((line) => ({ kind: 'leaf', line, depth: depth + 1 })) });
   const side = (list) => list.map((s) => (s.kind === 'wrapper'
-    ? { kind: 'group', label: s.label, depth: 0, children: s.groups.map((g) => group(g, 1)) } : group(s, 0)));
+    ? { kind: 'group', wrapper: true, label: s.label, depth: 0, children: s.groups.map((g) => group(g, 1)) } : group(s, 0)));
   return { revenue: side(sections.revenue), expense: side(sections.expense) };
 }
 
@@ -190,12 +193,16 @@ export function buildPlannerModel(builder, { layout = null, params }) {
   const shown = quiet.length && !params.showHidden ? builder.lines.filter((l) => !isQuietHiddenLine(l)) : builder.lines;
   const tree = boardView ? boardTree(shown, layout) : qbTree(shown);
   const keptLines = shown.filter(kept);
+  const flat = new Set(params.flat || []);
+  const flatPlan = (list) => list.filter((l) => flat.has(l.category)).reduce((t, l) => t + (l.plan?.plannedAmountCents || 0), 0);
   return {
     builder, layout, boardView, tree, kept,
     hiddenCount: quiet.length,
     excludedCount: shown.length - keptLines.length,
-    revenue: sumLines(keptLines.filter((l) => l.classification === 'Income')),
-    expense: sumLines(keptLines.filter((l) => l.classification !== 'Income')),
+    flat,
+    flatCount: keptLines.filter((l) => flat.has(l.category)).length,
+    revenue: { ...sumLines(keptLines.filter((l) => l.classification === 'Income')), flatPlan: flatPlan(keptLines.filter((l) => l.classification === 'Income')) },
+    expense: { ...sumLines(keptLines.filter((l) => l.classification !== 'Income')), flatPlan: flatPlan(keptLines.filter((l) => l.classification !== 'Income')) },
   };
 }
 
@@ -214,7 +221,7 @@ export function plannerRows(model, { includeExcluded = false } = {}) {
     }
     const keptLeaves = leavesOf(node).filter(model.kept);
     if (!keptLeaves.length && !includeExcluded) return;
-    push({ kind: 'header', label: node.label, depth: node.depth });
+    push({ kind: 'header', label: node.label, depth: node.depth, key: node.key, isRevenue: node.isRevenue, wrapper: node.wrapper });
     node.children.forEach(walk);
     push({ kind: 'total', label: `Total ${node.label}`, depth: node.depth, fig: sumLines(keptLeaves) });
   };
@@ -250,10 +257,16 @@ function deltaTone(pct) {
   return pct == null ? 'tone-muted' : pct > 4 ? 'bp-up' : pct < 0 ? 'bp-down' : 'bp-flat';
 }
 
+// How much of the base-year budget the actual has used: what the year-to-date view is read against.
+function usedText(f) {
+  return f.hasBud && f.bud ? `${Math.round((f.act / f.bud) * 100)}%` : '—';
+}
+
 function cellText(key, f, net = false) {
   const m = net ? (c) => (c < 0 ? `−${USD.format(Math.abs(Math.round(c / 100)))}` : USD.format(Math.round(c / 100))) : money;
   if (key === 'bud') return f.hasBud ? m(f.bud) : '—';
   if (key === 'act') return m(f.act);
+  if (key === 'used') return usedText(f);
   if (key === 'proj') return m(f.proj);
   if (key === 'plan') return f.hasPlan ? m(f.plan) : '—';
   if (key === 'change') return f.hasBud && f.hasPlan ? signed(f.plan - f.bud) : '—';
@@ -262,11 +275,11 @@ function cellText(key, f, net = false) {
 }
 
 function figureCell(key, f, kind) {
-  if (kind === 'net' && key === 'delta') return '<td></td>';
+  if (kind === 'net' && (key === 'delta' || key === 'used')) return '<td></td>';
   if (kind === 'net' && key === 'change') return '<td></td>';
   // data-col marks the figure columns for budget-planner-live.js, which redraws totals as a cell is
   // typed in; a line's own cells also carry the stored cents so the script can re-add them.
-  const attrs = ` data-col="${key}"${kind === 'leaf' && key !== 'delta' ? ` data-c="${f[key] ?? 0}" data-has="${key === 'bud' ? (f.hasBud ? 1 : 0) : key === 'plan' ? (f.hasPlan ? 1 : 0) : 1}"` : ''}`;
+  const attrs = ` data-col="${key}"${kind === 'leaf' && key !== 'delta' && key !== 'used' ? ` data-c="${f[key] ?? 0}" data-has="${key === 'bud' ? (f.hasBud ? 1 : 0) : key === 'plan' ? (f.hasPlan ? 1 : 0) : 1}"` : ''}`;
   if (kind === 'net') {
     const v = { bud: f.bud, act: f.act, proj: f.proj, plan: f.plan }[key];
     if ((key === 'bud' && !f.hasBud) || (key === 'plan' && !f.hasPlan)) return `<td class="tone-muted"${attrs}>—</td>`;
@@ -291,6 +304,7 @@ export function plannerCsv(model, p) {
   const value = (key, f, kind) => {
     if (key === 'bud') return f.hasBud ? d(f.bud) : '';
     if (key === 'act') return d(f.act);
+    if (key === 'used') return f.hasBud && f.bud ? `${((f.act / f.bud) * 100).toFixed(1)}%` : '';
     if (key === 'proj') return d(f.proj);
     if (key === 'plan') return f.hasPlan ? d(f.plan) : '';
     if (kind === 'net') return '';
@@ -316,6 +330,8 @@ const sameNumber = (a, b) => a === b || (a !== '' && b !== '' && Number(a) === N
 // correction; a blank Plan cell is left alone (Remove takes a line out of the plan). Only an admin's
 // Projected and Actual cells are read at all.
 export function parsePlannerForm(form, { canEditActuals = false } = {}) {
+  // Display names and headings renamed in place (admin only, like the corrections below).
+  const names = { accountLabels: {}, revenueLabels: {}, expenseLabels: {} };
   const errors = [];
   const year = (v) => { const n = Number(v); return Number.isInteger(n) && n >= 2000 && n <= 2100 ? n : null; };
   const targetYear = year(form.get('target_year'));
@@ -336,6 +352,10 @@ export function parsePlannerForm(form, { canEditActuals = false } = {}) {
         else plan.push({ category, classification, fiscal_year: targetYear, planned_amount: String(Math.round(Number(v))), notes: String(form.get(`notes_${i}`) || '') });
       }
     }
+    if (canEditActuals && form.has(`lname_${i}`)) {
+      const v = String(form.get(`lname_${i}`) || '').trim();
+      if (v !== String(form.get(`orig_lname_${i}`) || '').trim()) names.accountLabels[category] = v;
+    }
     if (canEditActuals && form.has(`proj_${i}`)) {
       const v = clean(form.get(`proj_${i}`));
       if (!sameNumber(v, clean(form.get(`orig_proj_${i}`)))) {
@@ -351,14 +371,28 @@ export function parsePlannerForm(form, { canEditActuals = false } = {}) {
       }
     }
   }
-  return { targetYear, baseYear, plan, projections, actuals, errors };
+  if (canEditActuals) {
+    for (const [field, value] of form.entries()) {
+      const m = /^hl_(wrapper|revenue_[a-z_]+|expense_[a-z_]+)$/.exec(field);
+      if (!m) continue;
+      const v = String(value || '').trim().slice(0, 80);
+      if (v === String(form.get(`orig_${field}`) || '').trim()) continue;
+      if (m[1] === 'wrapper') names.donorWrapperLabel = v;
+      else if (m[1].startsWith('revenue_')) names.revenueLabels[m[1].slice(8)] = v;
+      else names.expenseLabels[m[1].slice(8)] = v;
+    }
+  }
+  const renames = {};
+  for (const key of ['accountLabels', 'revenueLabels', 'expenseLabels']) if (Object.keys(names[key]).length) renames[key] = names[key];
+  if (names.donorWrapperLabel !== undefined) renames.donorWrapperLabel = names.donorWrapperLabel;
+  return { targetYear, baseYear, plan, projections, actuals, renames, errors };
 }
 
 // The view to return to after a save: only the planner's own view keys survive.
 export function plannerBackQuery(raw) {
   const src = new URLSearchParams(String(raw || '').slice(0, 4000));
   const out = new URLSearchParams([['section', 'planning'], ['page', 'builder']]);
-  for (const [k, v] of src) if (['target', 'base', 'view', 'cols', 'x', 'out_exp', 'out_rev', 'native'].includes(k)) out.append(k, v.slice(0, 200));
+  for (const [k, v] of src) if (['target', 'base', 'view', 'cols', 'x', 'f', 'out_exp', 'out_rev'].includes(k)) out.append(k, v.slice(0, 200));
   return out;
 }
 
@@ -457,7 +491,7 @@ function header(builder, p, now) {
   for (let y = p.target - 6; y < p.target; y += 1) bases.push(y);
   const opt = (y, sel) => `<option value="${y}"${y === sel ? ' selected' : ''}>${y}</option>`;
   return `<div class="bp-head">
-      <div><h2>Budget FY${p.target}</h2><p class="muted-line">Base year ${p.base}${builder.prorated ? ` (annualized from ${Math.round(builder.throughWeek)} weeks of actuals)` : ''} · independent of QuickBooks until you commit</p></div>
+      <div><h2>Budget FY${p.target}</h2><p class="muted-line">Base year ${p.base}${builder.prorated ? ` (annualized from ${Math.round(builder.throughWeek)} weeks of actuals, ${Math.round((builder.throughWeek / 52) * 100)}% of the year)` : ''} · independent of QuickBooks until you commit</p></div>
       <form method="GET" action="/" class="bp-years">${hiddenView(p, ['target', 'base', 'x', 'pick', 'tab'])}
         <label class="field"><span>Base year</span><select name="base">${bases.map((y) => opt(y, p.base)).join('')}</select></label>
         <label class="field"><span>Projecting for</span><select name="target">${targets.map((y) => opt(y, p.target)).join('')}</select></label>
@@ -490,11 +524,16 @@ function toolbar(model, p, { pickFormId }) {
   };
   const pick = p.pick
     ? `<form method="GET" action="/" id="${pickFormId}" class="bp-pick">${hiddenView(p, ['x', 'pick'])}<button type="submit" class="button-outline">Done choosing rows</button></form>`
-    : `<a class="button-outline bp-button" href="${href(p, { pick: true })}">Choose rows</a>`;
+    : `<a class="button-outline bp-button" href="${href(p, { pick: true, flatPick: false })}">Choose rows</a>`;
+  const flatPick = p.flatPick
+    ? `<form method="GET" action="/" id="${FLAT_FORM_ID}" class="bp-pick">${hiddenView(p, ['f', 'fpick'])}<button type="submit" class="button-outline">Done choosing growing lines</button></form>`
+    : `<a class="button-outline bp-button" href="${href(p, { flatPick: true, pick: false })}" title="Pick which lines grow in the five-year outlook">Choose lines that grow</a>`;
   const csv = `/api/v1/budget-planner-csv?${new URLSearchParams(plannerQuery(p, {}, ['pick', 'tab'])).toString().replace(/&/g, '&amp;')}`;
   return `<div class="bp-toolbar">
       <span class="bp-label">Columns</span><div class="chip-row bp-chips">${PLANNER_COLUMNS.map(chip).join('')}</div>
       ${pick}
+      ${flatPick}
+      ${p.flat.length && !p.flatPick ? `<span class="muted-line">${p.flat.length} line${p.flat.length === 1 ? '' : 's'} held flat in the outlook</span><a href="${href(p, { flat: [] })}">Let every line grow</a>` : ''}
       ${model.excludedCount ? `<span class="muted-line">${model.excludedCount} line${model.excludedCount === 1 ? '' : 's'} left out</span><a href="${href(p, { exclude: [], pick: false })}">Include all lines</a>` : ''}
       ${model.hiddenCount ? (p.showHidden
     ? `<a href="${href(p, { showHidden: false })}">Hide the ${model.hiddenCount} unused line${model.hiddenCount === 1 ? '' : 's'} again</a>`
@@ -510,14 +549,6 @@ function toolbar(model, p, { pickFormId }) {
     </div>`;
 }
 
-function basisNote(l) {
-  const plan = l.plan;
-  if (!plan) return 'Not planned';
-  if (plan.draft) return 'Your draft';
-  if (plan.basis === 'grown') return `Grown${plan.growthPct != null ? ` ${plan.growthPct >= 0 ? '+' : ''}${(plan.growthPct * 100).toFixed(1).replace(/\.0$/, '')}%` : ''}`;
-  return 'Manual';
-}
-
 // One account line. Editable cells carry their original value so only changes are saved.
 function leafRow(r, ctx) {
   const l = r.line;
@@ -527,10 +558,19 @@ function leafRow(r, ctx) {
   const i = editable ? ctx.counter++ : null;
   const ids = editable ? `<input type="hidden" name="p_${i}" value="${e(l.category)}"><input type="hidden" name="c_${i}" value="${l.classification === 'Income' ? 'Income' : 'Expenses'}"><input type="hidden" name="n_${i}" value="${e(l.name || shown)}"><input type="hidden" name="notes_${i}" value="${e(l.plan?.notes || '')}">` : '';
   const pickBox = p.pick ? `<input type="checkbox" form="${ctx.pickFormId}" name="x" value="${e(l.category)}"${r.excluded ? ' checked' : ''} aria-label="Leave out ${e(shown)}" title="Tick to leave this line out of the totals, the export and the printed sheet">` : '';
-  const remove = ctx.canManage && l.plan && !l.plan.draft && ctx.form
-    ? `<button type="submit" class="link-button bp-remove" formaction="/api/v1/connect-budget-plan-remove" formnovalidate name="category" value="${e(l.category)}" title="Remove this line from the FY${p.target} plan">Remove</button>` : '';
-  const sub = `${layout && isHiddenAccount(layout, l.category) ? 'Hidden in Chart of Accounts · ' : (isQuietHiddenLine(l) ? 'Unused this year · ' : '')}${shown !== l.name ? `${e(l.name)} · ` : ''}${e(basisNote(l))}${l.plan?.notes ? ` · ${e(l.plan.notes)}` : ''}`;
-  const label = `<td class="bp-name" style="padding-left:${10 + r.depth * 16}px">${pickBox}${ids}<b>${e(shown)}</b><small>${sub}${remove}</small></td>`;
+  const flatBox = p.flatPick ? `<input type="checkbox" form="${FLAT_FORM_ID}" name="f" value="${e(l.category)}"${ctx.model.flat.has(l.category) ? ' checked' : ''} aria-label="Hold ${e(shown)} flat in the outlook" title="Tick to hold this line flat: it does not grow in the five-year outlook">` : '';
+  const sub = [
+    layout && isHiddenAccount(layout, l.category) ? 'Hidden in Chart of Accounts' : (isQuietHiddenLine(l) ? 'Unused this year' : ''),
+    shown !== l.name ? e(l.name) : '',
+    l.plan?.draft ? 'Your draft' : '',
+    l.plan?.notes ? e(l.plan.notes) : '',
+  ].filter(Boolean).join(' · ');
+  // An admin renames a line in place; it saves with the rest of the table, to the same display names
+  // Chart of Accounts keeps. A blank name goes back to the QuickBooks name.
+  const nameCell = editable && ctx.canManage && layout
+    ? `<input type="text" name="lname_${i}" value="${e(shown)}" class="bp-name-input" aria-label="Name of ${e(shown)}" maxlength="120"><input type="hidden" name="orig_lname_${i}" value="${e(shown)}">`
+    : `<b>${e(shown)}</b>`;
+  const label = `<td class="bp-name" style="padding-left:${10 + r.depth * 16}px">${pickBox}${flatBox}${ids}${nameCell}${sub ? `<small>${sub}</small>` : ''}</td>`;
   const f = r.fig;
   const input = (name, value, extra, aria) => `<input type="text" inputmode="${extra.inputmode}" name="${name}_${i}" value="${e(value)}" class="bp-input${extra.cls ? ` ${extra.cls}` : ''}" aria-label="${e(aria)}"${extra.title ? ` title="${e(extra.title)}"` : ''}><input type="hidden" name="orig_${name}_${i}" value="${e(value)}">`;
   const cells = p.cols.map((key) => {
@@ -550,7 +590,13 @@ function tableRows(model, ctx) {
   return rows.map((r) => {
     if (r.kind === 'leaf') return leafRow(r, ctx);
     if (r.kind === 'side') return `<tr class="bb-group"><td colspan="${span}">${e(r.label)}</td></tr>`;
-    if (r.kind === 'header') return `<tr class="bp-header" data-bp="header" data-side="${r.side}"><td colspan="${span}" style="padding-left:${10 + r.depth * 16}px">${e(r.label)}</td></tr>`;
+    if (r.kind === 'header') {
+      const field = r.wrapper ? 'hl_wrapper' : r.key ? `hl_${r.isRevenue ? 'revenue' : 'expense'}_${r.key}` : '';
+      const text = ctx.form && ctx.canManage && ctx.layout && field
+        ? `<input type="text" name="${field}" value="${e(r.label)}" class="bp-name-input bp-heading-input" aria-label="Heading ${e(r.label)}" maxlength="80"><input type="hidden" name="orig_${field}" value="${e(r.label)}">`
+        : e(r.label);
+      return `<tr class="bp-header" data-bp="header" data-side="${r.side}"><td colspan="${span}" style="padding-left:${10 + r.depth * 16}px">${text}</td></tr>`;
+    }
     const cls = r.kind === 'net' ? 'bb-result' : r.kind === 'sidetotal' ? 'bb-total' : 'bb-subtotal';
     const pad = r.kind === 'total' ? ` style="padding-left:${10 + r.depth * 16}px"` : '';
     return `<tr class="${cls}" data-bp="${r.kind}" data-side="${r.side}"><td${pad}>${e(r.label)}</td>${ctx.p.cols.map((k) => figureCell(k, r.fig, r.kind)).join('')}</tr>`;
@@ -559,12 +605,16 @@ function tableRows(model, ctx) {
 
 // ── Five-year outlook ────────────────────────────────────────────────────────────────────────
 
-export function outlookYears({ firstYear, revenueCents, expenseCents, revenuePct, expensePct, years = 5 }) {
+// Only the lines that grow compound at the rate; `...FixedCents` is the part of each side (the lines
+// chosen to hold flat) that stays where the plan puts it.
+export function outlookYears({ firstYear, revenueCents, expenseCents, revenuePct, expensePct, revenueFixedCents = 0, expenseFixedCents = 0, years = 5 }) {
   const out = [];
-  let rev = revenueCents;
-  let exp = expenseCents;
+  let rev = revenueCents - revenueFixedCents;
+  let exp = expenseCents - expenseFixedCents;
   for (let i = 0; i < years; i += 1) {
-    out.push({ year: firstYear + i, revenueCents: rev, expenseCents: exp, gapCents: exp - rev });
+    const revenue = rev + revenueFixedCents;
+    const expense = exp + expenseFixedCents;
+    out.push({ year: firstYear + i, revenueCents: revenue, expenseCents: expense, gapCents: expense - revenue });
     rev = Math.round(rev * (1 + revenuePct / 100));
     exp = Math.round(exp * (1 + expensePct / 100));
   }
@@ -599,9 +649,9 @@ export function outlookChart(years) {
 }
 
 function outlook(model, p) {
-  const years = outlookYears({ firstYear: p.target, revenueCents: model.revenue.plan, expenseCents: model.expense.plan, revenuePct: p.outRev, expensePct: p.outExp });
+  const years = outlookYears({ firstYear: p.target, revenueCents: model.revenue.plan, expenseCents: model.expense.plan, revenuePct: p.outRev, expensePct: p.outExp, revenueFixedCents: model.revenue.flatPlan, expenseFixedCents: model.expense.flatPlan });
   const last = years[years.length - 1];
-  const rates = `${p.outExp}% expense growth and ${p.outRev === 0 ? 'flat revenue' : `${p.outRev}% revenue growth`}`;
+  const rates = `${p.outExp}% expense growth and ${p.outRev === 0 ? 'flat revenue' : `${p.outRev}% revenue growth`}${model.flatCount ? `, with the ${model.flatCount} line${model.flatCount === 1 ? '' : 's'} you chose held flat` : ''}`;
   return `<div class="panel panel-spaced bp-outlook">
       <div class="panel-head"><h2>Five-year outlook</h2><span class="muted">From the FY${p.target} plan</span></div>
       <p class="muted-line">At ${rates}, the gap ${last.gapCents > 0 ? `compounds to ${money(last.gapCents)} by FY${last.year}` : `stays closed through FY${last.year}`}. Not a forecast so much as the question “if nothing changes on the revenue side, what does this plan cost us?”</p>
@@ -625,7 +675,7 @@ export function renderBudgetBuilderPage({ liveVersion = 'local', builder: rawBui
   const model = buildPlannerModel(builder, { layout, params: p });
   const pickFormId = 'bp-pick';
   const form = canEditPlan || canEditActuals;
-  const ctx = { p, canEditPlan, canEditActuals, canManage: canManageBudgetPlan, layout, counter: 0, pickFormId, form };
+  const ctx = { model, p, canEditPlan, canEditActuals, canManage: canManageBudgetPlan, layout, counter: 0, pickFormId, form };
   const rows = tableRows(model, ctx);
   const drafts = builder.lines.filter((l) => l.plan?.draft).length;
   const viewToggle = layout
@@ -641,7 +691,7 @@ export function renderBudgetBuilderPage({ liveVersion = 'local', builder: rawBui
       <form method="POST" action="/api/v1/budget-planner-save" class="bp-form">
         <button type="submit" class="bp-default-submit" tabindex="-1" aria-hidden="true">Save changes</button>
         <input type="hidden" name="target_year" value="${p.target}"><input type="hidden" name="base_year" value="${p.base}"><input type="hidden" name="fiscal_year" value="${p.target}">
-        <input type="hidden" name="back" value="${e(new URLSearchParams(plannerQuery(p, {}, ['pick', 'tab'])).toString())}">
+        <input type="hidden" name="back" value="${e(new URLSearchParams(plannerQuery(p, {}, ['pick', 'fpick', 'tab'])).toString())}">
         ${table}
         <div class="bp-actions"><button type="submit">Save changes</button><span class="muted-line">${editNote}</span></div>
       </form>`
@@ -657,6 +707,7 @@ export function renderBudgetBuilderPage({ liveVersion = 'local', builder: rawBui
     <div class="panel panel-spaced list-panel bp-panel">
       <div class="bp-panel-head"><h2>Category by category</h2>${viewToggle}</div>
       ${toolbar(model, p, { pickFormId })}
+      ${p.flatPick ? '<p class="muted-line">Tick the lines that will <b>not</b> grow. They stay where the plan puts them in the five-year outlook; every other line grows at the rates below. Then choose Done choosing growing lines.</p>' : ''}
       ${p.pick ? '<p class="muted-line">Tick the lines to leave out of the totals, the export and the printed sheet, then choose Done choosing rows.</p>' : ''}
       ${body}
     </div>
@@ -681,7 +732,7 @@ export function renderPlannerPrint({ builder: rawBuilder, params, councilDraft =
   const builder = councilDraft ? applyCouncilDraft(rawBuilder, councilDraft) : rawBuilder;
   const model = buildPlannerModel(builder, { layout, params: p });
   const showPlan = p.printMode !== 'thisyear';
-  const cols = showPlan ? ['bud', 'act', 'proj', 'plan', 'change', 'delta'] : ['bud', 'act', 'proj'];
+  const cols = showPlan ? ['bud', 'act', 'used', 'proj', 'plan', 'change', 'delta'] : ['bud', 'act', 'used', 'proj'];
   const today = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
   const r = model.revenue;
   const x = model.expense;
@@ -768,6 +819,10 @@ export const BUDGET_BUILDER_STYLES = `
     .bp-pick, .bp-print { display:inline-flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0; }
     .bp-pick button, .bp-print button { margin:0; }
     .bp-print label { display:inline-flex; gap:4px; align-items:center; font-weight:600; color:#4B5563; }
+    .bp-name-input { width:100%; max-width:420px; font:inherit; font-weight:700; color:inherit; background:transparent; border:1px solid transparent; border-radius:6px; padding:2px 6px; margin-left:-7px; }
+    .bp-name-input:hover { border-color:#D5DBE5; background:#fff; }
+    .bp-name-input:focus { border-color:#B98B2E; background:#fff; outline:none; }
+    .bp-heading-input { font-size:13px; }
     .bp-table .bp-name small { display:block; color:#6B7280; font-size:11px; }
     .bp-table .bp-name input[type=checkbox] { margin-right:8px; vertical-align:middle; }
     .bp-excluded td { opacity:.45; }

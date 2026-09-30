@@ -1179,7 +1179,8 @@ async function handleBudgetPlannerSave(request, env, url) {
   if (!isAdmin && !isCouncilEditor) return back('error', 'Not saved: changing the budget plan needs admin access, or budget edit access for council.');
   const parsed = parsePlannerForm(form, { canEditActuals: isAdmin });
   if (parsed.errors.length) return back('error', `Not saved: ${parsed.errors.slice(0, 3).join(' ')}`);
-  if (!parsed.plan.length && !parsed.projections.length && !parsed.actuals.length) return back('ok', 'No changes to save.');
+  const renamed = Object.values(parsed.renames).reduce((n, v) => n + (typeof v === 'string' ? 1 : Object.keys(v).length), 0);
+  if (!parsed.plan.length && !parsed.projections.length && !parsed.actuals.length && !renamed) return back('ok', 'No changes to save.');
   const saved = [];
   const failed = [];
   const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -1197,6 +1198,11 @@ async function handleBudgetPlannerSave(request, env, url) {
   if (parsed.actuals.length) {
     const r = await postConnectFinanceChurchActualOverride(env, accessJwt, { year: parsed.baseYear, rows: parsed.actuals });
     const what = count(parsed.actuals.length, `FY${parsed.baseYear} actual correction`, `FY${parsed.baseYear} actual corrections`);
+    (r.ok ? saved : failed).push(r.ok ? what : `${what}: ${why(r)}`);
+  }
+  if (renamed) {
+    const r = await postConnectBoardCategoriesWrite(env, accessJwt, parsed.renames);
+    const what = count(renamed, 'name', 'names');
     (r.ok ? saved : failed).push(r.ok ? what : `${what}: ${why(r)}`);
   }
   if (!failed.length) return back('ok', `Saved in Connect: ${saved.join(', ')}.`);
@@ -1717,15 +1723,6 @@ function renderSectionBody(ctx) {
   // Finance's own page now (Planning › Budget planner); its old page=connect address resolves to it.
   if (section.id === 'accounts' && page.id === 'connect') {
     return renderConnectWorkspaceFrame('accounts');
-  }
-  // The Budget planner is Connect's own planner, run inside Finance: it is the one the church
-  // prefers. Finance's rebuilt page stays reachable with native=1, and is what any save (which comes
-  // back with a status), the print sheet and the CSV return to.
-  if (section.id === 'planning' && page.id === 'builder' && ctx.searchParams.get('native') !== '1'
-    && ctx.searchParams.get('print') !== '1' && !ctx.searchParams.get('op') && !ctx.searchParams.get('status')) {
-    return renderConnectWorkspaceFrame('planning', {
-      label: 'Budget planner', alternateHref: '/?section=planning&amp;page=builder&amp;native=1', alternateLabel: 'Finance’s own version',
-    });
   }
   if (section.id === 'planning' && page.id === 'builder' && ctx.budgetBuilder?.ok) {
     const isAdmin = !councilPreview && roleResult.ok && roleResult.role === 'admin';
@@ -2627,10 +2624,7 @@ export default {
       } catch {
         return response(null, { status: 303, headers: { Location: '/?section=accounts&status=error&reason=invalid_json' } });
       }
-      // The layout editor also sits on QuickBooks › Account mapping, which asks to come back there.
-      const back = form.get('return_to') === 'account-mapping'
-        ? (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'quickbooks', page: 'account-mapping', ...params }).toString()}#layout` } })
-        : (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'accounts', page: 'chart', ...params }).toString()}#layout` } });
+      const back = (params) => response(null, { status: 303, headers: { Location: `/?${new URLSearchParams({ section: 'accounts', page: 'chart', ...params }).toString()}#layout` } });
       const kind = String(form.get('form_kind') || '');
       // The Budget layout editor (accounts-pages.js): heading renames, or the changed rows of the
       // account table -- see buildBoardLayoutWrites for how a row's changes become the merge bodies.
@@ -4235,10 +4229,8 @@ export default {
         const councilBudgetDraftLoad = plannerView && !councilPreview && roleResult.ok && roleResult.role === 'council'
           ? fetchCouncilBudgetDraft(env, accessJwt) : null;
         // The Chart of Accounts board layout (categories, headings, renames, purpose tags) lays out
-        // the Budget planner and scenarios, and is what the Chart of Accounts editor (also on
-        // QuickBooks › Account mapping) edits.
+        // the Budget planner and scenarios, and is what the Chart of Accounts editor edits.
         let boardLayoutResult = (['builder', 'scenarios', 'multi-year'].includes(planningPageId) || section.id === 'accounts'
-          || (section.id === 'quickbooks' && resolveFinancePage(section, pageId).id === 'account-mapping')
           || (section.id === 'church' && resolveFinancePage(section, pageId).id === 'budget-actual')) ? fetchBoardLayout(env) : null;
         let boardLayout = after(boardLayoutResult, (result) => (result && result.ok ? normalizeBoardLayout(result.layout) : null));
         const planningLoads = planningV3 ? Promise.all([

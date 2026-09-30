@@ -199,18 +199,6 @@ describe('renderAccountsPage', () => {
     expect(html).toMatch(/name="path_\d+" value="Other Income:48 Other:48010 Interest"><input type="hidden" name="side_\d+" value="revenue">/);
     expect(html).not.toContain('value="Income:40 Giving:40090 Easter Offering"');
   });
-
-  it('lets an admin edit the mapping from QuickBooks › Account mapping and come back there', () => {
-    const editable = renderQuickbooksPage('account-mapping', {
-      accountsReport, boardLayout: layout, canManageBoardCategories: true, searchParams: new URLSearchParams('status=ok'),
-    });
-    expect(editable).toContain('Budget layout');
-    expect(editable).toContain('name="return_to" value="account-mapping"');
-    expect(editable).toContain('Saved in Connect.');
-    const readOnly = renderQuickbooksPage('account-mapping', { accountsReport, boardLayout: layout, canManageBoardCategories: false });
-    expect(readOnly).not.toContain('name="return_to"');
-    expect(readOnly).toContain('Only a Connect admin can change the mapping.');
-  });
 });
 
 // The same finance_church_entries/finance_settings tables Connect's contract reads.

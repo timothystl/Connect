@@ -106,24 +106,24 @@ const get = (env, q) => worker.fetch(new Request(`https://finance.test/?${q}`, {
 
 describe('Budget builder and Chart of Accounts board layout', () => {
   it('groups the Budget planner by board category with subtotals, and offers QuickBooks order', async () => {
-    const html = await (await get(makeEnv().env, 'section=planning&page=builder&native=1')).text();
-    expect(html).toContain('<tr class="bb-group"><td colspan="6">Revenue</td></tr>');
-    expect(html).toContain('<tr class="bp-header" data-bp="header" data-side="revenue"><td colspan="6" style="padding-left:10px">Donor Income</td></tr>');
-    expect(html).toContain('<tr class="bp-header" data-bp="header" data-side="revenue"><td colspan="6" style="padding-left:26px">General Offerings</td></tr>');
+    const html = await (await get(makeEnv().env, 'section=planning&page=builder')).text();
+    expect(html).toContain('<tr class="bb-group"><td colspan="7">Revenue</td></tr>');
+    expect(html).toContain('<tr class="bp-header" data-bp="header" data-side="revenue"><td colspan="7" style="padding-left:10px"><input type="text" name="hl_wrapper" value="Donor Income"');
+    expect(html).toContain('<tr class="bp-header" data-bp="header" data-side="revenue"><td colspan="7" style="padding-left:26px"><input type="text" name="hl_revenue_donor" value="General Offerings"');
     expect(html).toContain('<td style="padding-left:26px">Total General Offerings</td>');
     expect(html).toContain('<td style="padding-left:10px">Total Donor Income</td>');
-    expect(html).toContain('<td colspan="6" style="padding-left:10px">Worship &amp; Music</td>');
+    expect(html).toContain('name="hl_expense_worship" value="Worship &amp; Music"');
     expect(html).toContain('<td>Total Revenue</td>');
-    expect(html).toContain('<b>Pastor salary</b>');
+    expect(html).toContain('value="Pastor salary" class="bp-name-input"');
     expect(html.indexOf('Salaries</td>')).toBeLessThan(html.indexOf('Benefits</td>'));
     expect(html).toContain('Edit the layout in Chart of Accounts');
     expect(html).toContain('<span class="is-on">Board view</span>');
-    const qb = await (await get(makeEnv().env, 'section=planning&page=builder&native=1&view=qb')).text();
+    const qb = await (await get(makeEnv().env, 'section=planning&page=builder&view=qb')).text();
     expect(qb).not.toContain('Donor Income');
-    expect(qb).toContain('<td colspan="6" style="padding-left:26px">40 Giving</td>');
+    expect(qb).toContain('<td colspan="7" style="padding-left:26px">40 Giving</td>');
     expect(qb).toContain('<td style="padding-left:26px">Total 40 Giving</td>');
     expect(qb).toContain('<span class="is-on">QuickBooks order</span>');
-    const missing = await (await get(makeEnv({ layoutStatus: 500 }).env, 'section=planning&page=builder&native=1')).text();
+    const missing = await (await get(makeEnv({ layoutStatus: 500 }).env, 'section=planning&page=builder')).text();
     expect(missing).toContain('could not be read, so lines are listed in QuickBooks order');
   });
 
@@ -155,20 +155,44 @@ describe('Budget builder and Chart of Accounts board layout', () => {
     expect(calls.find((c) => c.path.endsWith('/finance-board-categories-write-v1')).body).toEqual({ expense: { 'Expenses:60 Payroll:60100 Salary - Pastor': 'benefits' } });
     expect(calls.find((c) => c.path.endsWith('/finance-purpose-tags-write-v1')).body).toEqual({ categories: { 'Expenses:60 Payroll:60100 Salary - Pastor': 'youth' } });
   });
+});
 
-  it('shows the same editor on QuickBooks › Account mapping and returns there after a save', async () => {
-    const { env } = makeEnv();
-    const page = await (await get(env, 'section=quickbooks&page=account-mapping')).text();
-    expect(page).toContain('id="layout"');
-    expect(page).toContain('name="return_to" value="account-mapping"');
-    const res = await worker.fetch(new Request('https://finance.test/api/v1/connect-board-categories-write', {
-      method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'jwt', 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        form_kind: 'accounts', return_to: 'account-mapping',
-        path_0: 'Expenses:60 Payroll:60100 Salary - Pastor', side_0: 'expense', orig_cat_0: '', cat_0: 'benefits', name_0: '', orig_name_0: '', tag_0: '', orig_tag_0: '',
-      }).toString(),
-    }), env);
-    expect(res.headers.get('location')).toBe('/?section=quickbooks&page=account-mapping&status=ok#layout');
+describe('Budget planner: rename lines and headings in place', () => {
+  const save = (env, fields) => worker.fetch(new Request('https://finance.test/api/v1/budget-planner-save', {
+    method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'jwt', 'Sec-Fetch-Site': 'same-origin' }, body: new URLSearchParams(fields),
+  }), env);
+  const base = { target_year: String(FY), base_year: String(FY - 1), fiscal_year: String(FY), back: `target=${FY}&base=${FY - 1}` };
+
+  it('gives an admin a name box on every line and heading, and nobody else', async () => {
+    const admin = await (await get(makeEnv().env, 'section=planning&page=builder')).text();
+    expect(admin).toMatch(/name="lname_0" value="[^"]+" class="bp-name-input"/);
+    expect(admin).toContain('name="hl_expense_salaries" value="Salaries"');
+    expect(admin).toContain('name="hl_wrapper"');
+    const council = await (await get(makeEnv({ role: 'council' }).env, 'section=planning&page=builder')).text();
+    expect(council).not.toContain('lname_');
+    expect(council).not.toContain('hl_expense_');
+  });
+
+  it('saves only the names that changed, to the same display names Chart of Accounts keeps', async () => {
+    const { env, calls } = makeEnv();
+    const res = await save(env, {
+      ...base,
+      p_0: 'Income:40 Giving:40100 Plate', c_0: 'Income', n_0: 'Plate', lname_0: 'Sunday offering', orig_lname_0: '40100 Plate', plan_0: '10000', orig_plan_0: '10000', notes_0: '',
+      p_1: 'Expenses:60 Payroll:60100 Salary - Pastor', c_1: 'Expenses', n_1: 'Pastor', lname_1: 'Pastor salary', orig_lname_1: 'Pastor salary', plan_1: '7000', orig_plan_1: '7000', notes_1: '',
+      hl_expense_salaries: 'Staff pay', orig_hl_expense_salaries: 'Salaries', hl_wrapper: 'Donor Income', orig_hl_wrapper: 'Donor Income',
+    });
+    expect(decodeURIComponent(res.headers.get('location').replace(/\+/g, ' '))).toContain('Saved in Connect: 2 names');
+    const write = calls.filter((c) => c.path.endsWith('/finance-board-categories-write-v1'));
+    expect(write).toHaveLength(1);
+    expect(write[0].body).toEqual({ accountLabels: { 'Income:40 Giving:40100 Plate': 'Sunday offering' }, expenseLabels: { salaries: 'Staff pay' } });
+    expect(calls.filter((c) => c.path.endsWith('/finance-budget-write-v1'))).toHaveLength(0);
+  });
+
+  it('ignores renames from a role that may not manage the plan', async () => {
+    const { env, calls } = makeEnv({ role: 'council' });
+    const res = await save(env, { ...base, p_0: 'Income:40 Giving:40100 Plate', c_0: 'Income', n_0: 'Plate', lname_0: 'Sneaky', orig_lname_0: 'Plate', plan_0: '10000', orig_plan_0: '10000', hl_wrapper: 'X', orig_hl_wrapper: 'Y' });
+    expect(res.status).toBe(303);
+    expect(calls.filter((c) => c.path.endsWith('/finance-board-categories-write-v1'))).toHaveLength(0);
   });
 });
 
