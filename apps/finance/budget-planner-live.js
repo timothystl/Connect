@@ -139,6 +139,49 @@ const DOM_GLUE = `
     setStrip('gap', (gap >= 0 ? '+' : '\\u2212') + money(Math.abs(gap)) + ' on this year\\u2019s revenue (FY' + base + ' projected ' + money(sums.revenue.proj) + ')');
   }
 
+  // ── Autosave ────────────────────────────────────────────────────────────────────────────────
+  // A figure, name or number is saved as soon as it is changed (the box loses focus or Enter is
+  // pressed), through the same route the Save changes button uses. The server only acts on boxes that
+  // differ from their \"orig_\" twin, so sending the whole form is safe. After a save the twins are
+  // brought up to date, so the next one carries only what changed since.
+  var form = tbody.closest('form');
+  var note = document.getElementById('bp-autosave');
+  var saving = false;
+  var again = false;
+  var timer = null;
+  function say(text, cls) { if (note) { note.textContent = text; note.className = 'bp-autosave' + (cls ? ' ' + cls : ''); } }
+  function boxes() { return [].slice.call(form.querySelectorAll('input[name]')).filter(function (i) { return i.name.indexOf('orig_') !== 0 && form.querySelector('input[name="orig_' + i.name + '"]'); }); }
+  function changed() { return boxes().filter(function (i) { return i.value !== form.querySelector('input[name="orig_' + i.name + '"]').value; }); }
+  function save() {
+    if (saving) { again = true; return; }
+    var pending = changed();
+    if (!pending.length) return;
+    var renumbered = pending.some(function (i) { return i.name.indexOf('pos_') === 0; });
+    saving = true;
+    say('Saving\u2026', 'is-saving');
+    var body = new FormData(form);
+    fetch(form.action, { method: 'POST', body: body, headers: { 'X-Planner-Autosave': '1' }, credentials: 'same-origin' })
+      .then(function (r) { return r.json().catch(function () { return { ok: false, message: 'Not saved: the answer could not be read.' }; }); })
+      .then(function (r) {
+        saving = false;
+        if (r.ok) {
+          pending.forEach(function (i) { form.querySelector('input[name="orig_' + i.name + '"]').value = i.value; });
+          if (renumbered) { window.location.reload(); return; }
+          say('Saved. ' + (r.message || ''), 'is-saved');
+        } else say(r.message || 'Not saved. Press Save changes to try again.', 'is-error');
+        if (again) { again = false; save(); }
+      })
+      .catch(function () { saving = false; say('Not saved: Connect could not be reached. Your change is still on the page; press Save changes to try again.', 'is-error'); });
+  }
+  if (form) {
+    form.addEventListener('change', function (event) {
+      var t = event.target;
+      if (!t || t.type === 'hidden' || !t.name || !form.querySelector('input[name="orig_' + t.name + '"]')) return;
+      clearTimeout(timer);
+      timer = setTimeout(save, 350);
+    });
+  }
+
   tbody.addEventListener('input', function (event) {
     if (event.target && event.target.classList && event.target.classList.contains('bp-input')) recompute();
   });

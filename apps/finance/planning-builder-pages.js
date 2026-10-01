@@ -718,7 +718,7 @@ export function renderBudgetBuilderPage({ liveVersion = 'local', builder: rawBui
         <input type="hidden" name="target_year" value="${p.target}"><input type="hidden" name="base_year" value="${p.base}"><input type="hidden" name="fiscal_year" value="${p.target}">
         <input type="hidden" name="back" value="${e(new URLSearchParams(plannerQuery(p, {}, ['pick', 'fpick', 'tab'])).toString())}">
         ${table}
-        <div class="bp-actions"><button type="submit">Save changes</button><span class="muted-line">${editNote}</span></div>
+        <div class="bp-actions"><button type="submit">Save changes</button><span class="bp-autosave" id="bp-autosave" role="status" aria-live="polite">Changes save on their own as you make them.</span><span class="muted-line">${editNote}</span></div>
       </form>`
     : table;
   const lede = `<p class="lede">The FY${p.target} church budget, category by category, built from FY${p.base}. Grouped the way the board reads a budget, not the way QuickBooks numbers it (set on Chart of Accounts). Δ% flags anything planned to grow more than 4% over the FY${p.base} budget. FY${p.base} projected is ${builder.prorated ? `the year-to-date actual extended to a full year (week ${builder.throughWeek} of 52)` : 'the full-year actual'}, unless a correction has been set.</p>`;
@@ -881,6 +881,10 @@ export const BUDGET_BUILDER_STYLES = `
     .bp-default-submit { position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden; }
     .bp-actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:12px; }
     .bp-actions button { margin:0; }
+    .bp-autosave { font-size:12.5px; color:#6B7280; }
+    .bp-autosave.is-saving { color:#B98B2E; }
+    .bp-autosave.is-saved { color:#2F7D5B; }
+    .bp-autosave.is-error { color:#B5412F; font-weight:600; }
     .bp-outlook-body { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(0,1fr); gap:18px; align-items:start; }
     @media(max-width:900px){ .bp-outlook-body { grid-template-columns:1fr; } }
     .bp-outlook-chart { display:block; height:auto; }

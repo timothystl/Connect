@@ -137,3 +137,36 @@ describe('Five-year outlook grows only the lines you pick', () => {
     expect(plain).not.toContain('held flat');
   });
 });
+
+describe('Budget planner autosave', () => {
+  const save = (env, fields, headers = {}) => worker.fetch(new Request('https://finance.test/api/v1/budget-planner-save', {
+    method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'jwt', 'Sec-Fetch-Site': 'same-origin', ...headers }, body: new URLSearchParams(fields),
+  }), env);
+  const form = { target_year: String(FY), base_year: String(FY - 1), fiscal_year: String(FY), back: `target=${FY}&base=${FY - 1}`, p_0: 'Income:Offerings', c_0: 'Income', n_0: 'Offerings', notes_0: '', orig_plan_0: '946004' };
+
+  it('answers a background save with data, not a redirect', async () => {
+    const { env, calls } = makeEnv();
+    const ok = await save(env, { ...form, plan_0: '950000' }, { 'X-Planner-Autosave': '1' });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get('Content-Type')).toContain('application/json');
+    expect(await ok.json()).toMatchObject({ ok: true, message: expect.stringContaining('Saved in Connect') });
+    expect(calls.some((c) => c.path.endsWith('-write-v1'))).toBe(true);
+    const bad = await save(env, { ...form, plan_0: 'abc' }, { 'X-Planner-Autosave': '1' });
+    expect(bad.status).toBe(422);
+    expect(await bad.json()).toMatchObject({ ok: false, message: expect.stringContaining('not a dollar amount') });
+    // Without the header, the Save changes button still redirects back to the page.
+    const plain = await save(env, { ...form, plan_0: '950000' });
+    expect(plain.status).toBe(303);
+  });
+
+  it('lets the planner page save in the background, and only that page', async () => {
+    const { env } = makeEnv();
+    const page = await get(env);
+    expect(page.headers.get('Content-Security-Policy')).toContain("connect-src 'self'");
+    const html = await page.text();
+    expect(html).toContain('id="bp-autosave"');
+    expect(BUDGET_PLANNER_LIVE_JS).toContain('X-Planner-Autosave');
+    const other = await worker.fetch(new Request('https://finance.test/?section=planning&page=scenarios', { headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }), env);
+    expect(other.headers.get('Content-Security-Policy')).not.toContain('connect-src');
+  });
+});
