@@ -319,12 +319,24 @@ describe('Finance alpha staging shell', () => {
     expect(unknown).toContain('aria-label="Financial health detail"');
   });
 
+  it('offers the app icon for the home screen: touch icon, manifest and sized icons', async () => {
+    const page = await (await worker.fetch(new Request('https://finance.test/'), env)).text();
+    expect(page).toContain('<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">');
+    expect(page).toContain('<link rel="manifest" href="/manifest.webmanifest">');
+    const res = await worker.fetch(new Request('https://finance.test/manifest.webmanifest'), env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/manifest+json');
+    const manifest = await res.json();
+    expect(manifest.icons.map((i) => i.sizes)).toEqual(['192x192', '512x512', '512x512']);
+    for (const icon of manifest.icons) expect((await worker.fetch(new Request(`https://finance.test${icon.src}`), env)).status).toBe(200);
+  });
+
   it('serves the self-hosted logo and fonts with a same-origin-only CSP', async () => {
     const page = await worker.fetch(new Request('https://finance.test/'), env);
     expect(page.headers.get('Content-Security-Policy')).toContain("img-src 'self'; font-src 'self'");
     expect(page.headers.get('Content-Security-Policy')).not.toMatch(/script-src|https?:/);
     expect(page.headers.get('Cache-Control')).toBe('no-store');
-    for (const [path, type] of [['/assets/finance-mark.png', 'image/png'], ['/assets/finance-icon.png', 'image/png'], ['/assets/fonts/hero-regular.woff2', 'font/woff2'], ['/assets/fonts/hero-bold.woff2', 'font/woff2'], ['/assets/fonts/outfit.woff2', 'font/woff2'], ['/assets/fonts/figtree.woff2', 'font/woff2']]) {
+    for (const [path, type] of [['/assets/finance-mark.png', 'image/png'], ['/assets/finance-icon.png', 'image/png'], ['/apple-touch-icon.png', 'image/png'], ['/assets/finance-icon-192.png', 'image/png'], ['/assets/finance-icon-512.png', 'image/png'], ['/assets/finance-icon-maskable-512.png', 'image/png'], ['/assets/fonts/hero-regular.woff2', 'font/woff2'], ['/assets/fonts/hero-bold.woff2', 'font/woff2'], ['/assets/fonts/outfit.woff2', 'font/woff2'], ['/assets/fonts/figtree.woff2', 'font/woff2']]) {
       const res = await worker.fetch(new Request(`https://finance.test${path}`), env);
       expect(res.status, path).toBe(200);
       expect(res.headers.get('Content-Type')).toBe(type);

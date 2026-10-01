@@ -87,7 +87,7 @@ describe('Finance staging route manifest', () => {
     const paths = FINANCE_ROUTE_MANIFEST.flatMap((route) => route.paths);
     expect(new Set(paths).size).toBe(paths.length);
     expect(paths).toEqual([
-      '/', '/index.html', '/health', '/assets/finance-mark.png', '/assets/finance-icon.png', '/assets/fonts/hero-regular.woff2', '/assets/fonts/hero-bold.woff2', '/assets/fonts/outfit.woff2', '/assets/fonts/figtree.woff2', '/api/v1/summary',
+      '/', '/index.html', '/health', '/assets/finance-mark.png', '/assets/finance-icon.png', '/apple-touch-icon.png', '/apple-touch-icon-precomposed.png', '/assets/finance-icon-192.png', '/assets/finance-icon-512.png', '/assets/finance-icon-maskable-512.png', '/manifest.webmanifest', '/assets/fonts/hero-regular.woff2', '/assets/fonts/hero-bold.woff2', '/assets/fonts/outfit.woff2', '/assets/fonts/figtree.woff2', '/api/v1/summary',
       '/api/v1/connect-giving-preview', '/api/v1/board-packet-export', '/api/v1/connect-giving-transport-evidence',
       '/api/v1/budget-plan-save', '/api/v1/connect-budget-plan-write', '/api/v1/connect-compensation-plan-write',
       '/api/v1/connect-budget-generate', '/api/v1/connect-budget-generate-all', '/api/v1/connect-budget-commit', '/api/v1/connect-budget-plan-remove',
