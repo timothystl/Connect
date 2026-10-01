@@ -6,7 +6,6 @@ import { handleReportsApi } from '../src/api-reports.js';
 import {
   CHMS_APP_MEMBER_JS, CHMS_APP_STAFF_JS, CHMS_APP_EXT_JS, CHMS_SCHEDULER_JS,
 } from '../src/html-chms.js';
-import { csvText as financeCsvText, csvNum as financeCsvNum } from '../apps/finance/payroll-report-render.js';
 
 // SEC18 / P22-C, 2026-08-19. The spreadsheet formula guard SW15 added lived on the three
 // FRONTEND csv builders and on none of the four server-side ones — and the giving-statement
@@ -220,33 +219,10 @@ describe('there is one CSV escaper per runtime boundary', () => {
         });
       }
     };
-    // api-utils owns the one real implementation; scheduler-html and apps/finance's payroll
-    // report keep documented local copies because each must stand alone (scheduler/index.html,
-    // and apps/finance being deliberately free of any src/ dependency so it can be lifted out as
-    // its own application) — the comparison test right below checks THIS copy for drift instead.
+    // api-utils owns the one real implementation; scheduler-html keeps a documented local copy
+    // because it must stand alone (scheduler/index.html).
     walk(new URL('../src/', import.meta.url), '', ['api-utils.js', 'scheduler-html.js', 'frontend/js-core.js']);
-    walk(new URL('../apps/', import.meta.url), '', ['finance/payroll-report-render.js']);
     expect(offenders, 'hand-rolled CSV quoting outside the shared/documented helpers').toEqual([]);
-  });
-
-  it('apps/finance\'s payroll CSV copy agrees with the canonical csvCell on every case that matters', () => {
-    // Excludes csvCell's plain-number carve-out (e.g. '-1234.56' staying unguarded text) —
-    // csvText is documented as being for text a person TYPED, never a figure this file computed
-    // itself; that carve-out is csvNum's job instead (see the second half of this test), so a
-    // bare negative number is not a case csvText is meant to agree with csvCell on.
-    const cases = ['plain', 'a,b', 'say "hi"', FORMULA, '-1+1', '1234', '', '@x', '+1', 'two\nlines', null, undefined];
-    for (const c of cases) {
-      // financeCsvText always quotes (csvCell only quotes when needed) — compare on the
-      // unquoted, unescaped content instead of the raw string.
-      const canonical = csvCell(c).replace(/^"|"$/g, '').replace(/""/g, '"');
-      const finance = financeCsvText(c).replace(/^"|"$/g, '').replace(/""/g, '"');
-      expect(finance, JSON.stringify(c)).toBe(canonical);
-    }
-    // csvNum deliberately never applies the formula guard (see payroll-report-render.js's own
-    // comment): a negative figure this file computed itself must stay a real number, not text.
-    expect(financeCsvNum('-118.00')).toBe('"-118.00"');
-    expect(financeCsvNum(null)).toBe('""');
-    expect(financeCsvNum(undefined)).toBe('""');
   });
 
   it('the browser copy agrees with the server copy on every case that matters', () => {

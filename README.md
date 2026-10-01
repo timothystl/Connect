@@ -1,16 +1,10 @@
 # Timothy Connect and Finance
 
-This repository contains production Connect, Giving, Serve/Scheduler and the legacy Finance
-module, plus the independently deployed Finance application under `apps/finance/`.
-Connect remains authoritative for people and Giving. New Finance has separate staging and
-production Workers/databases, real contract reads and Giving/payroll relays, alongside synthetic
-readers and unfinished pages. It is no longer accurately described as synthetic-only or read-only.
-
-The [production runbook](docs/FINANCE_PRODUCTION_CUTOVER.md) records deployed infrastructure.
-Finance released again September 18 with expanded report/edit paths. Missing-fixture page crashes
-and runtime role-failure behavior have been improved; data/writer cutover, complete permissions,
-and workflow parity remain open. New Finance-owned writes are off by default.
-See [Finance scope and limitations](apps/finance/README.md).
+This repository contains production Connect, Giving, and Serve/Scheduler. Finance is its own
+application in [timothystl/finance](https://github.com/timothystl/finance) (split from this
+repository in October 2026 with its full history). Connect remains authoritative for people and
+Giving; Finance reads versioned contract summaries from Connect and relays Giving and compensation
+writes back to it. The contracts Finance consumes are produced here (`contracts/`, `/api/contracts/*`).
 
 Start with [AGENTS.md](AGENTS.md) for development and release boundaries. Current reference docs:
 
@@ -19,7 +13,7 @@ Start with [AGENTS.md](AGENTS.md) for development and release boundaries. Curren
 - [Operations](docs/OPERATIONS.md)
 - [Security](docs/SECURITY.md)
 - [Testing](docs/TESTING.md)
-- [Finance alpha](apps/finance/README.md)
+- [Finance (separate repository)](https://github.com/timothystl/finance)
 
 Use Node 22. Install and validate with:
 

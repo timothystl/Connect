@@ -34,19 +34,4 @@ describe('shared contract validators boundary', () => {
       }
     }
   });
-
-  // Finance runs its own accounting code (apps/finance/accounting/). Only the older accounting
-  // workspace screens still borrow Connect's browser code; that pair is the last tie to remove
-  // before Finance can move to its own repository.
-  it('keeps Finance from importing Connect source, apart from the older workspace screens', () => {
-    const allowed = new Set(['apps/finance/accounting-workspace.js', 'apps/finance/connect-planner.js']);
-    for (const file of jsFilesUnder(path.join(repoRoot, 'apps/finance'))) {
-      const rel = path.relative(repoRoot, file).split(path.sep).join('/');
-      if (allowed.has(rel) || rel.endsWith('.generated.js')) continue;
-      for (const spec of importSpecifiers(fs.readFileSync(file, 'utf8'))) {
-        const target = path.relative(repoRoot, path.resolve(path.dirname(file), spec)).split(path.sep).join('/');
-        expect(spec.startsWith('.') && (target.startsWith('src/') || target === 'connect-worker.js'), `${rel} imports ${spec}`).toBe(false);
-      }
-    }
-  });
 });
