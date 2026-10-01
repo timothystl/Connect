@@ -575,7 +575,6 @@ function leafRow(r, ctx) {
   const flatBox = p.flatPick ? `<input type="checkbox" form="${FLAT_FORM_ID}" name="f" value="${e(l.category)}"${ctx.model.flat.has(l.category) ? ' checked' : ''} aria-label="Hold ${e(shown)} flat in the outlook" title="Tick to hold this line flat: it does not grow in the five-year outlook">` : '';
   const sub = [
     layout && isHiddenAccount(layout, l.category) ? 'Hidden in Chart of Accounts' : (isQuietHiddenLine(l) ? 'Unused this year' : ''),
-    shown !== l.name ? e(l.name) : '',
     l.plan?.draft ? 'Your draft' : '',
     l.plan?.notes ? e(l.plan.notes) : '',
   ].filter(Boolean).join(' · ');
