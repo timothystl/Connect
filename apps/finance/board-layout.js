@@ -38,6 +38,13 @@ export const DONOR_WRAPPER_DEFAULT_LABEL = 'Donor Income';
 
 const isObject = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 
+// A saved category order made complete: the saved keys first (known ones only, once each), then any
+// the saved list lacks in their built-in order, so a new category never goes missing.
+function orderOf(saved, builtIn) {
+  const first = Array.isArray(saved) ? [...new Set(saved)].filter((k) => builtIn.includes(k)) : [];
+  return [...first, ...builtIn.filter((k) => !first.includes(k))];
+}
+
 // The contract payload (or nothing) as one plain settings object; every map is present.
 export function normalizeBoardLayout(payload) {
   const c = isObject(payload && payload.boardCategories) ? payload.boardCategories : {};
@@ -50,6 +57,8 @@ export function normalizeBoardLayout(payload) {
     donorWrapperLabel: typeof c.donorWrapperLabel === 'string' ? c.donorWrapperLabel : '',
     accountLabels: isObject(c.accountLabels) ? c.accountLabels : {},
     hidden: isObject(c.hiddenAccounts) ? Object.fromEntries(Object.entries(c.hiddenAccounts).filter(([, v]) => v === true)) : {},
+    expenseOrder: orderOf(c.expenseOrder, BOARD_EXPENSE_ORDER),
+    revenueOrder: orderOf(c.revenueOrder, ['donor', 'earned', 'passive']),
     tags: Array.isArray(t.tags) ? t.tags.filter((x) => x && typeof x.id === 'string' && typeof x.label === 'string') : [],
     tagCategories: isObject(t.categories) ? t.categories : {},
   };
@@ -105,11 +114,15 @@ export function buildBoardSections(items, layout, pick) {
     const members = buckets[side][key];
     return members && members.length ? { kind: 'group', key, isRevenue: side === 'revenue', label: boardLabelFor(layout, key, side === 'revenue'), items: members } : null;
   };
-  const revenue = [];
   const donorGroups = ['donor', 'restricted'].map((k) => group('revenue', k)).filter(Boolean);
-  if (donorGroups.length) revenue.push({ kind: 'wrapper', label: donorWrapperLabel(layout), groups: donorGroups });
-  for (const key of ['earned', 'passive']) { const g = group('revenue', key); if (g) revenue.push(g); }
-  const expense = BOARD_EXPENSE_ORDER.map((k) => group('expense', k)).filter(Boolean);
+  // Revenue follows the saved order; the Donor Income wrapper stands where 'donor' is.
+  const revenueOrder = layout.revenueOrder || ['donor', 'earned', 'passive'];
+  const revenueByKey = {
+    donor: donorGroups.length ? { kind: 'wrapper', label: donorWrapperLabel(layout), groups: donorGroups } : null,
+    earned: group('revenue', 'earned'), passive: group('revenue', 'passive'),
+  };
+  const revenue = revenueOrder.map((k) => revenueByKey[k]).filter(Boolean);
+  const expense = (layout.expenseOrder || BOARD_EXPENSE_ORDER).map((k) => group('expense', k)).filter(Boolean);
   return { revenue, expense };
 }
 
@@ -152,4 +165,19 @@ export function buildBoardLayoutWrites(form, kind) {
     boardBody: Object.keys(boardBody).length ? boardBody : null,
     tagsBody: Object.keys(categories).length ? { categories } : null,
   };
+}
+
+// Moves one category a step up or down among the categories the page shows (an empty category is
+// not shown, so it is stepped over). `order` is the full saved order; returns the new full order, or
+// the same one when the key is already at that end or is not shown.
+export function moveBoardCategory(order, shown, key, dir) {
+  const visible = order.filter((k) => shown.includes(k));
+  const at = visible.indexOf(key);
+  const to = at + (dir === 'up' ? -1 : 1);
+  if (at < 0 || to < 0 || to >= visible.length) return order;
+  const next = [...order];
+  const a = next.indexOf(key);
+  const b = next.indexOf(visible[to]);
+  [next[a], next[b]] = [next[b], next[a]];
+  return next;
 }

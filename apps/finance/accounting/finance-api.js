@@ -3444,9 +3444,15 @@ export const BOARD_EXPENSE_CATEGORIES = [
   { key: 'programs', label: 'Programs' },
 ];
 export const BOARD_EXPENSE_KEYS = BOARD_EXPENSE_CATEGORIES.map(c => c.key);
+// A saved category order: only known keys, each once, in the saved sequence; anything else drops out.
+function cleanBoardOrder(value, allowed) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value)].filter((k) => allowed.includes(k));
+}
+
 export async function readPlanningBoardCategories(db) {
   const row = await db.prepare("SELECT value FROM finance_settings WHERE key='finance_planning_board_categories'").first();
-  const empty = { revenue: {}, expense: {}, revenueLabels: {}, expenseLabels: {}, donorWrapperLabel: '', accountLabels: {}, hiddenAccounts: {} };
+  const empty = { revenue: {}, expense: {}, revenueLabels: {}, expenseLabels: {}, donorWrapperLabel: '', accountLabels: {}, hiddenAccounts: {}, expenseOrder: [], revenueOrder: [] };
   if (!row) return empty;
   try {
     const v = JSON.parse(row.value) || {};
@@ -3469,6 +3475,11 @@ export async function readPlanningBoardCategories(db) {
       // builder and Budget vs actual, keyed by category_path -> true. Display only: a hidden line
       // that still carries money is shown anyway, so no total ever changes.
       hiddenAccounts: v.hiddenAccounts && typeof v.hiddenAccounts === 'object' ? v.hiddenAccounts : {},
+      // The order the board lists its categories in (the budget's headings), as category keys; an
+      // empty list is the built-in order. Display only. Revenue keeps Unrestricted and Restricted
+      // together under the Donor Income wrapper, which sits where 'donor' is.
+      expenseOrder: cleanBoardOrder(v.expenseOrder, BOARD_EXPENSE_KEYS),
+      revenueOrder: cleanBoardOrder(v.revenueOrder, REVENUE_STREAMS),
     };
   } catch { return empty; }
 }
@@ -3491,6 +3502,7 @@ export async function applyBoardCategoryMerge(db, body) {
     donorWrapperLabel: current.donorWrapperLabel,
     accountLabels: { ...current.accountLabels },
     hiddenAccounts: { ...current.hiddenAccounts },
+    expenseOrder: [...current.expenseOrder], revenueOrder: [...current.revenueOrder],
   };
   if (b.revenue && typeof b.revenue === 'object') {
     for (const [path, key] of Object.entries(b.revenue)) {
@@ -3521,6 +3533,13 @@ export async function applyBoardCategoryMerge(db, body) {
       const clean = String(label || '').trim();
       if (clean) merged.expenseLabels[key] = clean; else delete merged.expenseLabels[key];
     }
+  }
+  for (const [field, allowed] of [['expenseOrder', BOARD_EXPENSE_KEYS], ['revenueOrder', REVENUE_STREAMS]]) {
+    if (b[field] === undefined) continue;
+    if (!Array.isArray(b[field]) || b[field].some((k) => !allowed.includes(k)) || new Set(b[field]).size !== b[field].length) {
+      return { error: `Invalid ${field === 'expenseOrder' ? 'expense' : 'revenue'} category order`, status: 400 };
+    }
+    merged[field] = [...b[field]];
   }
   if (typeof b.donorWrapperLabel === 'string') {
     merged.donorWrapperLabel = b.donorWrapperLabel.trim();

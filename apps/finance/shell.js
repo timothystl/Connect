@@ -70,7 +70,7 @@ import {
   churchYearFromReport, councilDraftFromPlan, plannerViewer,
 } from './connect-planner.js';
 import { PLANNER_APP_JS } from './planner/bundle.generated.js';
-import { buildBoardLayoutWrites, normalizeBoardLayout } from './board-layout.js';
+import { buildBoardLayoutWrites, moveBoardCategory, normalizeBoardLayout } from './board-layout.js';
 import { BUDGET_BUILDER_STYLES, buildPlannerModel, defaultProjectBaseCents, parsePlannerForm, parseProjectLine, plannerBackQuery, plannerCsv, plannerParams, plannerYears, renderBudgetBuilderPage, renderPlannerPrint, applyCouncilDraft } from './planning-builder-pages.js';
 import { fetchLiveFinanceCashRunway } from './finance-cash-runway-client.js';
 import { defaultLiveBudgetFiscalYear } from './finance-budget-client.js';
@@ -1181,7 +1181,17 @@ async function handleBudgetPlannerSave(request, env, url) {
   if (!isAdmin && !isCouncilEditor) return back('error', 'Not saved: changing the budget plan needs admin access, or budget edit access for council.');
   const parsed = parsePlannerForm(form, { canEditActuals: isAdmin });
   if (parsed.errors.length) return back('error', `Not saved: ${parsed.errors.slice(0, 3).join(' ')}`);
-  const renamed = Object.values(parsed.renames).reduce((n, v) => n + (typeof v === 'string' ? 1 : Object.keys(v).length), 0);
+  if (parsed.move) {
+    // The order is merged over what Connect already holds, so read the saved order first.
+    const layoutRead = await fetchBoardLayout(env);
+    if (!layoutRead.ok) return back('error', 'Not saved: the category order could not be read from Connect, so nothing was moved.');
+    const layout = normalizeBoardLayout(layoutRead.layout);
+    const field = parsed.move.side === 'expense' ? 'expenseOrder' : 'revenueOrder';
+    const nextOrder = moveBoardCategory(layout[field], parsed.move.shown, parsed.move.key, parsed.move.dir);
+    if (nextOrder.join() !== layout[field].join()) parsed.renames[field] = nextOrder;
+  }
+  const renamed = Object.entries(parsed.renames).reduce((n, [k, v]) => n + (Array.isArray(v) ? 1 : typeof v === 'string' ? 1 : Object.keys(v).length), 0);
+  const movedOrder = Boolean(parsed.renames.expenseOrder || parsed.renames.revenueOrder);
   if (!parsed.plan.length && !parsed.projections.length && !parsed.actuals.length && !renamed) return back('ok', 'No changes to save.');
   const saved = [];
   const failed = [];
@@ -1204,7 +1214,8 @@ async function handleBudgetPlannerSave(request, env, url) {
   }
   if (renamed) {
     const r = await postConnectBoardCategoriesWrite(env, accessJwt, parsed.renames);
-    const what = count(renamed, 'name', 'names');
+    const nameChanges = renamed - (parsed.renames.expenseOrder ? 1 : 0) - (parsed.renames.revenueOrder ? 1 : 0);
+    const what = [nameChanges ? count(nameChanges, 'name', 'names') : '', movedOrder ? 'category order' : ''].filter(Boolean).join(' and ');
     (r.ok ? saved : failed).push(r.ok ? what : `${what}: ${why(r)}`);
   }
   if (!failed.length) return back('ok', `Saved in Connect: ${saved.join(', ')}.`);

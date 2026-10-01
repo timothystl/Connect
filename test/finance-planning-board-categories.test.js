@@ -38,7 +38,7 @@ describe('finance/planning/board-categories', () => {
     const res = await GET(db, false);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ revenue: {}, expense: {}, revenueLabels: {}, expenseLabels: {}, donorWrapperLabel: '', accountLabels: {}, hiddenAccounts: {} });
+    expect(body).toEqual({ revenue: {}, expense: {}, revenueLabels: {}, expenseLabels: {}, donorWrapperLabel: '', accountLabels: {}, hiddenAccounts: {}, expenseOrder: [], revenueOrder: [] });
   });
 
   it('a non-admin can read but not write', async () => {
@@ -66,6 +66,27 @@ describe('finance/planning/board-categories', () => {
     expect(res.status).toBe(400);
     const got = await (await GET(db, true)).json();
     expect(got.revenue).toEqual({}); // the bad write never landed
+  });
+
+  it('saves the order the board lists its categories in, and resets it with an empty list', async () => {
+    const db = makeTestDb();
+    const put = await PUT(db, { expenseOrder: ['salaries', 'mdo'], revenueOrder: ['earned', 'donor'] }, true);
+    expect(put.status).toBe(200);
+    const got = await (await GET(db, true)).json();
+    expect(got.expenseOrder).toEqual(['salaries', 'mdo']);
+    expect(got.revenueOrder).toEqual(['earned', 'donor']);
+    // a later write that does not mention order leaves it alone
+    await PUT(db, { revenue: { 'Income:X': 'earned' } }, true);
+    expect((await (await GET(db, true)).json()).expenseOrder).toEqual(['salaries', 'mdo']);
+    await PUT(db, { expenseOrder: [] }, true);
+    expect((await (await GET(db, true)).json()).expenseOrder).toEqual([]);
+  });
+
+  it('rejects an order with an unknown or repeated category, writing nothing', async () => {
+    const db = makeTestDb();
+    expect((await PUT(db, { expenseOrder: ['salaries', 'nope'] }, true)).status).toBe(400);
+    expect((await PUT(db, { revenueOrder: ['donor', 'donor'] }, true)).status).toBe(400);
+    expect((await (await GET(db, true)).json()).expenseOrder).toEqual([]);
   });
 
   it('rejects an expense category not in BOARD_EXPENSE_KEYS', async () => {
