@@ -110,7 +110,6 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
       { id: 'year-detail', label: 'This year in detail', status: 'live' },
       { id: 'income-expense', label: 'Income & expense detail', status: 'live' },
       { id: 'trend', label: 'Multi-year trend', status: 'live' },
-      { id: 'budget-actual', label: 'Budget vs actual', status: 'live' },
     ],
   },
   {

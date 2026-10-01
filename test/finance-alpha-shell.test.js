@@ -269,7 +269,7 @@ describe('Finance alpha staging shell', () => {
     expect(html).toContain('aria-label="Financial health detail"');
 
     const church = await (await worker.fetch(new Request('https://finance.test/?section=church&page=trend'), env)).text();
-    expect(church).toContain('<div class="nav-group is-open"><a class="nav-item is-active" href="/?section=church&amp;page=overview">Church<span class="nav-count">5</span></a>');
+    expect(church).toContain('<div class="nav-group is-open"><a class="nav-item is-active" href="/?section=church&amp;page=overview">Church<span class="nav-count">4</span></a>');
     expect(church).toContain('<a href="/?section=church&amp;page=trend" aria-current="page">Multi-year trend</a>');
     expect(church).toContain('<h1 class="page-title">Multi-year trend</h1>');
 
@@ -515,10 +515,6 @@ describe('Finance alpha staging shell', () => {
     expect(trendHtml).toContain('Synthetic staging');
     expect(trendHtml).toContain('the live endpoint is not configured or did not answer: not_configured');
     expect(trendHtml).toContain('$110,000');
-
-    const budgetActualHtml = await (await worker.fetch(new Request('https://finance.test/?section=church&page=budget-actual'), env)).text();
-    expect(budgetActualHtml).toContain('Budget vs actual');
-    expect(budgetActualHtml).toContain('Favorable');
   });
 
   it('renders a live multi-year Church Report trend from the real contract, using the full net-income bottom line rather than a naive income-minus-expense figure', async () => {

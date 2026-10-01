@@ -65,7 +65,7 @@ describe('Church Report — Budget vs. Actuals .xlsx import form and relay route
   });
 
   it('does not show the import form when the viewer role is not verified', async () => {
-    const res = await worker.fetch(new Request('https://finance.test/?section=church&page=budget-actual'), baseEnv);
+    const res = await worker.fetch(new Request('https://finance.test/?section=data'), baseEnv);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).not.toContain('/api/v1/connect-church-budget-xlsx-import-write');
@@ -74,7 +74,7 @@ describe('Church Report — Budget vs. Actuals .xlsx import form and relay route
 
   it('does not show the import form for a council viewer -- admin-only, same as the actual-figure correction form', async () => {
     const env = roleEnv('council', async () => new Response('not found', { status: 404 }));
-    const res = await worker.fetch(new Request('https://finance.test/?section=church&page=budget-actual', {
+    const res = await worker.fetch(new Request('https://finance.test/?section=data', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), env);
     const html = await res.text();
@@ -82,9 +82,9 @@ describe('Church Report — Budget vs. Actuals .xlsx import form and relay route
     expect(html).not.toContain('/api/v1/connect-church-budget-xlsx-preview');
   });
 
-  it('shows the import form for a verified admin viewer, only on Budget vs actual', async () => {
+  it('shows the import form for a verified admin viewer, on Data & Imports, not on the Church Report pages', async () => {
     const env = roleEnv('admin', async () => new Response('not found', { status: 404 }));
-    const res = await worker.fetch(new Request('https://finance.test/?section=church&page=budget-actual', {
+    const res = await worker.fetch(new Request('https://finance.test/?section=data', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), env);
     const html = await res.text();
@@ -137,7 +137,7 @@ describe('Church Report — Budget vs. Actuals .xlsx import form and relay route
       method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' }, body: form,
     }), env);
     expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toBe('/?section=church&page=budget-actual&status=ok');
+    expect(res.headers.get('location')).toBe('/?section=data&op=church-budget&status=ok');
     expect(body).toEqual({ fiscal_year: '2027', rows: [selected] });
   });
 
@@ -145,8 +145,8 @@ describe('Church Report — Budget vs. Actuals .xlsx import form and relay route
     const res = await postFile(liveEnv(async () => new Response('{}')), { accessJwt: 'signed.jwt.here', file: null });
     expect(res.status).toBe(303);
     const location = new URL(res.headers.get('location'), 'https://finance.test');
-    expect(location.searchParams.get('section')).toBe('church');
-    expect(location.searchParams.get('page')).toBe('budget-actual');
+    expect(location.searchParams.get('section')).toBe('data');
+    expect(location.searchParams.get('op')).toBe('church-budget');
     expect(location.searchParams.get('status')).toBe('error');
     expect(location.searchParams.get('reason')).toBe('no_file');
   });
@@ -167,7 +167,7 @@ describe('Church Report — Budget vs. Actuals .xlsx import form and relay route
     expect(res.status).toBe(303);
     const location = new URL(res.headers.get('location'), 'https://finance.test');
     expect(location.pathname).toBe('/');
-    expect(location.searchParams.get('section')).toBe('church');
+    expect(location.searchParams.get('section')).toBe('data');
     expect(location.searchParams.get('status')).toBe('error');
     expect(location.searchParams.get('reason')).toBe('not_configured');
   });
@@ -189,8 +189,8 @@ describe('Church Report — Budget vs. Actuals .xlsx import form and relay route
     const res = await postFile(env, { accessJwt: 'signed.jwt.here', file: fakeXlsxFile(content), fields: { fiscal_year_hint: '2027' } });
     expect(res.status).toBe(303);
     const location = new URL(res.headers.get('location'), 'https://finance.test');
-    expect(location.searchParams.get('section')).toBe('church');
-    expect(location.searchParams.get('page')).toBe('budget-actual');
+    expect(location.searchParams.get('section')).toBe('data');
+    expect(location.searchParams.get('op')).toBe('church-budget');
     expect(location.searchParams.get('status')).toBe('ok');
 
     expect(captured.headers.get('Cf-Access-Jwt-Assertion')).toBe('signed.jwt.here');

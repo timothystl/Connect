@@ -345,7 +345,7 @@ function renderChurchBudgetImportPreview(preview) {
   <h1>Review Budget vs. Actuals import</h1><p class="note"><strong>No data has been changed.</strong> Review FY${escapeHtml(String(preview.fiscalYear))} from “${escapeHtml(preview.sheetName || 'uploaded workbook')}”. Uncheck anything that should not overwrite the current imported row.</p>
   <form method="POST" action="/api/v1/connect-church-budget-xlsx-commit"><input type="hidden" name="fiscal_year" value="${escapeHtml(String(preview.fiscalYear))}">
   <table><thead><tr><th>Include</th><th>Classification</th><th>Account</th><th>Actual</th><th>Budget</th></tr></thead><tbody>${body}</tbody></table>
-  <button type="submit">Import selected rows</button> <a href="/?section=church&amp;page=budget-actual">Cancel without importing</a></form></body></html>`;
+  <button type="submit">Import selected rows</button> <a href="/?section=data">Cancel without importing</a></form></body></html>`;
 }
 
 function renderChurchBalancesImportPreview(preview) {
@@ -1602,8 +1602,6 @@ function renderSectionBody(ctx) {
       canImportChurchMultiYear,
       churchActivityXlsxImportStatus, churchActivityXlsxImportMessage,
       churchBudgetMultiYearXlsxImportStatus, churchBudgetMultiYearXlsxImportMessage,
-      // Budget vs actual groups its lines the Budget planner's way (Chart of Accounts layout).
-      boardLayout: ctx.boardLayout || null, showHidden: ctx.searchParams?.get('hidden') === '1',
     });
   }
   if (section.id === 'balance') {
@@ -1836,6 +1834,7 @@ function renderSectionBody(ctx) {
       dataStatus, importStatus, quickbooksOwn: ctx.quickbooksOwn, quickbooksEnabled: !!ctx.quickbooksEnabled, quickbooksSnapshot,
       daycarePreviewYear, daycarePreview, daycareImportStatus: dataDaycareImportStatus, daycareImportMessage: dataDaycareImportMessage,
       canManage, packetYear: new Date().getUTCFullYear(),
+      churchBudgetImportStatus: ctx.churchBudgetXlsxImportStatus, churchBudgetImportMessage: ctx.churchBudgetXlsxImportMessage,
       classificationHtml: renderClassificationEditors(classification, {
         canManage,
         revenueStatus: classificationRevenueStatus, revenueMessage: classificationRevenueMessage,
@@ -2394,7 +2393,7 @@ export default {
       const fileBase64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
       const result = await postConnectChurchBudgetXlsxPreview(env, accessJwt, { file_base64: fileBase64 });
       if (!result.ok) {
-        const params = new URLSearchParams({ section: 'church', page: 'budget-actual', status: 'error', reason: result.reason || 'unknown' });
+        const params = new URLSearchParams({ section: 'data', op: 'church-budget', status: 'error', reason: result.reason || 'unknown' });
         if (result.message) params.set('message', String(result.message).slice(0, 200));
         return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
       }
@@ -2413,8 +2412,8 @@ export default {
         return response('Invalid selected row', { status: 400, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
       }
       const result = await postConnectChurchBudgetXlsxCommit(env, accessJwt, { fiscal_year: form.get('fiscal_year'), rows });
-      if (result.ok) return response(null, { status: 303, headers: { Location: '/?section=church&page=budget-actual&status=ok' } });
-      const params = new URLSearchParams({ section: 'church', page: 'budget-actual', status: 'error', reason: result.reason || 'unknown' });
+      if (result.ok) return response(null, { status: 303, headers: { Location: '/?section=data&op=church-budget&status=ok' } });
+      const params = new URLSearchParams({ section: 'data', op: 'church-budget', status: 'error', reason: result.reason || 'unknown' });
       if (result.message) params.set('message', String(result.message).slice(0, 200));
       return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
     }
@@ -2522,7 +2521,7 @@ export default {
     // oversized upload never even reaches the relay call.
     if (route.id === 'church-budget-xlsx-import-write-v1' || route.id === 'church-balances-xlsx-import-write-v1') {
       const isBalances = route.id === 'church-balances-xlsx-import-write-v1';
-      const redirectBase = isBalances ? { section: 'balance', page: 'position' } : { section: 'church', page: 'budget-actual' };
+      const redirectBase = isBalances ? { section: 'balance', page: 'position' } : { section: 'data', op: 'church-budget' };
       const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
       let form;
       try {
@@ -4244,8 +4243,7 @@ export default {
           ? fetchCouncilBudgetDraft(env, accessJwt) : null;
         // The Chart of Accounts board layout (categories, headings, renames, purpose tags) lays out
         // the Budget planner and scenarios, and is what the Chart of Accounts editor edits.
-        let boardLayoutResult = (['builder', 'scenarios', 'multi-year'].includes(planningPageId) || section.id === 'accounts'
-          || (section.id === 'church' && resolveFinancePage(section, pageId).id === 'budget-actual')) ? fetchBoardLayout(env) : null;
+        let boardLayoutResult = (['builder', 'scenarios', 'multi-year'].includes(planningPageId) || section.id === 'accounts') ? fetchBoardLayout(env) : null;
         let boardLayout = after(boardLayoutResult, (result) => (result && result.ok ? normalizeBoardLayout(result.layout) : null));
         const planningLoads = planningV3 ? Promise.all([
           fetchPlanningBasis(env, defaultLiveBudgetFiscalYear()),
@@ -4391,7 +4389,7 @@ export default {
         // section-id-scoped status/reason/message query-param shape as churchOverrideStatus above
         // cannot bleed between the two forms -- only one of the two pages is ever rendered per
         // request.
-        const churchBudgetXlsxImportStatus = section.id === 'church' ? url.searchParams.get('status') : null;
+        const churchBudgetXlsxImportStatus = section.id === 'data' && url.searchParams.get('op') === 'church-budget' ? url.searchParams.get('status') : null;
         const churchBudgetXlsxImportMessage = churchBudgetXlsxImportStatus === 'error'
           ? describeChurchXlsxImportError(url.searchParams.get('reason'), url.searchParams.get('message'))
           : null;

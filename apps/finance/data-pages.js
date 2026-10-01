@@ -9,10 +9,11 @@
 import { buildDataStatusView } from './data-status-service.js';
 import { buildAccountBalances, flattenQuickbooksReport } from './quickbooks-snapshot-service.js';
 import { escapeHtml, formatCents, renderSectionHeading, renderTable } from './render-helpers.js';
+import { renderChurchBudgetXlsxImportForm } from './church-pages.js';
 
 // Where each Connect importer (FINANCE_IMPORTERS, src/api-finance.js) lives in Finance.
 export const IMPORTER_LOCATIONS = Object.freeze({
-  church_budget: { label: 'Budget (single year)', href: '/?section=church&page=budget-actual', page: 'Church Report › Budget vs actual' },
+  church_budget: { label: 'Budget (single year)', href: '#church-budget-import', page: 'This page, below' },
   church_monthly_pnl: { label: 'Monthly P&L', href: '/?section=church&page=trend', page: 'Church Report › Multi-year trend' },
   church_activity_multi: { label: 'Statement of Activity (multi-year)', href: '/?section=church&page=trend', page: 'Church Report › Multi-year trend' },
   church_budget_multi: { label: 'Budget by Year (multi-year)', href: '/?section=church&page=trend', page: 'Church Report › Multi-year trend' },
@@ -228,11 +229,12 @@ function formatExactCents(cents) {
 export function renderDataPage({
   dataStatus, importStatus, quickbooksOwn, quickbooksEnabled, quickbooksSnapshot,
   daycarePreviewYear, daycarePreview, daycareImportStatus, daycareImportMessage,
-  canManage, packetYear, classificationHtml,
+  canManage, packetYear, classificationHtml, churchBudgetImportStatus = null, churchBudgetImportMessage = null,
 }) {
   return `${renderStatusSection(dataStatus)}
     ${renderConnections({ quickbooksOwn, quickbooksEnabled, dataStatus, packetYear })}
     ${renderImports(importStatus, canManage)}
+    ${canManage ? renderChurchBudgetXlsxImportForm(churchBudgetImportStatus, churchBudgetImportMessage) : ''}
     ${renderDaycareChurchBudgetPreview({ year: daycarePreviewYear, preview: daycarePreview, canManage, importStatus: daycareImportStatus, importMessage: daycareImportMessage })}
     ${renderLinkList('Hand-entered adjustments', 'Data & Imports', 'Hand-entered adjustments', 'Daycare, property, corrections', ADJUSTMENTS, canManage, 'Figures typed in by hand. Each form lives beside the report it changes.')}
     ${renderLinkList('Destructive controls', 'Data & Imports', 'Remove or disconnect', 'Cannot be undone', DESTRUCTIVE, canManage, 'Each removal deletes the record from the shared accounting database and cannot be undone. Each control sits beside the record it removes.')}
