@@ -246,7 +246,7 @@ const SECURITY_HEADERS = Object.freeze({
 // it) and any image embedded in a letter template (a data: URL). Images only; still no script.
 const DONOR_LETTERS_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https://connect.timothystl.org; font-src 'self'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'";
 // The Budget planner's edit form loads one script from this Worker (live totals); nothing else.
-const BUDGET_PLANNER_PAGE_CSP = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'";
+const BUDGET_PLANNER_PAGE_CSP = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'";
 const PLANNER_PAGE_CSP = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'";
 
 function response(body, init = {}, { cacheControl } = {}) {
@@ -1166,7 +1166,15 @@ async function handleBudgetPlannerSave(request, env, url) {
   let form = null;
   try { form = await request.formData(); } catch { /* reported below */ }
   const query = plannerBackQuery(form ? form.get('back') : '');
+  // The page saves each edit in the background (budget-planner-live.js) and wants the outcome as data,
+  // not a redirect to a freshly loaded page.
+  const autosave = request.headers.get('X-Planner-Autosave') === '1';
   const back = (status, msg) => {
+    if (autosave) {
+      return response(JSON.stringify({ ok: status === 'ok', message: String(msg).slice(0, 300) }), {
+        status: status === 'ok' ? 200 : 422, headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      });
+    }
     query.set('op', 'planner');
     query.set('status', status);
     query.set('msg', String(msg).slice(0, 300));

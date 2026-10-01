@@ -115,6 +115,8 @@ describe('Budget builder and Chart of Accounts board layout', () => {
     expect(html).toContain('name="hl_expense_worship" value="Worship &amp; Music"');
     expect(html).toContain('<td>Total Revenue</td>');
     expect(html).toContain('value="Pastor salary" class="bp-name-input"');
+    // A renamed line does not repeat its QuickBooks name underneath.
+    expect(html).not.toContain('<small>60100 Salary - Pastor</small>');
     expect(html.indexOf('Salaries</td>')).toBeLessThan(html.indexOf('Benefits</td>'));
     expect(html).toContain('Edit the layout in Chart of Accounts');
     expect(html).toContain('<span class="is-on">Board view</span>');
