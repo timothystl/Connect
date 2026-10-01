@@ -12,7 +12,8 @@ Secrets are stored as Cloudflare Worker secrets (`wrangler secret put <NAME>`).
 The cross-product reference (every Worker, Supabase function, and repository secret, with the pairs
 that must match) is
 [architecture/17-credentials-and-secrets-inventory.md](https://github.com/timothystl/digital-architecture/blob/main/architecture/17-credentials-and-secrets-inventory.md).
-This file covers Connect and Finance in detail.
+This file covers Connect and Finance in detail. The Cloudflare token audit, reuse plan, and rotation
+map across all repositories is [docs/CLOUDFLARE_TOKENS.md](docs/CLOUDFLARE_TOKENS.md).
 
 ---
 
