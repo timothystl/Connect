@@ -166,6 +166,7 @@ describe('Budget planner autosave', () => {
     const html = await page.text();
     expect(html).toContain('id="bp-autosave"');
     expect(BUDGET_PLANNER_LIVE_JS).toContain('X-Planner-Autosave');
+    expect(BUDGET_PLANNER_LIVE_JS).toContain('refreshOutlook');
     const other = await worker.fetch(new Request('https://finance.test/?section=planning&page=scenarios', { headers: { 'Cf-Access-Jwt-Assertion': 'jwt' } }), env);
     expect(other.headers.get('Content-Security-Policy')).not.toContain('connect-src');
   });
