@@ -824,11 +824,29 @@ export const BUDGET_BUILDER_STYLES = `
     .bb-subtotal td { font-weight:600; font-size:13px; color:#374151; border-top:1px dashed #D5DAE3; }
     .bb-view { display:flex; flex-wrap:wrap; gap:16px; margin:0; font-size:14px; }
     .bb-view .is-on { font-weight:700; color:var(--navy); }
-    .coa-layout td { vertical-align:top; }
-    .coa-side td { font-weight:700; background:#F4F6F9; }
-    .coa-cat td, .coa-wrapper td { padding-top:12px; color:var(--navy); }
-    .coa-sub td { padding-left:20px; color:#374151; }
-    .coa-hidden td { opacity:.6; }
+    .coa-page-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-top:6px; }
+    .coa-page-head h2 { margin:0; }
+    .coa-bulk { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-top:12px; padding:10px 14px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+    .coa-bulk label { font-weight:600; font-size:13px; }
+    .coa-card-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+    .coa-card-head h2 { margin:0; }
+    .coa-wrapper-label { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:13px; font-weight:600; }
+    .coa-group { margin-top:18px; }
+    .coa-group-head { display:flex; align-items:center; gap:10px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+    .coa-heading-input { font-size:14px; max-width:320px; }
+    .coa-count { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:#6B7280; }
+    .coa-empty { padding:10px 2px; color:#6B7280; font-size:13px; }
+    .coa-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(380px,1fr)); column-gap:28px; }
+    .coa-row { display:grid; grid-template-columns:auto minmax(0,1fr) minmax(140px,190px); align-items:center; gap:4px 10px; padding:7px 0; border-bottom:1px solid #EEF1F5; }
+    .coa-row .coa-label { grid-column:1 / -1; }
+    .coa-namebox { display:flex; flex-direction:column; min-width:0; }
+    .coa-qb { color:#6B7280; font-size:11px; padding-left:7px; }
+    .coa-name { min-width:0; font:inherit; background:transparent; border:1px solid transparent; border-radius:6px; padding:3px 6px; }
+    .coa-name:hover, .coa-name:focus { border-color:#D5DBE5; background:#fff; outline:none; }
+    .coa-cat-select { font-size:12px; }
+    .coa-extra { grid-column:2 / -1; display:flex; align-items:center; gap:14px; font-size:12px; color:#6B7280; }
+    .coa-extra select { font-size:12px; }
+    .coa-hidden { opacity:.6; }
     .bb-result td { font-weight:700; background:#FBF5E6; border-top:2px solid var(--navy); }
     .bp-head { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-top:8px; }
     .bp-head h2 { margin:0; font-size:26px; }

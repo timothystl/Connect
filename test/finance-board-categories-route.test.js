@@ -66,15 +66,15 @@ describe('Chart of Accounts — board-category assignment form and relay route',
     expect(html).not.toContain('/api/v1/connect-board-categories-write');
   });
 
-  it('shows the assignment form for a verified admin viewer', async () => {
+  it('shows the Chart of Accounts page to a verified admin viewer', async () => {
     const env = roleEnv('admin', async () => new Response('not found', { status: 404 }));
     const res = await worker.fetch(new Request('https://finance.test/?section=accounts', {
       headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
     }), env);
     const html = await res.text();
-    expect(html).toContain('<form method="POST" action="/api/v1/connect-board-categories-write">');
-    expect(html).toContain('name="category_path"');
-    expect(html).toContain('name="board_category"');
+    // With the live chart unavailable here, the page shows the chart read-only; the editable form
+    // (live chart + saved layout) is covered in finance-board-layout.test.js.
+    expect(html).toContain('<h2>Chart of Accounts</h2>');
   });
 
   it('redirects to a not_configured error when the service binding and shared secret are not set', async () => {

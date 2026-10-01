@@ -35,9 +35,8 @@ describe('hidden old lines', () => {
       { classification: 'Expenses', category_path: 'Expenses:70 Youth:70100 Youth Gathering', account_name: '70100 Youth Gathering', depth: 2, has_children: 0 },
     ];
     const html = renderLayoutEditor(rows, layout, null, null);
-    expect(html).toContain('<th>Hide</th>');
-    expect(html).toMatch(/name="hide_\d" value="1" checked aria-label="Hide 80100 Egg Hunt"/);
-    expect(html).toMatch(/name="hide_\d" value="1" aria-label="Hide 70100 Youth Gathering"/);
+        expect(html).toMatch(/name="hide_\d" value="1" checked>/);
+    expect(html).toMatch(/name="hide_\d" value="1"> Hide/);
   });
 
   it('drops a hidden line from the Budget planner only while it carries no money', () => {

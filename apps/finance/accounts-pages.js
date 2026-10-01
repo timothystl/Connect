@@ -111,74 +111,80 @@ export function renderAccountHierarchy(nodes) {
   }).join('');
 }
 
-// Legacy Chart of Accounts (finRenderChartOfAccounts in src/frontend/js-finance.js): the budget's
-// board layout, edited in one place. Headings rename the Budget builder's categories and the Donor
-// Income wrapper; each account can be moved to another category (one at a time or by selecting
-// several), renamed for display, and tagged with a purpose. Only changed rows are sent, so an
-// account still on its name-based default is not pinned to it by saving another row. The accounts
-// are the same year's chart leaves the main table above lists.
-export function renderLayoutEditor(rows, layout, entryStatus, entryMessage, { returnTo = '' } = {}) {
+// The Chart of Accounts, as it was first designed: one page that says which category each account is
+// read under and what each category is called. A Revenue block and an Expenses block; inside each, the
+// categories as headings (renameable in place, with their place number) and the accounts under them in
+// a grid, each with a dropdown to move it. Tick several accounts and use "Move ticked accounts to" to
+// move them together. Names, categories, numbers, purpose tags and Hide save with one button. Display
+// only: QuickBooks account numbers, names and groups are never touched. `rows` is every account the
+// church has used (not just one year), so an old line can still be moved or hidden.
+export function renderLayoutEditor(rows, layout, entryStatus, entryMessage, { editable = true } = {}) {
   const e = escapeHtml;
   const leaves = chartLeafRows(rows);
-  const sections = buildBoardSections(leaves, layout, (r) => ({ path: r.category_path, name: r.account_name, isRevenue: isRevenueClassification(r.classification) }));
-  const tagOptions = (selected) => `<option value="">—</option>${layout.tags.map((t) => `<option value="${e(t.id)}"${t.id === selected ? ' selected' : ''}>${e(t.label)}</option>`).join('')}`;
-  const catOptions = (isRevenue, row) => {
+  const tagOptions = (selected) => `<option value="">No purpose</option>${layout.tags.map((t) => `<option value="${e(t.id)}"${t.id === selected ? ' selected' : ''}>${e(t.label)}</option>`).join('')}`;
+  const revenueOrder = layout.revenueOrder || ['donor', 'earned', 'passive'];
+  const expenseOrder = layout.expenseOrder || BOARD_EXPENSE_ORDER;
+  // Restricted gifts stay with Unrestricted under the Donor Income heading, so they follow 'donor'.
+  const revenueCats = revenueOrder.flatMap((k) => (k === 'donor' ? ['donor', 'restricted'] : [k]));
+  const catOptions = (isRevenue, row, cats) => {
     const { key, assigned } = boardCategoryFor(layout, row.category_path, row.account_name, isRevenue);
-    const order = isRevenue ? BOARD_REVENUE_ORDER : BOARD_EXPENSE_ORDER;
     const fallback = defaultBoardCategory(row.account_name, isRevenue);
-    return `<option value=""${assigned ? '' : ' selected'}>Automatic (${e(boardLabelFor(layout, fallback, isRevenue))})</option>${order.map((k) => `<option value="${k}"${assigned && k === key ? ' selected' : ''}>${e(boardLabelFor(layout, k, isRevenue))}</option>`).join('')}`;
+    return `<option value=""${assigned ? '' : ' selected'}>Automatic (${e(boardLabelFor(layout, fallback, isRevenue))})</option>${cats.map((k) => `<option value="${k}"${assigned && k === key ? ' selected' : ''}>${e(boardLabelFor(layout, k, isRevenue))}</option>`).join('')}`;
   };
   let index = 0;
-  const accountRow = (row, isRevenue) => {
+  const accountRow = (row, isRevenue, cats) => {
+    const customName = layout.accountLabels[row.category_path] || '';
+    const shown = customName || row.account_name;
+    const hidden = isHiddenAccount(layout, row.category_path);
+    if (!editable) return `<div class="coa-row${hidden ? ' coa-hidden' : ''}"><span class="coa-label">${e(shown)}${customName ? ` <small>QuickBooks: ${e(row.account_name)}</small>` : ''}${hidden ? ' <small>hidden</small>' : ''}</span></div>`;
     const i = index++;
     const { key, assigned } = boardCategoryFor(layout, row.category_path, row.account_name, isRevenue);
-    const customName = layout.accountLabels[row.category_path] || '';
     const tag = layout.tagCategories[row.category_path] || '';
-    const hidden = isHiddenAccount(layout, row.category_path);
-    return `<tr${hidden ? ' class="coa-hidden"' : ''}>
-      <td><input type="checkbox" name="select_${i}" value="1" aria-label="Select ${e(row.account_name)}"></td>
-      <td><input type="hidden" name="path_${i}" value="${e(row.category_path)}"><input type="hidden" name="side_${i}" value="${isRevenue ? 'revenue' : 'expense'}">
-        <input type="hidden" name="orig_cat_${i}" value="${assigned ? key : ''}"><input type="hidden" name="orig_name_${i}" value="${e(customName)}"><input type="hidden" name="orig_tag_${i}" value="${e(tag)}"><input type="hidden" name="orig_hide_${i}" value="${hidden ? '1' : ''}">
-        <input type="text" name="name_${i}" value="${e(customName)}" placeholder="${e(row.account_name)}" aria-label="Display name for ${e(row.account_name)}" style="width:100%"><br><small>${e(row.category_path)}</small></td>
-      <td><select name="cat_${i}" aria-label="Board category for ${e(row.account_name)}">${catOptions(isRevenue, row)}</select></td>
-      <td><select name="tag_${i}" aria-label="Purpose tag for ${e(row.account_name)}">${tagOptions(tag)}</select></td>
-      <td><input type="checkbox" name="hide_${i}" value="1"${hidden ? ' checked' : ''} aria-label="Hide ${e(row.account_name)}" title="Hide this old line from the Budget planner and Budget vs actual"></td>
-    </tr>`;
+    return `<div class="coa-row${hidden ? ' coa-hidden' : ''}">
+      <input type="hidden" name="path_${i}" value="${e(row.category_path)}"><input type="hidden" name="side_${i}" value="${isRevenue ? 'revenue' : 'expense'}">
+      <input type="hidden" name="orig_cat_${i}" value="${assigned ? key : ''}"><input type="hidden" name="orig_name_${i}" value="${e(shown)}"><input type="hidden" name="orig_tag_${i}" value="${e(tag)}"><input type="hidden" name="orig_hide_${i}" value="${hidden ? '1' : ''}">
+      <input type="checkbox" name="select_${i}" value="1" aria-label="Select ${e(shown)}">
+      <span class="coa-namebox"><input type="text" name="name_${i}" value="${e(shown)}" placeholder="${e(row.account_name)}" class="coa-name" aria-label="Display name for ${e(row.account_name)}" maxlength="120">${customName ? `<small class="coa-qb">QuickBooks: ${e(row.account_name)}</small>` : ''}</span>
+      <select name="cat_${i}" class="coa-cat-select" aria-label="Category for ${e(shown)}">${catOptions(isRevenue, row, cats)}</select>
+      <span class="coa-extra"><select name="tag_${i}" aria-label="Purpose for ${e(shown)}">${tagOptions(tag)}</select>
+        <label><input type="checkbox" name="hide_${i}" value="1"${hidden ? ' checked' : ''}> Hide</label></span>
+    </div>`;
   };
-  const group = (g, cls) => `<tr class="${cls}"><td colspan="5"><b>${e(g.label)}</b> <small>${g.items.length} account${g.items.length === 1 ? '' : 's'}</small></td></tr>${g.items.map((r) => accountRow(r, g.isRevenue)).join('')}`;
-  const side = (label, list) => `<tr class="coa-side"><td colspan="5">${label}</td></tr>${list.map((s) => (s.kind === 'wrapper'
-    ? `<tr class="coa-wrapper"><td colspan="5"><b>${e(s.label)}</b></td></tr>${s.groups.map((g) => group(g, 'coa-sub')).join('')}`
-    : group(s, 'coa-cat'))).join('')}`;
-  const bulkOptions = `<option value="">— keep each row’s choice</option><optgroup label="Revenue accounts">${BOARD_REVENUE_ORDER.map((k) => `<option value="revenue:${k}">${e(boardLabelFor(layout, k, true))}</option>`).join('')}<option value="revenue:">Automatic</option></optgroup><optgroup label="Expense accounts">${BOARD_EXPENSE_ORDER.map((k) => `<option value="expense:${k}">${e(boardLabelFor(layout, k, false))}</option>`).join('')}<option value="expense:">Automatic</option></optgroup>`;
-  const headingField = (name, value, placeholder, label) => `<div class="field"><label>${e(label)}<input type="text" name="${name}" value="${e(value || '')}" placeholder="${e(placeholder)}"></label></div>`;
-  return `<section id="layout" aria-label="Budget layout">
-    ${renderSectionHeading({ eyebrow: 'Chart of Accounts', heading: 'Budget layout', badge: 'Relayed live to Connect' })}
-    ${entryStatus === 'ok' ? '<p class="status">Saved in Connect.</p>' : ''}
-    ${entryStatus === 'error' ? `<p class="status status-error">Not saved: ${e(entryMessage || 'unknown error')}</p>` : ''}
-    <p>This is how the Budget planner groups its lines. Rename a heading, move accounts between categories, rename an account for display, give it a purpose tag, or hide an old line that is no longer used. QuickBooks account numbers, names and groups are untouched.</p>
-    <details class="panel panel-spaced"><summary>Category headings</summary>
-      <form method="POST" action="/api/v1/connect-board-categories-write">
-        <input type="hidden" name="form_kind" value="headings">${returnTo ? `<input type="hidden" name="return_to" value="${e(returnTo)}">` : ''}
-        <div class="grid form-grid">
-          ${headingField('donor_wrapper_label', layout.donorWrapperLabel, DONOR_WRAPPER_DEFAULT_LABEL, 'Donor income wrapper')}
-          ${BOARD_REVENUE_ORDER.map((k) => headingField(`label_revenue_${k}`, layout.revenueLabels[k], BOARD_REVENUE_DEFAULT_LABELS[k], `Revenue: ${BOARD_REVENUE_DEFAULT_LABELS[k]}`)).join('')}
-          ${BOARD_EXPENSE_ORDER.map((k) => headingField(`label_expense_${k}`, layout.expenseLabels[k], BOARD_EXPENSE_DEFAULT_LABELS[k], `Expense: ${BOARD_EXPENSE_DEFAULT_LABELS[k]}`)).join('')}
-        </div>
-        <p><small>A blank heading goes back to its default name.</small></p>
-        <button type="submit">Save headings</button>
-      </form>
-    </details>
-    <form method="POST" action="/api/v1/connect-board-categories-write">
-      <input type="hidden" name="form_kind" value="accounts">${returnTo ? `<input type="hidden" name="return_to" value="${e(returnTo)}">` : ''}
-      <div class="table-wrap"><table class="coa-layout"><thead><tr><th></th><th>Account (display name)</th><th>Board category</th><th>Purpose</th><th>Hide</th></tr></thead>
-        <tbody>${side('Revenue', sections.revenue)}${side('Expenses', sections.expense)}</tbody></table></div>
-      <div class="grid form-grid">
-        <div class="field"><label for="coa-bulk">Move the selected accounts to</label><select id="coa-bulk" name="bulk_category">${bulkOptions}</select></div>
-      </div>
-      <p><small>Selected revenue accounts only move to a revenue category, and expense accounts to an expense category. “Automatic” places an account by its QuickBooks name. A hidden line drops out of the Budget planner and Budget vs actual while it has no money in the year shown; if money is ever posted to it, it appears again so no total is off.</small></p>
-      <button type="submit">Save layout changes</button>
-    </form>
-  </section>`;
+  const card = (isRevenue, title, sub, cats, positioned) => {
+    const side = isRevenue ? 'revenue' : 'expense';
+    const members = (key) => leaves
+      .filter((r) => isRevenueClassification(r.classification) === isRevenue && boardCategoryFor(layout, r.category_path, r.account_name, isRevenue).key === key)
+      .sort((x, y) => String(x.account_name).localeCompare(String(y.account_name), 'en', { numeric: true }));
+    const total = cats.reduce((n, k) => n + members(k).length, 0);
+    const groups = cats.map((key) => {
+      const list = members(key);
+      const label = boardLabelFor(layout, key, isRevenue);
+      const place = positioned.indexOf(key) + 1;
+      const number = editable && place
+        ? `<label class="bp-place" title="Type another number and save to move ${e(label)}"><span>No.</span><input type="number" name="pos_${side}_${key}" value="${place}" min="1" max="${positioned.length}" class="bp-place-input" aria-label="Position of ${e(label)}"><input type="hidden" name="orig_pos_${side}_${key}" value="${place}"></label>`
+        : '';
+      const heading = editable
+        ? `<input type="text" name="hl_${side}_${key}" value="${e(label)}" class="bp-name-input coa-heading-input" aria-label="Name of this category" maxlength="80"><input type="hidden" name="orig_hl_${side}_${key}" value="${e(label)}">`
+        : `<b>${e(label)}</b>`;
+      return `<div class="coa-group"><div class="coa-group-head">${number}${heading}<span class="coa-count">${list.length} ${list.length === 1 ? 'fund' : 'funds'}</span></div>
+        ${list.length ? `<div class="coa-grid">${list.map((r) => accountRow(r, isRevenue, cats)).join('')}</div>` : '<div class="coa-empty">No funds read under this category yet.</div>'}</div>`;
+    }).join('');
+    const wrapper = isRevenue && editable
+      ? `<label class="coa-wrapper-label">Donor Income heading on the budget <input type="text" name="hl_wrapper" value="${e(layout.donorWrapperLabel || DONOR_WRAPPER_DEFAULT_LABEL)}" maxlength="80"><input type="hidden" name="orig_hl_wrapper" value="${e(layout.donorWrapperLabel || DONOR_WRAPPER_DEFAULT_LABEL)}"></label>` : '';
+    return `<div class="panel panel-spaced coa-card"><div class="coa-card-head"><h2>${title}</h2><span class="muted">${total} ${total === 1 ? 'fund' : 'funds'} · ${cats.length} categories</span></div>
+      <p class="muted-line">${sub}</p>${wrapper}${groups}</div>`;
+  };
+  const bulkOptions = `<option value="">Choose a category…</option><optgroup label="Revenue">${revenueCats.map((k) => `<option value="revenue:${k}">${e(boardLabelFor(layout, k, true))}</option>`).join('')}<option value="revenue:">Automatic</option></optgroup><optgroup label="Expenses">${expenseOrder.map((k) => `<option value="expense:${k}">${e(boardLabelFor(layout, k, false))}</option>`).join('')}<option value="expense:">Automatic</option></optgroup>`;
+  const status = entryStatus === 'ok' ? '<p class="status">Saved in Connect.</p>' : entryStatus === 'error' ? `<p class="status status-error">Not saved: ${e(entryMessage || 'unknown error')}</p>` : '';
+  const body = `<div class="coa-page-head"><div><h2>Chart of Accounts</h2><p class="muted-line">Which category each fund is read under, and what each category is called · display only, QuickBooks is never renumbered</p></div>${editable ? '<button type="submit">Save changes</button>' : ''}</div>
+    ${status}
+    ${editable ? `<div class="coa-bulk"><label>Move ticked accounts to <select name="bulk_category">${bulkOptions}</select></label><span class="muted-line">Tick several accounts, choose a category, then Save changes.</span></div>` : ''}
+    ${card(true, 'Revenue', 'Restricted giving reads as the second half of donor income, so both sit inside the Donor Income heading on the budget.', revenueCats, revenueOrder)}
+    ${card(false, 'Expenses', 'The categories the board reads spending against.', expenseOrder, expenseOrder)}
+    <p class="muted-line">Fund numbers, names and QuickBooks groups are untouched by anything on this page — the next export lands in exactly the same accounts. Only Connect’s reading of them changes, on the Budget planner, the Church Report and Financial Health alike. Hidden funds drop off the Budget planner while they have no money in the year shown.</p>`;
+  return editable
+    ? `<section id="layout" aria-label="Chart of Accounts"><form method="POST" action="/api/v1/connect-board-categories-write" class="coa-form"><input type="hidden" name="form_kind" value="accounts">${body}</form></section>`
+    : `<section id="layout" aria-label="Chart of Accounts">${body}</section>`;
 }
 
 // Which fiscal year the chart shows: a plain GET form (the page runs no script), listing every
@@ -273,38 +279,17 @@ export function renderAccountsPage(pageId, {
   });
   const report = buildAccountsReportView(rows);
   const view = buildChartOfAccountsView(rows, layout);
-  const usedCategories = [...view.revenue.groups, ...view.expense.groups].filter((g) => g.items.length).length;
   const { payroll, payrollNote } = purposePayroll(compensationProjection, canReadCompensation);
   const purpose = buildPurposeTotals(view, layout, payroll);
   const latestYear = availableFiscalYears.length ? Math.max(...availableFiscalYears) : null;
   const emptyYear = fiscalYear !== null && view.leaves.length === 0;
-  return `<section class="report" aria-label="${isLive ? 'Chart of Accounts' : 'Synthetic Chart of Accounts'}">
-    ${renderSectionHeading({ eyebrow: 'Chart of Accounts', heading: 'Account presentation', badge: isLive ? (fiscalYear ? `FY${fiscalYear} · live` : 'Live from Connect') : 'Synthetic staging' })}
-    ${fiscalYear !== null ? renderFiscalYearForm(fiscalYear, availableFiscalYears) : ''}
-    ${emptyYear ? `<p class="status status-pending">No ledger rows are on file for FY${fiscalYear} yet.${latestYear !== null && latestYear !== fiscalYear ? ` <a href="/?section=accounts&amp;page=chart&amp;fiscal_year=${latestYear}">Show FY${latestYear}</a>, the most recent year on file.` : ''}</p>` : ''}
-    ${renderKpiCards([
-      { label: 'Total accounts', value: String(view.leaves.length), hint: `${view.revenue.count} revenue · ${view.expense.count} expense` },
-      ...(view.hasFigures ? [
-        { label: `FY${fiscalYear} revenue`, value: escapeHtml(money(view.revenue.actualCents)), hint: 'Actual, accounts listed below' },
-        { label: `FY${fiscalYear} expenses`, value: escapeHtml(money(view.expense.actualCents)), hint: 'Actual, accounts listed below' },
-      ] : []),
-      { label: 'Board categories', value: String(usedCategories), hint: 'Presentation only; ledger paths unchanged' },
-      { label: 'Purpose tags', value: String(layout.tags.length), hint: 'Independent reporting lens over the same accounts' },
-    ])}
-    ${renderSectionHeading({ eyebrow: 'Chart of Accounts', heading: 'Accounts by board category', badge: 'Display names; QuickBooks unchanged' })}
-    ${renderChartTable(view, fiscalYear)}
-    ${view.unlistedRevenueCents || view.unlistedExpenseCents ? `<p><small>Posted directly to account groups rather than to an account, so not listed above (the Church Report includes it): ${escapeHtml(money(view.unlistedRevenueCents))} revenue, ${escapeHtml(money(view.unlistedExpenseCents))} expenses.</small></p>` : ''}
-    <p><small>Income and Other Income accounts are revenue; Expenses, Other Expenses and Cost of Goods Sold accounts are expenses. As on Connect's Chart of Accounts, a line with no actual and no budget this year is left out, and an account with no saved category is placed by its QuickBooks name. Actuals are each account's own postings, not including sub-accounts.</small></p>
-  </section>${layout.tags.length && fiscalYear !== null ? renderPurposeReport(purpose, fiscalYear, { payrollNote }) : ''}
-  <section class="report" aria-label="Ledger hierarchy">
-    ${renderSectionHeading({ eyebrow: 'Ledger hierarchy', heading: 'Account tree', badge: 'Paths preserved', trend: true })}
-    ${renderTable({ head: ['Hierarchy', 'Ledger path', 'Account', 'Board category', 'Purpose'], rows: renderAccountHierarchy(report.hierarchy) })}
-    <p><small>${isLive
-      ? `Fetched live from Connect's finance-chart-of-accounts contract${fiscalYear ? ` for FY${fiscalYear}` : ''}: account names, ledger paths and each account's year totals. No gift, donor, or person crosses this contract.`
-      : `The committed synthetic fixture (the live endpoint is not configured or did not answer${accountsReport.fallbackReason ? `: ${escapeHtml(accountsReport.fallbackReason)}` : ''}).`}</small></p>
-  </section>${canManageBoardCategories && boardLayout && isLive
-    ? renderLayoutEditor(accountsReport.layoutRows || report.rows, boardLayout, boardCategoryEntryStatus, boardCategoryEntryMessage)
-    : (canManageBoardCategories ? renderBoardCategoryForm(boardCategoryEntryStatus, boardCategoryEntryMessage) : '')}${canManagePurposeTags
+  // One list, the one you edit: every account the church has used, grouped by category. The spending
+  // report by purpose follows, then the purpose-tag list.
+  const editor = renderLayoutEditor(accountsReport.layoutRows || report.rows, layout, boardCategoryEntryStatus, boardCategoryEntryMessage, { editable: Boolean(canManageBoardCategories && isLive && boardLayout) });
+  return `${editor}
+  ${fiscalYear !== null && boardLayout && layout.tags.length ? `<section class="report" aria-label="Resources by purpose">${renderFiscalYearForm(fiscalYear, availableFiscalYears)}
+    ${emptyYear ? `<p class="status status-pending">No ledger rows are on file for FY${fiscalYear} yet.${latestYear !== null && latestYear !== fiscalYear ? ` <a href="/?section=accounts&amp;page=chart&amp;fiscal_year=${latestYear}">Show FY${latestYear}</a>` : ''}</p>` : ''}</section>${renderPurposeReport(purpose, fiscalYear, { payrollNote })}` : ''}
+  ${canManagePurposeTags
     ? renderPurposeTagsForms(boardLayout ? boardLayout.tags.map((t) => ({ id: t.id, label: t.label })) : deriveCurrentPurposeTags(report.rows), purposeTagsEntryStatus, purposeTagsEntryMessage, { listOnly: Boolean(boardLayout && isLive && canManageBoardCategories) })
     : ''}`;
 }
