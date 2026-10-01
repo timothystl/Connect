@@ -1,7 +1,7 @@
 # Stax Giving Mockup — walkthrough
 
 Status: prototype for review, not shipped. Built on branch `claude/zen-thompson-4t3emh`. This is
-reference material (see AGENTS.md's Documentation discipline), not a startup instruction.
+reference material (see AGENTS.md's Documentation policy), not a startup instruction.
 
 ## What this is
 

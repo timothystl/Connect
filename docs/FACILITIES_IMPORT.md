@@ -1,7 +1,11 @@
 # Facilities bundle import
 
+> The Facilities feature is part of Finance, not Connect: the importer is `apps/finance/facility-import.js`
+> in [timothystl/finance](https://github.com/timothystl/finance). This page is kept here only until it
+> is copied into that repository's docs; nothing in this repository implements it.
+
 Facilities → Assets → "Import a prepared bundle" loads assets, capital projects, service
-entries, and their PDFs/photos in one post (`facility-import.js`). Choose `manifest.json`
+entries, and their PDFs/photos in one post (`apps/finance/facility-import.js` in the Finance repository). Choose `manifest.json`
 and, in the second box, every file the manifest lists. Limits: 40 files, 20 MB each, 64 MB total.
 The whole bundle is validated first; nothing is saved if any row or file is wrong. Records
 already present (asset: same name and category; project: same name; service: same asset, date

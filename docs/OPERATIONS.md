@@ -1,6 +1,8 @@
 # Operations
 
-Updated September 18, 2026. [AGENTS.md](../AGENTS.md) defines routine delivery authorization.
+Updated October 1, 2026. [AGENTS.md](../AGENTS.md) defines routine delivery authorization.
+Finance operations (its Worker, database, staging, QuickBooks, recovery, and release) are documented
+in [timothystl/finance](https://github.com/timothystl/finance).
 
 ## Environments
 
@@ -8,24 +10,22 @@ Updated September 18, 2026. [AGENTS.md](../AGENTS.md) defines routine delivery a
 |---|---|---|---|
 | Connect production | `timothy-connect` | `timothy-connect-db`, `KV`, `timothy-connect-photos`; daily cron | `deploy.yml`, manual dispatch |
 | Connect staging | `timothy-connect-staging` | Separate D1/KV/R2; no cron | Staging workflow/config |
-| Finance production | `timothy-finance-app` | Separate `timothy-finance-db`, Connect and Website service bindings | `deploy-finance.yml`, manual dispatch |
-| Finance staging | `timothy-finance-app-staging` | Separate Finance D1; fixtures explicit | Finance staging workflow/config |
 
-Main merges do not automatically deploy either production Worker. Dispatch the affected
-workflow with the tested full main SHA and an accurate release reason. Connect repeats
-`npm test` and the built-script check; Finance runs `npm run validate:finance:prod`.
-Verify completion. A requested routine release needs no additional signoff.
+Main merges do not automatically deploy. Dispatch `deploy.yml` with the tested full main SHA and an
+accurate release reason; it repeats `npm test` and the built-script check. Verify completion. A
+requested routine release needs no additional signoff. Finance releases are dispatched from the
+Finance repository. Connect staging is deployed by `deploy-connect-staging.yml` (manual dispatch)
+using `wrangler.staging.toml`.
 
-[Connect release](https://github.com/timothystl/connect/actions/runs/35352987006) succeeded at
-`7e93e60f3`; [Finance release](https://github.com/timothystl/connect/actions/runs/35351838490)
-succeeded at `582c72a8f` on September 18. Finance infrastructure is deployed; its authoritative
-data/user cutover remains unfinished. See [the runbook](FINANCE_PRODUCTION_CUTOVER.md).
+Connect's `FINANCE_DB` binding points at Finance's production database, so Connect releases and
+Finance releases share that data; coordinate any schema change to Finance-owned tables with the
+Finance repository.
 
 ## Data and rollback
 
 Inspect target configuration and live schema before migrations. Connect's current production
 source is `timothy-connect-db`, not retained `tlc-volunteer-db`. Finance schema migrations
-and synthetic fixtures are separate operations; never load fixtures into production.
+are run from the Finance repository, separately from Connect's; never load fixtures into production.
 A data move needs a usable backup and reconciliation, with deliberate reader/writer cutover.
 Do not enable unfinished feature flags merely because their code has deployed.
 

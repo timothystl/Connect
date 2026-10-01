@@ -9,7 +9,7 @@ Status: Phase 0 documentation; no implementation authorized
 Last updated: September 5, 2026  
 Architecture owner: Timothy Lutheran Church
 
-For a new AI session, begin only with [`AI_SESSION_START_HERE.md`](../AI_SESSION_START_HERE.md). This directory is reference material and should not be loaded in full.
+These are dated planning snapshots (September 2026), not current instructions. [`AGENTS.md`](../AGENTS.md) is the only agent instruction file, and current overhaul status is kept in the [digital-architecture](https://github.com/timothystl/digital-architecture) repository. Several documents below describe Connect and Finance as one repository and Worker (`chms`, `tlc-chms`); Finance was split into [timothystl/finance](https://github.com/timothystl/finance) on October 1, 2026. Do not load this directory in full.
 
 ## Purpose
 
