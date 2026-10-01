@@ -152,6 +152,20 @@ const DOM_GLUE = `
   function say(text, cls) { if (note) { note.textContent = text; note.className = 'bp-autosave' + (cls ? ' ' + cls : ''); } }
   function boxes() { return [].slice.call(form.querySelectorAll('input[name]')).filter(function (i) { return i.name.indexOf('orig_') !== 0 && form.querySelector('input[name="orig_' + i.name + '"]'); }); }
   function changed() { return boxes().filter(function (i) { return i.value !== form.querySelector('input[name="orig_' + i.name + '"]').value; }); }
+  // The five-year outlook is worked out on the server from the saved plan, so after a save the fresh
+  // panel is fetched and swapped in (unless a growth rate is being typed in it).
+  function refreshOutlook() {
+    var old = document.querySelector('.bp-outlook');
+    if (!old || old.contains(document.activeElement)) return;
+    fetch(window.location.href, { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var fresh = new DOMParser().parseFromString(html, 'text/html').querySelector('.bp-outlook');
+        var cur = document.querySelector('.bp-outlook');
+        if (fresh && cur && !cur.contains(document.activeElement)) cur.replaceWith(fresh);
+      })
+      .catch(function () {});
+  }
   function save() {
     if (saving) { again = true; return; }
     var pending = changed();
@@ -168,6 +182,7 @@ const DOM_GLUE = `
           pending.forEach(function (i) { form.querySelector('input[name="orig_' + i.name + '"]').value = i.value; });
           if (renumbered) { window.location.reload(); return; }
           say('Saved. ' + (r.message || ''), 'is-saved');
+          refreshOutlook();
         } else say(r.message || 'Not saved. Press Save changes to try again.', 'is-error');
         if (again) { again = false; save(); }
       })
