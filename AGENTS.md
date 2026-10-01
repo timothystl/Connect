@@ -1,6 +1,7 @@
-# Timothy Connect and Finance — Agent Instructions
+# Timothy Connect — Agent Instructions
 
 Updated September 18, 2026, at Andrew's request to remove unnecessary approval and incremental-work restrictions.
+Revised October 1, 2026 for the Finance repository split.
 
 ## Working agreement
 
@@ -51,18 +52,24 @@ this working agreement. Keep useful technical procedures and data protections, b
 revive retired preparation gates, waived baselines, or repeated release signoffs.
 The current overhaul status is maintained in
 [the architecture plan](https://github.com/timothystl/digital-architecture/blob/main/architecture/11-overhaul-readiness-and-execution-plan.md).
-Keep durable instructions here and detailed progress there.
+Keep durable instructions here and detailed progress there. Open Connect work is listed in
+[docs/OPEN-WORK.md](docs/OPEN-WORK.md); consequential decisions are in [docs/adr/](docs/adr/).
+Git history preserves retired plans and diaries; do not add chronological logs to the active tree.
 
 ## Runtime and ownership
 
 - The GitHub repository is `timothystl/connect` (renamed from `chms`). `connect-worker.js`
-  serves Connect, Giving, Serve/Scheduler, and legacy Finance as
+  serves Connect, Giving, Serve/Scheduler, and the legacy Finance screens as
   `timothy-connect`. Production binds `DB` to `timothy-connect-db`, `KV` to the
   `timothy-connect-kv` namespace, and `PHOTOS` to `timothy-connect-photos`.
 - Finance lives in its own repository, [`timothystl/finance`](https://github.com/timothystl/finance)
-  (split from this one in October 2026 with its full history). It deploys separately as
-  `timothy-finance-app`, with its own `timothy-finance-db` and isolated staging. Finance code, its
-  tests, runbooks, and deploy workflows are no longer here; do not recreate them.
+  (split from this one on October 1, 2026 with its full history). It deploys separately as
+  `timothy-finance-app`, with its own `timothy-finance-db` and isolated staging. The `apps/finance`
+  application, its Worker configurations, deploy workflows, and runbooks are no longer here; do not
+  recreate them. Connect keeps the legacy Finance screens and handlers (`src/api-finance.js`,
+  `src/frontend/js-finance.js`), the contract producers Finance consumes (`contracts/`,
+  `src/api-contracts*.js`), and a `FINANCE_DB` binding to `timothy-finance-db` selected by
+  `FINANCE_STORAGE_MODE` (`src/finance-storage.js`).
 - Giving stays authoritative in Connect. Finance consumes versioned summaries and relays
   Giving writes to Connect. Payroll currently relays to Website's backend. Finance-owned
   accounting data/writers are being migrated; separate infrastructure is already deployed.
@@ -94,6 +101,7 @@ Finance work is done and tested in `timothystl/finance`.
 
 Main merges do not deploy automatically. Complete a requested Connect release by dispatching
 `.github/workflows/deploy.yml` with the exact tested main SHA and a real release reason. Finance
-releases are dispatched from `timothystl/finance` (`.github/workflows/deploy-finance.yml`). The working agreement above supplies routine release authorization; the
-workflow's “approved SHA” wording does not require another question. Deploy only the affected
+releases are dispatched from the `timothystl/finance` repository, not this one. The working
+agreement above supplies routine release authorization; the workflow's “approved SHA” wording does
+not require another question. Deploy only the affected
 application. Documentation-only changes normally need no manual Worker deployment.

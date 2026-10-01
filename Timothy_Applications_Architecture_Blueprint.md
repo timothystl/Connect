@@ -5,7 +5,7 @@
 > and verify dated claims against current code, tests, configuration, and live behavior.
 
 
-Status: planning document; no production changes authorized  
+Status: historical planning document (September 4, 2026). Superseded where it disagrees with current code and [AGENTS.md](AGENTS.md); for example, Finance is now its own repository and Worker ([timothystl/finance](https://github.com/timothystl/finance), split October 1, 2026), not a deployment inside this one, and `chms` is now `connect`.  
 Rebuilt: September 4, 2026
 
 ## 1. Decisions reached

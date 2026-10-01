@@ -5,8 +5,11 @@
 > and verify dated claims against current code, tests, configuration, and live behavior.
 
 
-This file is checked at the start of every debugging or improvement session.
-Update it as issues are found, fixed, or queued.
+**Retired historical record; no longer updated.** Release history is in Git and the deployment
+workflow runs. Open work is in [docs/OPEN-WORK.md](docs/OPEN-WORK.md) and decisions are in
+[docs/adr/](docs/adr/). Worker, file, and database names below are the names in use on each date
+(for example `tlc-volunteer-worker.js` is now `connect-worker.js`, and Finance has since moved to
+[timothystl/finance](https://github.com/timothystl/finance)).
 
 ---
 

@@ -9,14 +9,18 @@ access or a second write path.
 
 ## Finance-owned facts
 
-Finance owns accounting imports, chart-of-accounts mapping, budgets, actuals, balances, forecasts,
-planning, property finance, compensation scenarios, and future payroll processing. The current
-production Finance module still shares `tlc-volunteer-db` and reads Connect-owned fund and Giving
-summary data directly; that is current coupling, not the target contract.
+Finance ([timothystl/finance](https://github.com/timothystl/finance)) owns accounting imports,
+chart-of-accounts mapping, budgets, actuals, balances, forecasts, planning, property finance,
+compensation scenarios, QuickBooks, and payroll processing. Its production database is
+`timothy-finance-db`.
 
-The Finance staging schema is intentionally independent and contains only Finance-owned tables.
-Its fixtures are deterministic synthetic records marked `SYNTHETIC-NO-PRODUCTION-DATA`. They are
-never migrations and must never be mistaken for copied production data.
+Connect's legacy Finance screens still read and write the Finance-owned tables
+(`src/finance-storage.js` lists them) and the Tuition Aid tables. In production
+`FINANCE_STORAGE_MODE` and `TUITION_STORAGE_MODE` are `finance`, so these go to
+`timothy-finance-db` through Connect's `FINANCE_DB` binding; with `connect` they use
+`timothy-connect-db`. Connect-owned fund and Giving data are still read directly by those legacy
+screens; that is current coupling, not the target contract. Check the live mode and data before any
+migration or cleanup, and never load synthetic fixtures into production.
 
 ## External ownership
 
