@@ -70,7 +70,7 @@ import {
   churchYearFromReport, councilDraftFromPlan, plannerViewer,
 } from './connect-planner.js';
 import { PLANNER_APP_JS } from './planner/bundle.generated.js';
-import { buildBoardLayoutWrites, moveBoardCategory, normalizeBoardLayout } from './board-layout.js';
+import { buildBoardLayoutWrites, normalizeBoardLayout, orderByPositions } from './board-layout.js';
 import { BUDGET_BUILDER_STYLES, buildPlannerModel, defaultProjectBaseCents, parsePlannerForm, parseProjectLine, plannerBackQuery, plannerCsv, plannerParams, plannerYears, renderBudgetBuilderPage, renderPlannerPrint, applyCouncilDraft } from './planning-builder-pages.js';
 import { fetchLiveFinanceCashRunway } from './finance-cash-runway-client.js';
 import { defaultLiveBudgetFiscalYear } from './finance-budget-client.js';
@@ -1181,14 +1181,16 @@ async function handleBudgetPlannerSave(request, env, url) {
   if (!isAdmin && !isCouncilEditor) return back('error', 'Not saved: changing the budget plan needs admin access, or budget edit access for council.');
   const parsed = parsePlannerForm(form, { canEditActuals: isAdmin });
   if (parsed.errors.length) return back('error', `Not saved: ${parsed.errors.slice(0, 3).join(' ')}`);
-  if (parsed.move) {
+  if (Object.keys(parsed.order).length) {
     // The order is merged over what Connect already holds, so read the saved order first.
     const layoutRead = await fetchBoardLayout(env);
     if (!layoutRead.ok) return back('error', 'Not saved: the category order could not be read from Connect, so nothing was moved.');
     const layout = normalizeBoardLayout(layoutRead.layout);
-    const field = parsed.move.side === 'expense' ? 'expenseOrder' : 'revenueOrder';
-    const nextOrder = moveBoardCategory(layout[field], parsed.move.shown, parsed.move.key, parsed.move.dir);
-    if (nextOrder.join() !== layout[field].join()) parsed.renames[field] = nextOrder;
+    for (const [side, entries] of Object.entries(parsed.order)) {
+      const field = side === 'expense' ? 'expenseOrder' : 'revenueOrder';
+      const nextOrder = orderByPositions(layout[field], entries);
+      if (nextOrder.join() !== layout[field].join()) parsed.renames[field] = nextOrder;
+    }
   }
   const renamed = Object.entries(parsed.renames).reduce((n, [k, v]) => n + (Array.isArray(v) ? 1 : typeof v === 'string' ? 1 : Object.keys(v).length), 0);
   const movedOrder = Boolean(parsed.renames.expenseOrder || parsed.renames.revenueOrder);

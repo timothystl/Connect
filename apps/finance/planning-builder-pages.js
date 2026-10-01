@@ -382,22 +382,24 @@ export function parsePlannerForm(form, { canEditActuals = false } = {}) {
       else names.expenseLabels[m[1].slice(8)] = v;
     }
   }
-  // A category moved with its arrows, with the categories the page was showing (an empty one is not).
-  let move = null;
-  const asked = /^(revenue|expense):([a-z_]+):(up|down)$/.exec(String(form.get('move') || ''));
-  if (canEditActuals && asked) {
-    const shown = [];
-    for (const field of form.keys()) {
-      const m = /^hl_(wrapper|revenue_[a-z_]+|expense_[a-z_]+)$/.exec(field);
+  // Headings renumbered: for each side, every heading shown with its place now and the number typed.
+  const order = {};
+  if (canEditActuals) {
+    const seen = { expense: [], revenue: [] };
+    for (const [field, value] of form.entries()) {
+      const m = /^pos_(expense|revenue)_([a-z_]+)$/.exec(field);
       if (!m) continue;
-      if (m[1] === 'wrapper') { if (asked[1] === 'revenue') shown.push('donor'); } else if (m[1].startsWith(`${asked[1]}_`)) shown.push(m[1].slice(asked[1].length + 1));
+      const from = Number(form.get(`orig_${field}`));
+      const typed = Number(String(value).trim());
+      if (!Number.isInteger(from) || from < 1) continue;
+      seen[m[1]].push({ key: m[2], from, to: Number.isInteger(typed) && typed >= 1 ? typed : from });
     }
-    move = { side: asked[1], key: asked[2], dir: asked[3], shown };
+    for (const side of ['expense', 'revenue']) if (seen[side].some((x) => x.to !== x.from)) order[side] = seen[side];
   }
   const renames = {};
   for (const key of ['accountLabels', 'revenueLabels', 'expenseLabels']) if (Object.keys(names[key]).length) renames[key] = names[key];
   if (names.donorWrapperLabel !== undefined) renames.donorWrapperLabel = names.donorWrapperLabel;
-  return { targetYear, baseYear, plan, projections, actuals, renames, move, errors };
+  return { targetYear, baseYear, plan, projections, actuals, renames, order, errors };
 }
 
 // The view to return to after a save: only the planner's own view keys survive.
@@ -607,13 +609,15 @@ function tableRows(model, ctx) {
       const text = ctx.form && ctx.canManage && ctx.layout && field
         ? `<input type="text" name="${field}" value="${e(r.label)}" class="bp-name-input bp-heading-input" aria-label="Heading ${e(r.label)}" maxlength="80"><input type="hidden" name="orig_${field}" value="${e(r.label)}">`
         : e(r.label);
-      // A top-level heading can be moved up or down among the others; the Donor Income wrapper counts as 'donor'.
-      const moveKey = r.depth === 0 && ctx.form && ctx.canManage && ctx.layout && ctx.model.boardView ? (r.wrapper ? 'donor' : r.key) : '';
-      const moveSide = r.isRevenue || r.wrapper ? 'revenue' : 'expense';
-      const moves = moveKey
-        ? `<span class="bp-moves"><button type="submit" name="move" value="${moveSide}:${moveKey}:up" formnovalidate class="bp-move" title="Move ${e(r.label)} up" aria-label="Move ${e(r.label)} up">↑</button><button type="submit" name="move" value="${moveSide}:${moveKey}:down" formnovalidate class="bp-move" title="Move ${e(r.label)} down" aria-label="Move ${e(r.label)} down">↓</button></span>`
+      // A top-level heading carries its place in the list (1, 2, 3...); typing another number and saving
+      // reorders the headings. The Donor Income wrapper counts as 'donor'.
+      const posKey = r.depth === 0 && ctx.form && ctx.canManage && ctx.layout && ctx.model.boardView ? (r.wrapper ? 'donor' : r.key) : '';
+      const posSide = r.isRevenue || r.wrapper ? 'revenue' : 'expense';
+      const place = posKey ? ctx.places[posSide].indexOf(posKey) + 1 : 0;
+      const moves = place
+        ? `<label class="bp-place" title="Type another number and save to move ${e(r.label)}"><span>No.</span><input type="number" name="pos_${posSide}_${posKey}" value="${place}" min="1" max="${ctx.places[posSide].length}" class="bp-place-input" aria-label="Position of ${e(r.label)}"><input type="hidden" name="orig_pos_${posSide}_${posKey}" value="${place}"></label>`
         : '';
-      return `<tr class="bp-header" data-bp="header" data-side="${r.side}"><td colspan="${span}" style="padding-left:${10 + r.depth * 16}px"><span class="bp-heading-row">${text}${moves}</span></td></tr>`;
+      return `<tr class="bp-header" data-bp="header" data-side="${r.side}"><td colspan="${span}" style="padding-left:${10 + r.depth * 16}px"><span class="bp-heading-row">${moves}${text}</span></td></tr>`;
     }
     const cls = r.kind === 'net' ? 'bb-result' : r.kind === 'sidetotal' ? 'bb-total' : 'bb-subtotal';
     const pad = r.kind === 'total' ? ` style="padding-left:${10 + r.depth * 16}px"` : '';
@@ -693,7 +697,11 @@ export function renderBudgetBuilderPage({ liveVersion = 'local', builder: rawBui
   const model = buildPlannerModel(builder, { layout, params: p });
   const pickFormId = 'bp-pick';
   const form = canEditPlan || canEditActuals;
-  const ctx = { model, p, canEditPlan, canEditActuals, canManage: canManageBudgetPlan, layout, counter: 0, pickFormId, form };
+  const places = { expense: [], revenue: [] };
+  for (const r of plannerRows(model, { includeExcluded: p.pick })) {
+    if (r.kind === 'header' && r.depth === 0) places[r.isRevenue || r.wrapper ? 'revenue' : 'expense'].push(r.wrapper ? 'donor' : r.key);
+  }
+  const ctx = { places, model, p, canEditPlan, canEditActuals, canManage: canManageBudgetPlan, layout, counter: 0, pickFormId, form };
   const rows = tableRows(model, ctx);
   const drafts = builder.lines.filter((l) => l.plan?.draft).length;
   const viewToggle = layout
@@ -842,9 +850,8 @@ export const BUDGET_BUILDER_STYLES = `
     .bp-name-input:focus { border-color:#B98B2E; background:#fff; outline:none; }
     .bp-heading-input { font-size:13px; }
     .bp-heading-row { display:flex; align-items:center; gap:8px; }
-    .bp-moves { display:inline-flex; gap:2px; }
-    .bp-move { border:1px solid #D5DBE5; background:#fff; border-radius:6px; padding:0 7px; line-height:20px; cursor:pointer; color:#4B5563; }
-    .bp-move:hover { border-color:#B98B2E; color:#1B2A3A; }
+    .bp-place { display:inline-flex; align-items:center; gap:4px; font-size:11px; color:#6B7280; }
+    .bp-place-input { width:46px; font:inherit; font-weight:700; text-align:center; border:1px solid #D5DBE5; border-radius:6px; padding:2px 4px; background:#fff; }
     .bp-table .bp-name small { display:block; color:#6B7280; font-size:11px; }
     .bp-table .bp-name input[type=checkbox] { margin-right:8px; vertical-align:middle; }
     .bp-excluded td { opacity:.45; }
