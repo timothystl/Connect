@@ -382,10 +382,22 @@ export function parsePlannerForm(form, { canEditActuals = false } = {}) {
       else names.expenseLabels[m[1].slice(8)] = v;
     }
   }
+  // A category moved with its arrows, with the categories the page was showing (an empty one is not).
+  let move = null;
+  const asked = /^(revenue|expense):([a-z_]+):(up|down)$/.exec(String(form.get('move') || ''));
+  if (canEditActuals && asked) {
+    const shown = [];
+    for (const field of form.keys()) {
+      const m = /^hl_(wrapper|revenue_[a-z_]+|expense_[a-z_]+)$/.exec(field);
+      if (!m) continue;
+      if (m[1] === 'wrapper') { if (asked[1] === 'revenue') shown.push('donor'); } else if (m[1].startsWith(`${asked[1]}_`)) shown.push(m[1].slice(asked[1].length + 1));
+    }
+    move = { side: asked[1], key: asked[2], dir: asked[3], shown };
+  }
   const renames = {};
   for (const key of ['accountLabels', 'revenueLabels', 'expenseLabels']) if (Object.keys(names[key]).length) renames[key] = names[key];
   if (names.donorWrapperLabel !== undefined) renames.donorWrapperLabel = names.donorWrapperLabel;
-  return { targetYear, baseYear, plan, projections, actuals, renames, errors };
+  return { targetYear, baseYear, plan, projections, actuals, renames, move, errors };
 }
 
 // The view to return to after a save: only the planner's own view keys survive.
@@ -595,7 +607,13 @@ function tableRows(model, ctx) {
       const text = ctx.form && ctx.canManage && ctx.layout && field
         ? `<input type="text" name="${field}" value="${e(r.label)}" class="bp-name-input bp-heading-input" aria-label="Heading ${e(r.label)}" maxlength="80"><input type="hidden" name="orig_${field}" value="${e(r.label)}">`
         : e(r.label);
-      return `<tr class="bp-header" data-bp="header" data-side="${r.side}"><td colspan="${span}" style="padding-left:${10 + r.depth * 16}px">${text}</td></tr>`;
+      // A top-level heading can be moved up or down among the others; the Donor Income wrapper counts as 'donor'.
+      const moveKey = r.depth === 0 && ctx.form && ctx.canManage && ctx.layout && ctx.model.boardView ? (r.wrapper ? 'donor' : r.key) : '';
+      const moveSide = r.isRevenue || r.wrapper ? 'revenue' : 'expense';
+      const moves = moveKey
+        ? `<span class="bp-moves"><button type="submit" name="move" value="${moveSide}:${moveKey}:up" formnovalidate class="bp-move" title="Move ${e(r.label)} up" aria-label="Move ${e(r.label)} up">↑</button><button type="submit" name="move" value="${moveSide}:${moveKey}:down" formnovalidate class="bp-move" title="Move ${e(r.label)} down" aria-label="Move ${e(r.label)} down">↓</button></span>`
+        : '';
+      return `<tr class="bp-header" data-bp="header" data-side="${r.side}"><td colspan="${span}" style="padding-left:${10 + r.depth * 16}px"><span class="bp-heading-row">${text}${moves}</span></td></tr>`;
     }
     const cls = r.kind === 'net' ? 'bb-result' : r.kind === 'sidetotal' ? 'bb-total' : 'bb-subtotal';
     const pad = r.kind === 'total' ? ` style="padding-left:${10 + r.depth * 16}px"` : '';
@@ -679,7 +697,7 @@ export function renderBudgetBuilderPage({ liveVersion = 'local', builder: rawBui
   const rows = tableRows(model, ctx);
   const drafts = builder.lines.filter((l) => l.plan?.draft).length;
   const viewToggle = layout
-    ? `<div class="bb-view" role="group" aria-label="Layout">${model.boardView ? '<span class="is-on">Board view</span>' : `<a href="${href(p, { view: 'board' })}">Board view</a>`}${model.boardView ? `<a href="${href(p, { view: 'qb' })}">QuickBooks order</a>` : '<span class="is-on">QuickBooks order</span>'}${canManageBudgetPlan ? '<a href="/?section=accounts&amp;page=chart#layout">Edit the layout in Chart of Accounts</a>' : ''}</div>`
+    ? `<div class="bb-view" role="group" aria-label="Layout">${model.boardView ? '<span class="is-on">Board view</span>' : `<a href="${href(p, { view: 'board' })}">Board view</a>`}${model.boardView ? `<a href="${href(p, { view: 'qb' })}">QuickBooks order</a>` : '<span class="is-on">QuickBooks order</span>'}${canManageBudgetPlan ? '<a href="/?section=accounts&amp;page=connect">Edit the layout in Chart of Accounts</a>' : ''}</div>`
     : '<p class="muted-line">The board layout from Chart of Accounts could not be read, so lines are listed in QuickBooks order.</p>';
   const table = `<div class="table-scroll"><table class="pm-table bb-table bp-table"><thead><tr><th>Category</th>${p.cols.map((k) => `<th>${e(COLUMN_LABELS[k](p))}</th>`).join('')}</tr></thead>
       <tbody>${rows}</tbody></table></div>`;
@@ -823,6 +841,10 @@ export const BUDGET_BUILDER_STYLES = `
     .bp-name-input:hover { border-color:#D5DBE5; background:#fff; }
     .bp-name-input:focus { border-color:#B98B2E; background:#fff; outline:none; }
     .bp-heading-input { font-size:13px; }
+    .bp-heading-row { display:flex; align-items:center; gap:8px; }
+    .bp-moves { display:inline-flex; gap:2px; }
+    .bp-move { border:1px solid #D5DBE5; background:#fff; border-radius:6px; padding:0 7px; line-height:20px; cursor:pointer; color:#4B5563; }
+    .bp-move:hover { border-color:#B98B2E; color:#1B2A3A; }
     .bp-table .bp-name small { display:block; color:#6B7280; font-size:11px; }
     .bp-table .bp-name input[type=checkbox] { margin-right:8px; vertical-align:middle; }
     .bp-excluded td { opacity:.45; }

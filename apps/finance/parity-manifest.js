@@ -110,7 +110,6 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
       { id: 'year-detail', label: 'This year in detail', status: 'live' },
       { id: 'income-expense', label: 'Income & expense detail', status: 'live' },
       { id: 'trend', label: 'Multi-year trend', status: 'live' },
-      { id: 'budget-actual', label: 'Budget vs actual', status: 'live' },
     ],
   },
   {
@@ -226,8 +225,7 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
     id: 'accounts', label: 'Chart of Accounts', group: 'Accounts & Data', permission: 'finance',
     capabilities: ['account tree', 'board-category presentation', 'fiscal-year actuals', 'resources by purpose'],
     pages: [
-      { id: 'chart', label: 'Chart of accounts', status: 'live' },
-      { id: 'connect', label: 'Connect chart of accounts', status: 'live' },
+      { id: 'connect', label: 'Chart of accounts', status: 'live' },
       { id: 'access', label: 'Access & roles', status: 'live' },
     ],
   },

@@ -269,13 +269,13 @@ describe('Finance alpha staging shell', () => {
     expect(html).toContain('aria-label="Financial health detail"');
 
     const church = await (await worker.fetch(new Request('https://finance.test/?section=church&page=trend'), env)).text();
-    expect(church).toContain('<div class="nav-group is-open"><a class="nav-item is-active" href="/?section=church&amp;page=overview">Church<span class="nav-count">5</span></a>');
+    expect(church).toContain('<div class="nav-group is-open"><a class="nav-item is-active" href="/?section=church&amp;page=overview">Church<span class="nav-count">4</span></a>');
     expect(church).toContain('<a href="/?section=church&amp;page=trend" aria-current="page">Multi-year trend</a>');
     expect(church).toContain('<h1 class="page-title">Multi-year trend</h1>');
 
     // Accounts & Data folds two sections under one entry, listing both.
     const data = await (await worker.fetch(new Request('https://finance.test/?section=data'), env)).text();
-    expect(data).toContain('<a href="/?section=accounts&amp;page=chart">Chart of accounts</a>');
+    expect(data).toContain('<a href="/?section=accounts&amp;page=connect">Chart of accounts</a>');
     expect(data).toContain('<a href="/?section=data" aria-current="page">Data &amp; Imports</a>');
 
     // HR & Staff is its own admin-only area.
@@ -515,10 +515,6 @@ describe('Finance alpha staging shell', () => {
     expect(trendHtml).toContain('Synthetic staging');
     expect(trendHtml).toContain('the live endpoint is not configured or did not answer: not_configured');
     expect(trendHtml).toContain('$110,000');
-
-    const budgetActualHtml = await (await worker.fetch(new Request('https://finance.test/?section=church&page=budget-actual'), env)).text();
-    expect(budgetActualHtml).toContain('Budget vs actual');
-    expect(budgetActualHtml).toContain('Favorable');
   });
 
   it('renders a live multi-year Church Report trend from the real contract, using the full net-income bottom line rather than a naive income-minus-expense figure', async () => {
@@ -1428,30 +1424,6 @@ describe('Finance alpha staging shell', () => {
     expect(html).toContain('$132,000');
     expect(html).toContain('$90,000');
     expect(html).toContain('Planned totals reconcile · read-only preview');
-    expect(statements).toHaveLength(1);
-    expect(statements[0]).toMatch(/^SELECT\b/i);
-  });
-
-  it('renders Finance-owned board-category and purpose-tag presentation with its own read budget', async () => {
-    statements.length = 0;
-    const res = await worker.fetch(new Request('https://finance.test/?section=accounts'), env);
-    const html = await res.text();
-    expect(res.status).toBe(200);
-    expect(html).toContain('Synthetic Chart of Accounts');
-    expect(html).toContain('Account presentation');
-    expect(html).toContain('Total accounts');
-    expect(html).toContain('Synthetic Contributions');
-    expect(html).toContain('Income:Synthetic Contributions');
-    expect(html).toContain('Synthetic Programs');
-    expect(html).toContain('Board categories');
-    expect(html).toContain('Unrestricted Gifts');
-    expect(html).toContain('Purpose tags');
-    expect(html).toContain('Ministry');
-    expect(html).toContain('Presentation only; ledger paths unchanged');
-    expect(html).toContain('Ledger hierarchy');
-    expect(html).toContain('Account tree');
-    expect(html).toContain('Paths preserved');
-    expect(html).toContain('padding-left:1.95rem');
     expect(statements).toHaveLength(1);
     expect(statements[0]).toMatch(/^SELECT\b/i);
   });

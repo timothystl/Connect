@@ -70,7 +70,7 @@ import {
   churchYearFromReport, councilDraftFromPlan, plannerViewer,
 } from './connect-planner.js';
 import { PLANNER_APP_JS } from './planner/bundle.generated.js';
-import { buildBoardLayoutWrites, normalizeBoardLayout } from './board-layout.js';
+import { buildBoardLayoutWrites, moveBoardCategory, normalizeBoardLayout } from './board-layout.js';
 import { BUDGET_BUILDER_STYLES, buildPlannerModel, defaultProjectBaseCents, parsePlannerForm, parseProjectLine, plannerBackQuery, plannerCsv, plannerParams, plannerYears, renderBudgetBuilderPage, renderPlannerPrint, applyCouncilDraft } from './planning-builder-pages.js';
 import { fetchLiveFinanceCashRunway } from './finance-cash-runway-client.js';
 import { defaultLiveBudgetFiscalYear } from './finance-budget-client.js';
@@ -345,7 +345,7 @@ function renderChurchBudgetImportPreview(preview) {
   <h1>Review Budget vs. Actuals import</h1><p class="note"><strong>No data has been changed.</strong> Review FY${escapeHtml(String(preview.fiscalYear))} from “${escapeHtml(preview.sheetName || 'uploaded workbook')}”. Uncheck anything that should not overwrite the current imported row.</p>
   <form method="POST" action="/api/v1/connect-church-budget-xlsx-commit"><input type="hidden" name="fiscal_year" value="${escapeHtml(String(preview.fiscalYear))}">
   <table><thead><tr><th>Include</th><th>Classification</th><th>Account</th><th>Actual</th><th>Budget</th></tr></thead><tbody>${body}</tbody></table>
-  <button type="submit">Import selected rows</button> <a href="/?section=church&amp;page=budget-actual">Cancel without importing</a></form></body></html>`;
+  <button type="submit">Import selected rows</button> <a href="/?section=data">Cancel without importing</a></form></body></html>`;
 }
 
 function renderChurchBalancesImportPreview(preview) {
@@ -1181,7 +1181,17 @@ async function handleBudgetPlannerSave(request, env, url) {
   if (!isAdmin && !isCouncilEditor) return back('error', 'Not saved: changing the budget plan needs admin access, or budget edit access for council.');
   const parsed = parsePlannerForm(form, { canEditActuals: isAdmin });
   if (parsed.errors.length) return back('error', `Not saved: ${parsed.errors.slice(0, 3).join(' ')}`);
-  const renamed = Object.values(parsed.renames).reduce((n, v) => n + (typeof v === 'string' ? 1 : Object.keys(v).length), 0);
+  if (parsed.move) {
+    // The order is merged over what Connect already holds, so read the saved order first.
+    const layoutRead = await fetchBoardLayout(env);
+    if (!layoutRead.ok) return back('error', 'Not saved: the category order could not be read from Connect, so nothing was moved.');
+    const layout = normalizeBoardLayout(layoutRead.layout);
+    const field = parsed.move.side === 'expense' ? 'expenseOrder' : 'revenueOrder';
+    const nextOrder = moveBoardCategory(layout[field], parsed.move.shown, parsed.move.key, parsed.move.dir);
+    if (nextOrder.join() !== layout[field].join()) parsed.renames[field] = nextOrder;
+  }
+  const renamed = Object.entries(parsed.renames).reduce((n, [k, v]) => n + (Array.isArray(v) ? 1 : typeof v === 'string' ? 1 : Object.keys(v).length), 0);
+  const movedOrder = Boolean(parsed.renames.expenseOrder || parsed.renames.revenueOrder);
   if (!parsed.plan.length && !parsed.projections.length && !parsed.actuals.length && !renamed) return back('ok', 'No changes to save.');
   const saved = [];
   const failed = [];
@@ -1204,7 +1214,8 @@ async function handleBudgetPlannerSave(request, env, url) {
   }
   if (renamed) {
     const r = await postConnectBoardCategoriesWrite(env, accessJwt, parsed.renames);
-    const what = count(renamed, 'name', 'names');
+    const nameChanges = renamed - (parsed.renames.expenseOrder ? 1 : 0) - (parsed.renames.revenueOrder ? 1 : 0);
+    const what = [nameChanges ? count(nameChanges, 'name', 'names') : '', movedOrder ? 'category order' : ''].filter(Boolean).join(' and ');
     (r.ok ? saved : failed).push(r.ok ? what : `${what}: ${why(r)}`);
   }
   if (!failed.length) return back('ok', `Saved in Connect: ${saved.join(', ')}.`);
@@ -1602,8 +1613,6 @@ function renderSectionBody(ctx) {
       canImportChurchMultiYear,
       churchActivityXlsxImportStatus, churchActivityXlsxImportMessage,
       churchBudgetMultiYearXlsxImportStatus, churchBudgetMultiYearXlsxImportMessage,
-      // Budget vs actual groups its lines the Budget planner's way (Chart of Accounts layout).
-      boardLayout: ctx.boardLayout || null, showHidden: ctx.searchParams?.get('hidden') === '1',
     });
   }
   if (section.id === 'balance') {
@@ -1836,6 +1845,7 @@ function renderSectionBody(ctx) {
       dataStatus, importStatus, quickbooksOwn: ctx.quickbooksOwn, quickbooksEnabled: !!ctx.quickbooksEnabled, quickbooksSnapshot,
       daycarePreviewYear, daycarePreview, daycareImportStatus: dataDaycareImportStatus, daycareImportMessage: dataDaycareImportMessage,
       canManage, packetYear: new Date().getUTCFullYear(),
+      churchBudgetImportStatus: ctx.churchBudgetXlsxImportStatus, churchBudgetImportMessage: ctx.churchBudgetXlsxImportMessage,
       classificationHtml: renderClassificationEditors(classification, {
         canManage,
         revenueStatus: classificationRevenueStatus, revenueMessage: classificationRevenueMessage,
@@ -2394,7 +2404,7 @@ export default {
       const fileBase64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
       const result = await postConnectChurchBudgetXlsxPreview(env, accessJwt, { file_base64: fileBase64 });
       if (!result.ok) {
-        const params = new URLSearchParams({ section: 'church', page: 'budget-actual', status: 'error', reason: result.reason || 'unknown' });
+        const params = new URLSearchParams({ section: 'data', op: 'church-budget', status: 'error', reason: result.reason || 'unknown' });
         if (result.message) params.set('message', String(result.message).slice(0, 200));
         return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
       }
@@ -2413,8 +2423,8 @@ export default {
         return response('Invalid selected row', { status: 400, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
       }
       const result = await postConnectChurchBudgetXlsxCommit(env, accessJwt, { fiscal_year: form.get('fiscal_year'), rows });
-      if (result.ok) return response(null, { status: 303, headers: { Location: '/?section=church&page=budget-actual&status=ok' } });
-      const params = new URLSearchParams({ section: 'church', page: 'budget-actual', status: 'error', reason: result.reason || 'unknown' });
+      if (result.ok) return response(null, { status: 303, headers: { Location: '/?section=data&op=church-budget&status=ok' } });
+      const params = new URLSearchParams({ section: 'data', op: 'church-budget', status: 'error', reason: result.reason || 'unknown' });
       if (result.message) params.set('message', String(result.message).slice(0, 200));
       return response(null, { status: 303, headers: { Location: `/?${params.toString()}` } });
     }
@@ -2522,7 +2532,7 @@ export default {
     // oversized upload never even reaches the relay call.
     if (route.id === 'church-budget-xlsx-import-write-v1' || route.id === 'church-balances-xlsx-import-write-v1') {
       const isBalances = route.id === 'church-balances-xlsx-import-write-v1';
-      const redirectBase = isBalances ? { section: 'balance', page: 'position' } : { section: 'church', page: 'budget-actual' };
+      const redirectBase = isBalances ? { section: 'balance', page: 'position' } : { section: 'data', op: 'church-budget' };
       const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion') || '';
       let form;
       try {
@@ -4244,8 +4254,7 @@ export default {
           ? fetchCouncilBudgetDraft(env, accessJwt) : null;
         // The Chart of Accounts board layout (categories, headings, renames, purpose tags) lays out
         // the Budget planner and scenarios, and is what the Chart of Accounts editor edits.
-        let boardLayoutResult = (['builder', 'scenarios', 'multi-year'].includes(planningPageId) || section.id === 'accounts'
-          || (section.id === 'church' && resolveFinancePage(section, pageId).id === 'budget-actual')) ? fetchBoardLayout(env) : null;
+        let boardLayoutResult = (['builder', 'scenarios', 'multi-year'].includes(planningPageId) || section.id === 'accounts') ? fetchBoardLayout(env) : null;
         let boardLayout = after(boardLayoutResult, (result) => (result && result.ok ? normalizeBoardLayout(result.layout) : null));
         const planningLoads = planningV3 ? Promise.all([
           fetchPlanningBasis(env, defaultLiveBudgetFiscalYear()),
@@ -4258,11 +4267,8 @@ export default {
         let planningBasis = after(planningLoads, (loads) => loads[0]);
         let planningScenarios = after(planningLoads, (loads) => loads[1]);
         let planningRunway = after(planningLoads, (loads) => (loads[2]?.ok ? buildLiveCashRunwayView(loads[2].runway) : null));
-        // Chart of Accounts shows one fiscal year, like legacy's tab: ?fiscal_year= or, by default,
-        // the church's current calendar year (no fallback to an older year; the page offers one).
-        const accountsFiscalYear = section.id === 'accounts' ? chartOfAccountsFiscalYear(url.searchParams.get('fiscal_year')) : null;
-        let accountsReport = ['accounts', 'quickbooks'].includes(section.id)
-          ? safeSyntheticRead(() => resolveAccountsReport(env, env.FINANCE_DB, { fiscalYear: accountsFiscalYear })) : null;
+        // Chart of Accounts is Connect's own page (framed), so Finance reads no account list for it.
+        let accountsReport = null;
         // Finance's own QuickBooks connection, once enabled (quickbooks-oauth-routes.js), and for
         // admins the pre-sync backups they can restore (quickbooks-sync-backup.js).
         let quickbooksOwn = ['quickbooks', 'data'].includes(section.id) && qbEnabled(env) && env.FINANCE_DB
@@ -4330,13 +4336,12 @@ export default {
         // same role check and hides hideFromCouncil workers from council logins.
         // Chart of Accounts' Resources by Purpose also reads the plan (legacy counts each tagged
         // worker's church cost there), under the same role check as the Compensation pages.
-        const accountsChartPayroll = section.id === 'accounts' && effectivePageId === 'chart' && compensationRoleVerified;
-        let compensationPlanRaw = ((section.id === 'compensation' && ['council', 'benefits', 'benchmarks', 'rates'].includes(effectivePageId) && compensationRoleVerified) || accountsChartPayroll)
+        let compensationPlanRaw = ((section.id === 'compensation' && ['council', 'benefits', 'benchmarks', 'rates'].includes(effectivePageId) && compensationRoleVerified))
           ? fetchConnectSalaryPlannerState(env, request.headers.get('Cf-Access-Jwt-Assertion') || '') : null;
         let compensationProjection = after(compensationPlanRaw, (plan) => (plan && plan.ok && plan.data
           ? buildCompensationProjection(env, plan.data, {
             // Legacy's purpose totals use the Salary Planner's target year, the year after the chart's.
-            targetYear: accountsChartPayroll ? accountsFiscalYear + 1 : compensationTargetYear(url.searchParams.get('plan_year')),
+            targetYear: compensationTargetYear(url.searchParams.get('plan_year')),
             councilView: effectivePageId === 'council' || roleResult.role === 'council',
           })
           : null));
@@ -4395,7 +4400,7 @@ export default {
         // section-id-scoped status/reason/message query-param shape as churchOverrideStatus above
         // cannot bleed between the two forms -- only one of the two pages is ever rendered per
         // request.
-        const churchBudgetXlsxImportStatus = section.id === 'church' ? url.searchParams.get('status') : null;
+        const churchBudgetXlsxImportStatus = section.id === 'data' && url.searchParams.get('op') === 'church-budget' ? url.searchParams.get('status') : null;
         const churchBudgetXlsxImportMessage = churchBudgetXlsxImportStatus === 'error'
           ? describeChurchXlsxImportError(url.searchParams.get('reason'), url.searchParams.get('message'))
           : null;
