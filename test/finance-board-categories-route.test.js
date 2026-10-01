@@ -66,6 +66,17 @@ describe('Chart of Accounts — board-category assignment form and relay route',
     expect(html).not.toContain('/api/v1/connect-board-categories-write');
   });
 
+  it('shows the assignment form for a verified admin viewer', async () => {
+    const env = roleEnv('admin', async () => new Response('not found', { status: 404 }));
+    const res = await worker.fetch(new Request('https://finance.test/?section=accounts', {
+      headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
+    }), env);
+    const html = await res.text();
+    expect(html).toContain('<form method="POST" action="/api/v1/connect-board-categories-write">');
+    expect(html).toContain('name="category_path"');
+    expect(html).toContain('name="board_category"');
+  });
+
   it('redirects to a not_configured error when the service binding and shared secret are not set', async () => {
     const res = await postForm(baseEnv, { accessJwt: 'whatever' });
     expect(res.status).toBe(303);
@@ -122,6 +133,20 @@ describe('Chart of Accounts — board-category assignment form and relay route',
     expect(res.status).toBe(303);
     const sentBody = JSON.parse(await captured.text());
     expect(sentBody).toEqual({ revenue: { 'Expenses:60000 Programs': '' }, expense: { 'Expenses:60000 Programs': '' } });
+  });
+
+  it('redirects with the refusal reason when Connect declines the assignment, and shows it back on the page', async () => {
+    const env = liveEnv(async () => new Response(JSON.stringify({ error: 'Access denied: editing the chart of accounts requires admin access' }), { status: 403 }));
+    const res = await postForm(env, { accessJwt: 'signed.jwt.here' });
+    const location = new URL(res.headers.get('location'), 'https://finance.test');
+    expect(location.searchParams.get('status')).toBe('error');
+    expect(location.searchParams.get('reason')).toBe('http_error');
+    expect(location.searchParams.get('message')).toBe('Access denied: editing the chart of accounts requires admin access');
+
+    const shownEnv = roleEnv('admin', async () => new Response('not found', { status: 404 }));
+    const shown = await worker.fetch(new Request(location.toString(), { headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' } }), shownEnv);
+    const html = await shown.text();
+    expect(html).toContain('Not saved: Access denied: editing the chart of accounts requires admin access');
   });
 
   it('redirects with a network_error reason when the relay call itself fails, never throwing', async () => {

@@ -167,17 +167,16 @@ export function buildBoardLayoutWrites(form, kind) {
   };
 }
 
-// Moves one category a step up or down among the categories the page shows (an empty category is
-// not shown, so it is stepped over). `order` is the full saved order; returns the new full order, or
-// the same one when the key is already at that end or is not shown.
-export function moveBoardCategory(order, shown, key, dir) {
-  const visible = order.filter((k) => shown.includes(k));
-  const at = visible.indexOf(key);
-  const to = at + (dir === 'up' ? -1 : 1);
-  if (at < 0 || to < 0 || to >= visible.length) return order;
+// Puts the categories the page shows into the order the person numbered them. `entries` has every
+// shown category as { key, from, to }: `from` is its place now (1, 2, 3...), `to` the number typed. A
+// category given a number another one also has goes ahead of it; categories the page does not show keep
+// their places. Returns the new full order.
+export function orderByPositions(order, entries) {
+  const moved = (e) => (e.to !== e.from ? 0 : 1);
+  const sorted = [...entries].sort((a, b) => a.to - b.to || moved(a) - moved(b) || a.from - b.from).map((e) => e.key);
+  const keys = new Set(entries.map((e) => e.key));
+  const slots = order.map((k, i) => (keys.has(k) ? i : -1)).filter((i) => i >= 0);
   const next = [...order];
-  const a = next.indexOf(key);
-  const b = next.indexOf(visible[to]);
-  [next[a], next[b]] = [next[b], next[a]];
+  slots.forEach((slot, i) => { next[slot] = sorted[i]; });
   return next;
 }

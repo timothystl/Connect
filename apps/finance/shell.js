@@ -70,7 +70,7 @@ import {
   churchYearFromReport, councilDraftFromPlan, plannerViewer,
 } from './connect-planner.js';
 import { PLANNER_APP_JS } from './planner/bundle.generated.js';
-import { buildBoardLayoutWrites, moveBoardCategory, normalizeBoardLayout } from './board-layout.js';
+import { buildBoardLayoutWrites, normalizeBoardLayout, orderByPositions } from './board-layout.js';
 import { BUDGET_BUILDER_STYLES, buildPlannerModel, defaultProjectBaseCents, parsePlannerForm, parseProjectLine, plannerBackQuery, plannerCsv, plannerParams, plannerYears, renderBudgetBuilderPage, renderPlannerPrint, applyCouncilDraft } from './planning-builder-pages.js';
 import { fetchLiveFinanceCashRunway } from './finance-cash-runway-client.js';
 import { defaultLiveBudgetFiscalYear } from './finance-budget-client.js';
@@ -1181,14 +1181,16 @@ async function handleBudgetPlannerSave(request, env, url) {
   if (!isAdmin && !isCouncilEditor) return back('error', 'Not saved: changing the budget plan needs admin access, or budget edit access for council.');
   const parsed = parsePlannerForm(form, { canEditActuals: isAdmin });
   if (parsed.errors.length) return back('error', `Not saved: ${parsed.errors.slice(0, 3).join(' ')}`);
-  if (parsed.move) {
+  if (Object.keys(parsed.order).length) {
     // The order is merged over what Connect already holds, so read the saved order first.
     const layoutRead = await fetchBoardLayout(env);
     if (!layoutRead.ok) return back('error', 'Not saved: the category order could not be read from Connect, so nothing was moved.');
     const layout = normalizeBoardLayout(layoutRead.layout);
-    const field = parsed.move.side === 'expense' ? 'expenseOrder' : 'revenueOrder';
-    const nextOrder = moveBoardCategory(layout[field], parsed.move.shown, parsed.move.key, parsed.move.dir);
-    if (nextOrder.join() !== layout[field].join()) parsed.renames[field] = nextOrder;
+    for (const [side, entries] of Object.entries(parsed.order)) {
+      const field = side === 'expense' ? 'expenseOrder' : 'revenueOrder';
+      const nextOrder = orderByPositions(layout[field], entries);
+      if (nextOrder.join() !== layout[field].join()) parsed.renames[field] = nextOrder;
+    }
   }
   const renamed = Object.entries(parsed.renames).reduce((n, [k, v]) => n + (Array.isArray(v) ? 1 : typeof v === 'string' ? 1 : Object.keys(v).length), 0);
   const movedOrder = Boolean(parsed.renames.expenseOrder || parsed.renames.revenueOrder);
@@ -1250,13 +1252,6 @@ async function handleBudgetPlannerCsv(request, env, url) {
 
 function renderEntityCards(entities) {
   return entities.map((entity) => (entity.available === false ? renderUnavailableCard(`${entity.label} · ${entity.periodLabel}`, entity.unavailableNote) : `<div class="card"><small>${escapeHtml(entity.label)} · ${escapeHtml(entity.periodLabel)}</small><strong>${formatSignedCents(entity.resultCents)}</strong><span>Income ${formatCents(entity.incomeCents)} · expenses ${formatCents(entity.expenseCents)} · ${entity.source === 'live' ? 'live from Connect' : 'synthetic fixture'}</span></div>`)).join('');
-}
-
-function renderConnectWorkspaceFrame(workspaceSection, { label = 'Chart of Accounts', alternateHref = '', alternateLabel = '' } = {}) {
-  const src = `/accounting?section=${workspaceSection}`;
-  const alternate = alternateHref ? ` · <a href="${alternateHref}">${alternateLabel}</a>` : '';
-  return `<p class="muted-line">Connect’s ${label}, running in Finance with the same controls and autosave. It edits the same saved data as Finance’s own pages. <a href="${src}" target="_blank" rel="noopener">Open full screen</a>${alternate}</p>
-    <iframe src="${src}" title="${label} (Connect)" style="width:100%;height:calc(100vh - 150px);min-height:720px;border:1px solid #E3E7EE;border-radius:10px;background:#F3F7FA"></iframe>`;
 }
 
 function renderSectionBody(ctx) {
@@ -1729,12 +1724,6 @@ function renderSectionBody(ctx) {
       basis, planning: ctx.planningScenarios, canEdit: !councilPreview && canEditPlanning(roleResult), status: describeFormStatus(ctx.searchParams, 'planning'),
       params: ctx.searchParams, layout: ctx.boardLayout || null,
     });
-  }
-  // Connect's own Chart of Accounts (the accounting workspace, which runs Connect's screens
-  // unchanged), framed here beside Finance's pages for side-by-side use. The Budget Planner is
-  // Finance's own page now (Planning › Budget planner); its old page=connect address resolves to it.
-  if (section.id === 'accounts' && page.id === 'connect') {
-    return renderConnectWorkspaceFrame('accounts');
   }
   if (section.id === 'planning' && page.id === 'builder' && ctx.budgetBuilder?.ok) {
     const isAdmin = !councilPreview && roleResult.ok && roleResult.role === 'admin';
@@ -4267,8 +4256,11 @@ export default {
         let planningBasis = after(planningLoads, (loads) => loads[0]);
         let planningScenarios = after(planningLoads, (loads) => loads[1]);
         let planningRunway = after(planningLoads, (loads) => (loads[2]?.ok ? buildLiveCashRunwayView(loads[2].runway) : null));
-        // Chart of Accounts is Connect's own page (framed), so Finance reads no account list for it.
-        let accountsReport = null;
+        // Chart of Accounts shows one fiscal year, like legacy's tab: ?fiscal_year= or, by default,
+        // the church's current calendar year (no fallback to an older year; the page offers one).
+        const accountsFiscalYear = section.id === 'accounts' ? chartOfAccountsFiscalYear(url.searchParams.get('fiscal_year')) : null;
+        let accountsReport = ['accounts', 'quickbooks'].includes(section.id)
+          ? safeSyntheticRead(() => resolveAccountsReport(env, env.FINANCE_DB, { fiscalYear: accountsFiscalYear })) : null;
         // Finance's own QuickBooks connection, once enabled (quickbooks-oauth-routes.js), and for
         // admins the pre-sync backups they can restore (quickbooks-sync-backup.js).
         let quickbooksOwn = ['quickbooks', 'data'].includes(section.id) && qbEnabled(env) && env.FINANCE_DB
@@ -4336,12 +4328,13 @@ export default {
         // same role check and hides hideFromCouncil workers from council logins.
         // Chart of Accounts' Resources by Purpose also reads the plan (legacy counts each tagged
         // worker's church cost there), under the same role check as the Compensation pages.
-        let compensationPlanRaw = ((section.id === 'compensation' && ['council', 'benefits', 'benchmarks', 'rates'].includes(effectivePageId) && compensationRoleVerified))
+        const accountsChartPayroll = section.id === 'accounts' && effectivePageId === 'chart' && compensationRoleVerified;
+        let compensationPlanRaw = ((section.id === 'compensation' && ['council', 'benefits', 'benchmarks', 'rates'].includes(effectivePageId) && compensationRoleVerified) || accountsChartPayroll)
           ? fetchConnectSalaryPlannerState(env, request.headers.get('Cf-Access-Jwt-Assertion') || '') : null;
         let compensationProjection = after(compensationPlanRaw, (plan) => (plan && plan.ok && plan.data
           ? buildCompensationProjection(env, plan.data, {
             // Legacy's purpose totals use the Salary Planner's target year, the year after the chart's.
-            targetYear: compensationTargetYear(url.searchParams.get('plan_year')),
+            targetYear: accountsChartPayroll ? accountsFiscalYear + 1 : compensationTargetYear(url.searchParams.get('plan_year')),
             councilView: effectivePageId === 'council' || roleResult.role === 'council',
           })
           : null));

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 import worker from '../apps/finance/shell.js';
-import { buildBoardLayoutWrites, buildBoardSections, moveBoardCategory, normalizeBoardLayout } from '../apps/finance/board-layout.js';
+import { buildBoardLayoutWrites, buildBoardSections, normalizeBoardLayout, orderByPositions } from '../apps/finance/board-layout.js';
 import { handleContractsServiceApi } from '../src/api-contracts-service.js';
 
 // Account names are fabricated QuickBooks-style labels; no real figures.
@@ -108,8 +108,8 @@ describe('Budget builder and Chart of Accounts board layout', () => {
   it('groups the Budget planner by board category with subtotals, and offers QuickBooks order', async () => {
     const html = await (await get(makeEnv().env, 'section=planning&page=builder')).text();
     expect(html).toContain('<tr class="bb-group"><td colspan="7">Revenue</td></tr>');
-    expect(html).toContain('<tr class="bp-header" data-bp="header" data-side="revenue"><td colspan="7" style="padding-left:10px"><span class="bp-heading-row"><input type="text" name="hl_wrapper" value="Donor Income"');
-    expect(html).toContain('<tr class="bp-header" data-bp="header" data-side="revenue"><td colspan="7" style="padding-left:26px"><span class="bp-heading-row"><input type="text" name="hl_revenue_donor" value="General Offerings"');
+    expect(html).toContain('name="hl_wrapper" value="Donor Income"');
+    expect(html).toContain('name="hl_revenue_donor" value="General Offerings"');
     expect(html).toContain('<td style="padding-left:26px">Total General Offerings</td>');
     expect(html).toContain('<td style="padding-left:10px">Total Donor Income</td>');
     expect(html).toContain('name="hl_expense_worship" value="Worship &amp; Music"');
@@ -125,6 +125,20 @@ describe('Budget builder and Chart of Accounts board layout', () => {
     expect(qb).toContain('<span class="is-on">QuickBooks order</span>');
     const missing = await (await get(makeEnv({ layoutStatus: 500 }).env, 'section=planning&page=builder')).text();
     expect(missing).toContain('could not be read, so lines are listed in QuickBooks order');
+  });
+
+  it('gives an admin the layout editor on Chart of Accounts, with every saved purpose tag', async () => {
+    const html = await (await get(makeEnv().env, 'section=accounts&page=chart')).text();
+    expect(html).toContain('id="layout"');
+    expect(html).toContain('name="label_revenue_donor" value="General Offerings"');
+    expect(html).toContain('placeholder="60100 Salary - Pastor"');
+    expect(html).toContain('value="Pastor salary"');
+    expect(html).toContain('Automatic (Salaries)');
+    expect(html).not.toContain('name="path_3"');
+    expect(html).toContain('Salaries (automatic)');
+    expect(html).toContain('unused,Not yet used');
+    const council = await (await get(makeEnv({ role: 'council' }).env, 'section=accounts&page=chart')).text();
+    expect(council).not.toContain('id="layout"');
   });
 
   it('relays a layout save as merge bodies for categories, names and tags', async () => {
@@ -161,36 +175,58 @@ describe('category order', () => {
     expect(s.revenue.map((x) => x.label)).toEqual(['Passive Income', 'Earned Income', 'Donor Income']);
   });
 
-  it('steps a category past the ones the page does not show, and stops at the ends', () => {
-    const order = ['mdo', 'salaries', 'benefits', 'worship'];
-    expect(moveBoardCategory(order, ['salaries', 'worship'], 'worship', 'up')).toEqual(['mdo', 'worship', 'benefits', 'salaries']);
-    expect(moveBoardCategory(order, ['salaries', 'worship'], 'salaries', 'up')).toEqual(order);
-    expect(moveBoardCategory(order, ['salaries', 'worship'], 'worship', 'down')).toEqual(order);
-    expect(moveBoardCategory(order, ['salaries'], 'benefits', 'up')).toEqual(order);
+  const place = (key, from, to) => ({ key, from, to });
+
+  it('puts the shown categories in the order they were numbered, leaving the hidden ones where they are', () => {
+    const order = ['mdo', 'salaries', 'benefits', 'worship', 'property'];
+    // The page shows salaries (1), worship (2) and property (3); benefits and mdo are empty and not shown.
+    const shown = (to) => [place('salaries', 1, to.salaries), place('worship', 2, to.worship), place('property', 3, to.property)];
+    expect(orderByPositions(order, shown({ salaries: 3, worship: 1, property: 2 }))).toEqual(['mdo', 'worship', 'benefits', 'property', 'salaries']);
+    expect(orderByPositions(order, shown({ salaries: 1, worship: 2, property: 3 }))).toEqual(order);
+    // A full reorder in one go: last to first.
+    expect(orderByPositions(order, shown({ salaries: 3, worship: 2, property: 1 }))).toEqual(['mdo', 'property', 'benefits', 'worship', 'salaries']);
   });
 
-  it('moves a heading from the Budget planner: arrows for an admin, the new order sent to Connect', async () => {
+  it('gives the category that was numbered the place when another already holds that number', () => {
+    const order = ['a', 'b', 'c', 'd'];
+    expect(orderByPositions(order, [place('a', 1, 1), place('b', 2, 2), place('c', 3, 3), place('d', 4, 2)])).toEqual(['a', 'd', 'b', 'c']);
+    expect(orderByPositions(order, [place('a', 1, 4), place('b', 2, 2), place('c', 3, 3), place('d', 4, 4)])).toEqual(['b', 'c', 'a', 'd']);
+  });
+
+  it('numbers a heading from the Budget planner: a number box for an admin, the new order sent to Connect', async () => {
     const admin = await (await get(makeEnv().env, 'section=planning&page=builder')).text();
-    expect(admin).toContain('name="move" value="expense:salaries:down"');
-    expect(admin).toContain('name="move" value="revenue:donor:down"');
-    expect(admin).not.toContain('value="revenue:restricted');
+    expect(admin).toMatch(/name="pos_expense_salaries" value="\d" min="1" max="\d" class="bp-place-input"/);
+    expect(admin).toContain('name="pos_revenue_donor"');
+    expect(admin).not.toContain('pos_revenue_restricted');
+    expect(admin).not.toContain('name="move"');
     const council = await (await get(makeEnv({ role: 'council' }).env, 'section=planning&page=builder')).text();
-    expect(council).not.toContain('name="move"');
+    expect(council).not.toContain('name="pos_');
 
     const { env, calls } = makeEnv();
     const res = await worker.fetch(new Request('https://finance.test/api/v1/budget-planner-save', {
       method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'jwt', 'Sec-Fetch-Site': 'same-origin' },
       body: new URLSearchParams({
         target_year: String(FY), base_year: String(FY - 1), fiscal_year: String(FY), back: `target=${FY}&base=${FY - 1}`,
-        move: 'expense:salaries:down',
-        hl_expense_salaries: 'Salaries', orig_hl_expense_salaries: 'Salaries', hl_expense_benefits: 'Benefits', orig_hl_expense_benefits: 'Benefits',
-        hl_expense_worship: 'Worship', orig_hl_expense_worship: 'Worship',
+        pos_expense_salaries: '3', orig_pos_expense_salaries: '1', pos_expense_benefits: '2', orig_pos_expense_benefits: '2', pos_expense_worship: '1', orig_pos_expense_worship: '3',
       }),
     }), env);
     expect(decodeURIComponent(res.headers.get('location').replace(/\+/g, ' '))).toContain('category order');
     const write = calls.find((c) => c.path.endsWith('/finance-board-categories-write-v1'));
-    expect(write.body.expenseOrder.slice(0, 3)).toEqual(['mdo', 'benefits', 'salaries']);
-    expect(write.body.expenseOrder).toHaveLength(9);
+    const order = write.body.expenseOrder;
+    expect(order).toHaveLength(9);
+    // worship was typed 1, salaries 3: the three shown slots now read worship, benefits, salaries.
+    const slots = order.filter((k) => ['salaries', 'benefits', 'worship'].includes(k));
+    expect(slots).toEqual(['worship', 'benefits', 'salaries']);
+    expect(write.body.revenueOrder).toBeUndefined();
+  });
+
+  it('changes nothing when no number was changed', async () => {
+    const { env, calls } = makeEnv();
+    await worker.fetch(new Request('https://finance.test/api/v1/budget-planner-save', {
+      method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'jwt', 'Sec-Fetch-Site': 'same-origin' },
+      body: new URLSearchParams({ target_year: String(FY), base_year: String(FY - 1), fiscal_year: String(FY), back: '', pos_expense_salaries: '1', orig_pos_expense_salaries: '1' }),
+    }), env);
+    expect(calls.filter((c) => c.path.endsWith('/finance-board-categories-write-v1'))).toHaveLength(0);
   });
 });
 
