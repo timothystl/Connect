@@ -29,10 +29,10 @@ Reference, not startup instructions. Verify against current workflows before rel
 | `CLOUDFLARE_ACCOUNT_ID` (not secret) | several | recovery check | several | deploy | |
 | R2 S3-style keys (`R2_*`) | `R2_MIGRATION_ACCESS_KEY_ID` + `_SECRET_ACCESS_KEY` (photo migration, one-time) | | `R2_RECOVERY_ACCESS_KEY_ID` + `_SECRET_ACCESS_KEY` | `R2_ACCESS_KEY_ID` + `_SECRET_ACCESS_KEY` + `R2_ACCOUNT_ID` (Supabase backups to R2) | |
 
-`ministry-study` uses no Cloudflare secrets. Finance, Connect, website, and app-launcher keep
-theirs in a GitHub environment named `production` (Finance and Connect workflows declare it);
-check each repository's workflow for repository-level versus environment-level placement before
-pasting.
+`ministry-study` uses no Cloudflare secrets. Connect and Finance workflows declare a GitHub environment
+named `production`, so their secrets belong in that environment. app-launcher selects its environment
+by run input (`production` or `staging`). The website and myMDO workflows declare no environment, so
+theirs are repository-level secrets. Check each workflow before pasting.
 
 ## Cloudflare tokens that existed on October 1, 2026 (from the dashboard)
 
