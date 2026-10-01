@@ -1,5 +1,6 @@
 import { buildChurchReportView, buildLiveChurchReportView } from './church-report-service.js';
 import { escapeHtml, formatCents, formatSignedCents, renderKpiCards, renderSectionHeading, renderTable } from './render-helpers.js';
+import { renderChurchYearDetail } from './church-year-pages.js';
 import { accountDisplayName, buildBoardSections, isHiddenAccount } from './board-layout.js';
 
 // Admin-only correction of one account's real, posted actual figure -- relayed live to Connect's
@@ -238,8 +239,9 @@ export function renderChurchPage(pageId, {
   canImportChurchMultiYear,
   churchActivityXlsxImportStatus, churchActivityXlsxImportMessage,
   churchBudgetMultiYearXlsxImportStatus, churchBudgetMultiYearXlsxImportMessage,
-  boardLayout = null, showHidden = false,
+  boardLayout = null, showHidden = false, churchYear = null,
 }) {
+  if (pageId === 'year-detail') return renderChurchYearDetail(churchYear);
   if (pageId === 'trend') {
     const isTrendLive = churchTrendLive.source === 'live';
     const badge = isTrendLive ? 'Live from Connect' : 'Synthetic staging';

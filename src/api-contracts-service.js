@@ -29,6 +29,7 @@ import { respondWithFinanceClassificationV1 } from './api-classification-contrac
 import { respondWithFinanceBoardLayoutV1 } from './api-board-layout-contracts.js';
 import { respondWithFinanceImportStatusV1, respondWithFinanceDaycareChurchBudgetPreviewV1, respondWithFinanceBoardPacketV1 } from './api-data-imports-contracts.js';
 import { respondWithFinanceHealthV1 } from './api-finance-health-contract.js';
+import { respondWithFinanceChurchYearV1 } from './api-finance-church-year-contract.js';
 import {
   applyBudgetPlanOverrideRows, applySalaryPlannerWrite, resolveSalaryPlannerState,
   generateBudgetPlanRows, generateAllBudgetPlan, commitBudgetPlan, deleteBudgetPlanRow,
@@ -130,6 +131,12 @@ export async function handleContractsServiceApi(req, env, path) {
   // database. env.DB routes each query to its owning database; none of them joins across the two.
   if (path === '/api/contracts/finance-health-v1' && req.method === 'GET') {
     return respondWithFinanceHealthV1(new URL(req.url), env.DB);
+  }
+
+  // Church Report › This year in detail (Finance): expense pace, this year vs. last year,
+  // supplies by month and Giving by fund. Reads Giving's fund totals, so Connect serves it.
+  if (path === '/api/contracts/finance-church-year-v1' && req.method === 'GET') {
+    return respondWithFinanceChurchYearV1(new URL(req.url), env.DB);
   }
 
   if (path === '/api/contracts/finance-chart-of-accounts-v1' && req.method === 'GET') {
