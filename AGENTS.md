@@ -59,8 +59,10 @@ Keep durable instructions here and detailed progress there.
   serves Connect, Giving, Serve/Scheduler, and legacy Finance as
   `timothy-connect`. Production binds `DB` to `timothy-connect-db`, `KV` to the
   `timothy-connect-kv` namespace, and `PHOTOS` to `timothy-connect-photos`.
-- `apps/finance/shell.js` deploys separately as `timothy-finance-app`, with its own
-  `timothy-finance-db`. Both applications also have isolated staging configurations.
+- Finance lives in its own repository, [`timothystl/finance`](https://github.com/timothystl/finance)
+  (split from this one in October 2026 with its full history). It deploys separately as
+  `timothy-finance-app`, with its own `timothy-finance-db` and isolated staging. Finance code, its
+  tests, runbooks, and deploy workflows are no longer here; do not recreate them.
 - Giving stays authoritative in Connect. Finance consumes versioned summaries and relays
   Giving writes to Connect. Payroll currently relays to Website's backend. Finance-owned
   accounting data/writers are being migrated; separate infrastructure is already deployed.
@@ -87,13 +89,11 @@ effect of a documentation task. Keep fixtures and production clearly separate.
 ## Tests and releases
 
 Use Node 22. For application changes run `npm test` and
-`node .github/scripts/check-built-scripts.js`; Finance changes also use
-`npm run validate:finance` or `npm run validate:finance:prod` for the target configuration.
-Add focused regression coverage when useful.
+`node .github/scripts/check-built-scripts.js`. Add focused regression coverage when useful.
+Finance work is done and tested in `timothystl/finance`.
 
-Main merges do not deploy Connect or Finance automatically. Complete a requested application
-release by dispatching `.github/workflows/deploy.yml` (Connect) or
-`.github/workflows/deploy-finance.yml` (Finance), with the exact tested main SHA and a real
-release reason. The working agreement above supplies routine release authorization; the
+Main merges do not deploy automatically. Complete a requested Connect release by dispatching
+`.github/workflows/deploy.yml` with the exact tested main SHA and a real release reason. Finance
+releases are dispatched from `timothystl/finance` (`.github/workflows/deploy-finance.yml`). The working agreement above supplies routine release authorization; the
 workflow's “approved SHA” wording does not require another question. Deploy only the affected
 application. Documentation-only changes normally need no manual Worker deployment.

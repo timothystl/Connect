@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { handleAdminApi } from '../src/api-admin.js';
 import { authCookieHeader } from '../src/auth.js';
-import { saveCouncilOverlay } from '../apps/finance/compensation-council-overlay.js';
 
 // Council gets a narrower, per-user slice of the Compensation Planner. Finance is three
 // independently grantable items for every configurable role (see financeSegItems in
@@ -206,31 +205,18 @@ describe('council role — Compensation Planner reads', () => {
 });
 
 describe('council role — saving the plan', () => {
-  // Council drafts are written by Finance's own writer now (apps/finance/compensation-council-overlay.js),
-  // straight into the same finance_settings row. This adapter gives it the in-memory database.
-  const financeDb = {
-    prepare(sql) {
-      return { bind: (...args) => ({ run: async () => sqlite.prepare(sql).run(...args) }) };
-    },
+  // Council drafts are written by Finance (its own repository now) straight into the same
+  // finance_settings row Connect reads. These tests seed that row the way Finance stores it.
+  const saveDraft = async (username, overlay) => {
+    sqlite.prepare("INSERT INTO finance_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .run(`finance_salary_planner_council_${String(username).toLowerCase()}`, JSON.stringify(overlay));
   };
-  const saveDraft = (username, overlay) => saveCouncilOverlay(financeDb, username, overlay);
 
   it('refuses council saves in Connect, pointing to Finance, and writes nothing', async () => {
     const r = await call('council', 'elder1', 'finance/planning/salary', 'PUT', { compMethod: 'custom', compCustomPct: 4.25 });
     expect(r.status).toBe(409);
     expect(r.body.error).toMatch(/saved in Finance/);
     expect(sqlite.prepare("SELECT value FROM finance_settings WHERE key='finance_salary_planner_council_elder1'").get()).toBeFalsy();
-  });
-
-  it("Finance's writer keeps only the raise-plan fields, in the key Connect reads for this username", async () => {
-    await saveDraft('Elder1', {
-      roster: [{ name: 'Smuggled Seed Edit', actualSalaryCents: 1 }],
-      compMethod: 'custom', compCustomPct: 4.25, compBaselineRosterOnly: true,
-      compOverrides: { 0: '999999' }, targetCategory: 'Smuggled Category',
-    });
-    const stored = JSON.parse(sqlite.prepare("SELECT value FROM finance_settings WHERE key='finance_salary_planner_council_elder1'").get().value);
-    expect(stored).toEqual({ compMethod: 'custom', compCustomPct: 4.25, compBaselineRosterOnly: true });
-    expect(sqlite.prepare("SELECT value FROM finance_settings WHERE key='finance_salary_planner'").get()).toBeFalsy();
   });
 
   it('never lets a council draft overwrite the real admin/finance plan', async () => {
