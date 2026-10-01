@@ -104,9 +104,10 @@ export const FINANCE_PARITY_SECTIONS = Object.freeze([
   },
   {
     id: 'church', label: 'Church Report', group: 'Church', permission: 'finance',
-    capabilities: ['current year', 'multi-year trends', 'income and expense detail', 'board packet'],
+    capabilities: ['current year', 'expense pace', 'this year vs. last year', 'supplies by month', 'giving by fund', 'CSV export', 'multi-year trends', 'income and expense detail', 'board packet'],
     pages: [
       { id: 'overview', label: 'Overview', status: 'live' },
+      { id: 'year-detail', label: 'This year in detail', status: 'live' },
       { id: 'income-expense', label: 'Income & expense detail', status: 'live' },
       { id: 'trend', label: 'Multi-year trend', status: 'live' },
       { id: 'budget-actual', label: 'Budget vs actual', status: 'live' },

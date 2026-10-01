@@ -160,6 +160,8 @@ import { buildLiveCashRunwayView, buildResolvedCashRunwayView, resolveCashRunway
 import { buildFinancialMixView, buildLiveFinancialMixView } from './financial-mix-service.js';
 import { buildEntityOverview, buildHealthEntityOverview } from './entity-overview-service.js';
 import { fetchLiveFinanceHealth } from './finance-health-client.js';
+import { fetchLiveFinanceChurchYear } from './finance-church-year-client.js';
+import { CHURCH_YEAR_STYLES, buildChurchYearCsv } from './church-year-pages.js';
 import { HEALTH_PARITY_STYLES, renderCashRunwayCard, renderCashRunwayNotYetAvailable, renderHealthParity } from './health-parity-pages.js';
 import { buildOperatingBridge } from './operating-bridge-service.js';
 import { readSyntheticPropertyForecast, resolvePropertyForecast } from './property-forecast-service.js';
@@ -1590,6 +1592,7 @@ function renderSectionBody(ctx) {
     // rule, so hiding the forms from other roles only avoids offering a guaranteed 403.
     const canImportChurchMultiYear = roleResult.ok && roleResult.role === 'admin';
     return renderChurchPage(page.id, {
+      churchYear: ctx.churchYear || null,
       churchReport: churchReportLive, churchTrendLive, canManageChurchReport, churchOverrideStatus, churchOverrideMessage,
       // Same admin-only gate as canManageChurchReport above -- the Budget vs. Actuals .xlsx import
       // form is a separate write (finance-church-budget-xlsx-import-v1), but matches legacy's own
@@ -1926,7 +1929,7 @@ function renderShell(ctx) {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Timothy Finance${production ? '' : ' — Staging'}</title>
   <link rel="icon" href="/assets/finance-mark.png"><link rel="apple-touch-icon" href="/assets/finance-icon.png">
-  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${COUNCIL_REPORT_STYLES}${GIVING_REPORTS_STYLES}${DONOR_LETTERS_STYLES}${PLEDGE_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}${FUND_CLEANUP_STYLES}</style>
+  <style>${SHELL_STYLES}${HEALTH_STYLES}${HEALTH_PARITY_STYLES}${FACILITIES_STYLES}${HR_STYLES}${PAYROLL_STYLES}${GIFT_BATCH_STYLES}${GIFT_TRANSACTIONS_STYLES}${COUNCIL_REPORT_STYLES}${GIVING_REPORTS_STYLES}${DONOR_LETTERS_STYLES}${PLEDGE_STYLES}${GIVING_ANALYTICS_STYLES}${PLANNING_V3_STYLES}${ACCESS_STYLES}${BUDGET_BUILDER_STYLES}${ACQUISITION_STYLES}${PROPERTY_BOOKS_STYLES}${PROPERTY_CHART_STYLES}${BALANCE_STYLES}${FUND_CLEANUP_STYLES}${CHURCH_YEAR_STYLES}</style>
 </head>
 <body${councilPreview ? ' class="council-preview"' : ''}>
   <header class="app-header">
@@ -4033,6 +4036,17 @@ export default {
             'Content-Disposition': `attachment; filename="${transactionsCsvFilename(found.result.filters)}"`,
           } });
         }
+        // This year in detail's "Download CSV": the page's own figures from Connect, as a file.
+        if (section.id === 'church' && resolveFinancePage(section, pageId).id === 'year-detail' && url.searchParams.get('format') === 'csv') {
+          const found = await fetchLiveFinanceChurchYear(env, defaultLiveChurchReportFiscalYear());
+          if (!found.ok) {
+            return response('The Church Report could not be read from Connect.', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+          }
+          return response(buildChurchYearCsv(found.report), { headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': `attachment; filename="church-report-${found.report.fiscalYear}.csv"`,
+          } });
+        }
         if (section.id === 'balance' && url.searchParams.get('format') === 'csv') {
           const trend = await safeSyntheticRead(() => resolveBalanceSheetTrend(env, env.FINANCE_DB, balanceSelection));
           if (isSyntheticUnavailable(trend)) {
@@ -4337,6 +4351,10 @@ export default {
         // page standing and says so where these sections would have been.
         let financeHealth = section.id === 'health'
           ? fetchLiveFinanceHealth(env, defaultLiveChurchReportFiscalYear()) : null;
+        // Church Report › This year in detail (connect.finance-church-year.v1), also answered by
+        // Connect because Giving by fund reads Giving's totals.
+        let churchYear = section.id === 'church' && effectivePageId === 'year-detail'
+          ? fetchLiveFinanceChurchYear(env, defaultLiveChurchReportFiscalYear()) : null;
         const canManageCashPolicy = section.id === 'charts' && effectivePageId === 'cash-reserve'
           && roleResult.ok && roleResult.role === 'admin';
         const cashPolicyStatus = canManageCashPolicy && url.searchParams.get('op') === 'cash-policy'
@@ -4642,7 +4660,7 @@ export default {
           : null;
         // Every load above started without waiting on the others; one slow Connect answer now
         // costs its own timeout once, not once per section read in turn.
-        [summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, givingMdoBooks, facilities, gymIncome, payrollBundle, financeHealth] = await Promise.all([summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, givingMdoBooks, facilities, gymIncome, payrollBundle, financeHealth]);
+        [summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, givingMdoBooks, facilities, gymIncome, payrollBundle, financeHealth, churchYear] = await Promise.all([summary, churchReport, churchReportLive, churchTrendLive, balanceSheet, balanceTrends, daycareReportLive, daycareEntries, propertyReport, propertyReserves, propertyLedgers, propertyValuation, propertyPolicy, propertyBooks, propertyDebt, propertyReportLive, propertyReservesLive, propertyLedgersLive, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, budgetBuilder, boardLayoutResult, boardLayout, planningBasis, planningScenarios, planningRunway, accountsReport, quickbooksOwn, quickbooksBackups, quickbooksTransactions, importHistory, dataStatus, classification, importStatus, quickbooksSnapshot, daycarePreview, compensationReport, compensationReportLive, compensationBenchmarks, compensationBenefits, compensationPlanRaw, compensationProjection, cashRunway, giving, givingSource, hr, givingBatch, accessRoles, givingAnalytics, givingAnalyticsPeople, givingMdoBooks, facilities, gymIncome, payrollBundle, financeHealth, churchYear]);
         const balancePriorYear = await balancePriorYearLoad;
         const [balancePropertyValue, balanceMortgageHistory, propertyMortgageHistory] = await Promise.all([balancePropertyValueLoad, balanceMortgageHistoryLoad, propertyMortgageHistoryLoad]);
         const printMode = url.searchParams.get('print') === '1';
@@ -4655,7 +4673,7 @@ export default {
           pledgeList: pledgeListLoad ? await pledgeListLoad : null,
           councilAnalysis: councilAnalysisLoad ? await councilAnalysisLoad : null,
           councilBudgetDraft: councilBudgetDraftLoad ? await councilBudgetDraftLoad : null,
-          healthView: url.searchParams.get('view'), healthAppeal: url.searchParams.get('appeal'), healthFlow: url.searchParams.get('flow'), financeHealth, facilities, hr, givingBatch, givingAnalytics, givingAnalyticsPeople, givingMdoBooks, gymIncome, accessRoles, budgetBuilder, boardLayout, planningBasis, planningScenarios, planningRunway, propertyBooks, searchParams: url.searchParams,
+          healthView: url.searchParams.get('view'), healthAppeal: url.searchParams.get('appeal'), healthFlow: url.searchParams.get('flow'), financeHealth, churchYear, facilities, hr, givingBatch, givingAnalytics, givingAnalyticsPeople, givingMdoBooks, gymIncome, accessRoles, budgetBuilder, boardLayout, planningBasis, planningScenarios, planningRunway, propertyBooks, searchParams: url.searchParams,
           metadata, summary, giving, givingSource, section, pageId, councilPreview, roleResult, churchReport, churchReportLive, churchTrendLive,
           balanceSheet, balanceTrends, balancePriorYear, balancePropertyValue, balanceMortgageHistory, balanceSelection, daycareReport, daycareReportLive, daycareEntries, daycareEditId, propertyReport, propertyReportLive, propertyReserves,
           propertyReservesLive, propertyLedgers, propertyLedgersLive, propertyValuation, propertyPolicy, propertyDebt, propertyForecast, propertyForecastLive, propertyDistributions, budgetReport, accountsReport,
