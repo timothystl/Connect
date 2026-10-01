@@ -127,20 +127,6 @@ describe('Budget builder and Chart of Accounts board layout', () => {
     expect(missing).toContain('could not be read, so lines are listed in QuickBooks order');
   });
 
-  it('gives an admin the layout editor on Chart of Accounts, with every saved purpose tag', async () => {
-    const html = await (await get(makeEnv().env, 'section=accounts&page=chart')).text();
-    expect(html).toContain('id="layout"');
-    expect(html).toContain('name="label_revenue_donor" value="General Offerings"');
-    expect(html).toContain('placeholder="60100 Salary - Pastor"');
-    expect(html).toContain('value="Pastor salary"');
-    expect(html).toContain('Automatic (Salaries)');
-    expect(html).not.toContain('name="path_3"');
-    expect(html).toContain('Salaries (automatic)');
-    expect(html).toContain('unused,Not yet used');
-    const council = await (await get(makeEnv({ role: 'council' }).env, 'section=accounts&page=chart')).text();
-    expect(council).not.toContain('id="layout"');
-  });
-
   it('relays a layout save as merge bodies for categories, names and tags', async () => {
     const { env, calls } = makeEnv();
     const res = await worker.fetch(new Request('https://finance.test/api/v1/connect-board-categories-write', {

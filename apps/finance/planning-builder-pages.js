@@ -679,7 +679,7 @@ export function renderBudgetBuilderPage({ liveVersion = 'local', builder: rawBui
   const rows = tableRows(model, ctx);
   const drafts = builder.lines.filter((l) => l.plan?.draft).length;
   const viewToggle = layout
-    ? `<div class="bb-view" role="group" aria-label="Layout">${model.boardView ? '<span class="is-on">Board view</span>' : `<a href="${href(p, { view: 'board' })}">Board view</a>`}${model.boardView ? `<a href="${href(p, { view: 'qb' })}">QuickBooks order</a>` : '<span class="is-on">QuickBooks order</span>'}${canManageBudgetPlan ? '<a href="/?section=accounts&amp;page=chart#layout">Edit the layout in Chart of Accounts</a>' : ''}</div>`
+    ? `<div class="bb-view" role="group" aria-label="Layout">${model.boardView ? '<span class="is-on">Board view</span>' : `<a href="${href(p, { view: 'board' })}">Board view</a>`}${model.boardView ? `<a href="${href(p, { view: 'qb' })}">QuickBooks order</a>` : '<span class="is-on">QuickBooks order</span>'}${canManageBudgetPlan ? '<a href="/?section=accounts&amp;page=connect">Edit the layout in Chart of Accounts</a>' : ''}</div>`
     : '<p class="muted-line">The board layout from Chart of Accounts could not be read, so lines are listed in QuickBooks order.</p>';
   const table = `<div class="table-scroll"><table class="pm-table bb-table bp-table"><thead><tr><th>Category</th>${p.cols.map((k) => `<th>${e(COLUMN_LABELS[k](p))}</th>`).join('')}</tr></thead>
       <tbody>${rows}</tbody></table></div>`;

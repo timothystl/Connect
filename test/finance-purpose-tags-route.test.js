@@ -76,20 +76,6 @@ describe('Chart of Accounts — purpose-tag forms and relay route', () => {
     expect(html).not.toContain('/api/v1/connect-purpose-tags-write');
   });
 
-  it('shows both purpose-tag forms for a verified admin viewer, the tag list prefilled from the current accounts', async () => {
-    const env = roleEnv('admin', async () => new Response('not found', { status: 404 }));
-    const res = await worker.fetch(new Request('https://finance.test/?section=accounts', {
-      headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' },
-    }), env);
-    const html = await res.text();
-    expect((html.match(/action="\/api\/v1\/connect-purpose-tags-write"/g) || []).length).toBe(2);
-    expect(html).toContain('name="tags"');
-    expect(html).toContain('youth,Youth');
-    expect(html).toContain('name="category_path"');
-    expect(html).toContain('name="purpose_tag_id"');
-    expect(html).toContain('<option value="youth">Youth</option>');
-  });
-
   it('redirects to a not_configured error when the service binding and shared secret are not set', async () => {
     const res = await postTagListForm(baseEnv, { accessJwt: 'whatever' });
     expect(res.status).toBe(303);
@@ -146,20 +132,6 @@ describe('Chart of Accounts — purpose-tag forms and relay route', () => {
     await postAssignForm(env, { accessJwt: 'signed.jwt.here', body: { purpose_tag_id: '' } });
     const sentBody = JSON.parse(await captured.text());
     expect(sentBody).toEqual({ categories: { 'Expenses:60010 Missions': '' } });
-  });
-
-  it('redirects with the refusal reason when Connect declines the edit, and shows it back on the page', async () => {
-    const env = liveEnv(async () => new Response(JSON.stringify({ error: 'Access denied: editing purpose tags requires admin access' }), { status: 403 }));
-    const res = await postTagListForm(env, { accessJwt: 'signed.jwt.here' });
-    const location = new URL(res.headers.get('location'), 'https://finance.test');
-    expect(location.searchParams.get('status')).toBe('error');
-    expect(location.searchParams.get('reason')).toBe('http_error');
-    expect(location.searchParams.get('message')).toBe('Access denied: editing purpose tags requires admin access');
-
-    const shownEnv = roleEnv('admin', async () => new Response('not found', { status: 404 }));
-    const shown = await worker.fetch(new Request(location.toString(), { headers: { 'Cf-Access-Jwt-Assertion': 'signed.jwt.here' } }), shownEnv);
-    const html = await shown.text();
-    expect(html).toContain('Not saved: Access denied: editing purpose tags requires admin access');
   });
 
   it('redirects with a network_error reason when the relay call itself fails, never throwing', async () => {

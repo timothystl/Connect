@@ -275,7 +275,7 @@ describe('Finance alpha staging shell', () => {
 
     // Accounts & Data folds two sections under one entry, listing both.
     const data = await (await worker.fetch(new Request('https://finance.test/?section=data'), env)).text();
-    expect(data).toContain('<a href="/?section=accounts&amp;page=chart">Chart of accounts</a>');
+    expect(data).toContain('<a href="/?section=accounts&amp;page=connect">Chart of accounts</a>');
     expect(data).toContain('<a href="/?section=data" aria-current="page">Data &amp; Imports</a>');
 
     // HR & Staff is its own admin-only area.
@@ -1428,30 +1428,6 @@ describe('Finance alpha staging shell', () => {
     expect(html).toContain('$132,000');
     expect(html).toContain('$90,000');
     expect(html).toContain('Planned totals reconcile · read-only preview');
-    expect(statements).toHaveLength(1);
-    expect(statements[0]).toMatch(/^SELECT\b/i);
-  });
-
-  it('renders Finance-owned board-category and purpose-tag presentation with its own read budget', async () => {
-    statements.length = 0;
-    const res = await worker.fetch(new Request('https://finance.test/?section=accounts'), env);
-    const html = await res.text();
-    expect(res.status).toBe(200);
-    expect(html).toContain('Synthetic Chart of Accounts');
-    expect(html).toContain('Account presentation');
-    expect(html).toContain('Total accounts');
-    expect(html).toContain('Synthetic Contributions');
-    expect(html).toContain('Income:Synthetic Contributions');
-    expect(html).toContain('Synthetic Programs');
-    expect(html).toContain('Board categories');
-    expect(html).toContain('Unrestricted Gifts');
-    expect(html).toContain('Purpose tags');
-    expect(html).toContain('Ministry');
-    expect(html).toContain('Presentation only; ledger paths unchanged');
-    expect(html).toContain('Ledger hierarchy');
-    expect(html).toContain('Account tree');
-    expect(html).toContain('Paths preserved');
-    expect(html).toContain('padding-left:1.95rem');
     expect(statements).toHaveLength(1);
     expect(statements[0]).toMatch(/^SELECT\b/i);
   });
