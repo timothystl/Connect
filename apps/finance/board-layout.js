@@ -180,3 +180,36 @@ export function orderByPositions(order, entries) {
   slots.forEach((slot, i) => { next[slot] = sorted[i]; });
   return next;
 }
+
+// The heading names and numbers on a form: `hl_<side>_<key>` (a category's name, `hl_wrapper` for the
+// Donor Income heading) and `pos_<side>_<key>` (its place, with `orig_` fields holding what the page
+// showed). Returns only what changed: { labels, order } where labels is a merge body for Connect and
+// order lists, for each side whose numbers changed, every shown category as { key, from, to }.
+export function parseHeadingEdits(form) {
+  const labels = { revenueLabels: {}, expenseLabels: {} };
+  let wrapper;
+  const shown = { expense: [], revenue: [] };
+  for (const [field, value] of form.entries()) {
+    let m = /^hl_(wrapper|revenue_[a-z_]+|expense_[a-z_]+)$/.exec(field);
+    if (m) {
+      const v = String(value || '').trim().slice(0, 80);
+      if (v === String(form.get(`orig_${field}`) || '').trim()) continue;
+      if (m[1] === 'wrapper') wrapper = v;
+      else if (m[1].startsWith('revenue_')) labels.revenueLabels[m[1].slice(8)] = v;
+      else labels.expenseLabels[m[1].slice(8)] = v;
+      continue;
+    }
+    m = /^pos_(expense|revenue)_([a-z_]+)$/.exec(field);
+    if (!m) continue;
+    const from = Number(form.get(`orig_${field}`));
+    const typed = Number(String(value).trim());
+    if (!Number.isInteger(from) || from < 1) continue;
+    shown[m[1]].push({ key: m[2], from, to: Number.isInteger(typed) && typed >= 1 ? typed : from });
+  }
+  const out = {};
+  for (const key of ['revenueLabels', 'expenseLabels']) if (Object.keys(labels[key]).length) out[key] = labels[key];
+  if (wrapper !== undefined) out.donorWrapperLabel = wrapper;
+  const order = {};
+  for (const side of ['expense', 'revenue']) if (shown[side].some((x) => x.to !== x.from)) order[side] = shown[side];
+  return { labels: out, order };
+}

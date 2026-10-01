@@ -127,18 +127,41 @@ describe('Budget builder and Chart of Accounts board layout', () => {
     expect(missing).toContain('could not be read, so lines are listed in QuickBooks order');
   });
 
-  it('gives an admin the layout editor on Chart of Accounts, with every saved purpose tag', async () => {
+  it('gives an admin the Chart of Accounts: a block per side, headings and accounts editable, every saved purpose tag', async () => {
     const html = await (await get(makeEnv().env, 'section=accounts&page=chart')).text();
     expect(html).toContain('id="layout"');
-    expect(html).toContain('name="label_revenue_donor" value="General Offerings"');
+    expect(html).toContain('<h2>Revenue</h2>');
+    expect(html).toContain('<h2>Expenses</h2>');
+    expect(html).toContain('name="hl_revenue_donor" value="General Offerings"');
+    expect(html).toContain('name="pos_expense_salaries"');
     expect(html).toContain('placeholder="60100 Salary - Pastor"');
     expect(html).toContain('value="Pastor salary"');
     expect(html).toContain('Automatic (Salaries)');
-    expect(html).not.toContain('name="path_3"');
-    expect(html).toContain('Salaries (automatic)');
-    expect(html).toContain('unused,Not yet used');
+    expect(html).toContain('No funds read under this category yet.');
+    expect(html).toContain('Move ticked accounts to');
+    expect(html).toContain('<option value="unused">Not yet used</option>');
+    expect(html).not.toContain('Ledger hierarchy');
     const council = await (await get(makeEnv({ role: 'council' }).env, 'section=accounts&page=chart')).text();
-    expect(council).not.toContain('id="layout"');
+    expect(council).toContain('<h2>Revenue</h2>');
+    expect(council).not.toContain('name="cat_0"');
+    expect(council).not.toContain('name="hl_');
+  });
+
+  it('saves heading names and numbers from the Chart of Accounts with the accounts', async () => {
+    const { env, calls } = makeEnv();
+    const res = await worker.fetch(new Request('https://finance.test/api/v1/connect-board-categories-write', {
+      method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'jwt', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        form_kind: 'accounts',
+        hl_expense_salaries: 'Staff pay', orig_hl_expense_salaries: 'Salaries', hl_wrapper: 'Gifts', orig_hl_wrapper: 'Donor Income',
+        pos_expense_mdo: '2', orig_pos_expense_mdo: '1', pos_expense_salaries: '1', orig_pos_expense_salaries: '2',
+      }).toString(),
+    }), env);
+    expect(res.headers.get('location')).toContain('status=ok');
+    const write = calls.find((c) => c.path.endsWith('/finance-board-categories-write-v1'));
+    expect(write.body.expenseLabels).toEqual({ salaries: 'Staff pay' });
+    expect(write.body.donorWrapperLabel).toBe('Gifts');
+    expect(write.body.expenseOrder.slice(0, 2)).toEqual(['salaries', 'mdo']);
   });
 
   it('relays a layout save as merge bodies for categories, names and tags', async () => {

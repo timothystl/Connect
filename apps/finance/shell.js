@@ -70,7 +70,7 @@ import {
   churchYearFromReport, councilDraftFromPlan, plannerViewer,
 } from './connect-planner.js';
 import { PLANNER_APP_JS } from './planner/bundle.generated.js';
-import { buildBoardLayoutWrites, normalizeBoardLayout, orderByPositions } from './board-layout.js';
+import { buildBoardLayoutWrites, normalizeBoardLayout, orderByPositions, parseHeadingEdits } from './board-layout.js';
 import { BUDGET_BUILDER_STYLES, buildPlannerModel, defaultProjectBaseCents, parsePlannerForm, parseProjectLine, plannerBackQuery, plannerCsv, plannerParams, plannerYears, renderBudgetBuilderPage, renderPlannerPrint, applyCouncilDraft } from './planning-builder-pages.js';
 import { fetchLiveFinanceCashRunway } from './finance-cash-runway-client.js';
 import { defaultLiveBudgetFiscalYear } from './finance-budget-client.js';
@@ -2631,7 +2631,25 @@ export default {
       // The Budget layout editor (accounts-pages.js): heading renames, or the changed rows of the
       // account table -- see buildBoardLayoutWrites for how a row's changes become the merge bodies.
       if (kind === 'headings' || kind === 'accounts') {
-        const { boardBody, tagsBody } = buildBoardLayoutWrites(form, kind);
+        const written = buildBoardLayoutWrites(form, kind);
+        const { tagsBody } = written;
+        let boardBody = written.boardBody;
+        if (kind === 'accounts') {
+          // Headings renamed and numbered on the same page save with the accounts.
+          const edits = parseHeadingEdits(form);
+          const extra = { ...edits.labels };
+          if (Object.keys(edits.order).length) {
+            const layoutRead = await fetchBoardLayout(env);
+            if (!layoutRead.ok) return back({ status: 'error', reason: 'http_error', message: 'The category order could not be read from Connect, so nothing was saved.' });
+            const current = normalizeBoardLayout(layoutRead.layout);
+            for (const [side, entries] of Object.entries(edits.order)) {
+              const field = side === 'expense' ? 'expenseOrder' : 'revenueOrder';
+              const next = orderByPositions(current[field], entries);
+              if (next.join() !== current[field].join()) extra[field] = next;
+            }
+          }
+          if (Object.keys(extra).length) boardBody = { ...(boardBody || {}), ...extra };
+        }
         if (boardBody) {
           const result = await postConnectBoardCategoriesWrite(env, accessJwt, boardBody);
           if (!result.ok) return back({ status: 'error', reason: result.reason || 'unknown', ...(result.message ? { message: String(result.message).slice(0, 200) } : {}) });

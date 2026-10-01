@@ -160,16 +160,22 @@ describe('renderAccountsPage', () => {
     expect(html).toContain('Pastor salary');
     expect(html).toContain('QuickBooks: 60010 Pastor Salary');
     expect(html).toContain('Unrestricted Gifts');
-    expect(html).toContain('$5,000');
-    expect(html).toContain('No accounts read under this category yet.');
+    expect(html).toContain('No funds read under this category yet.');
     expect(html).toContain('Resources by Purpose');
     expect(html).toContain('Payroll (FY2027 plan)');
     expect(html).toContain('1 worker: Synthetic Worker A');
-    // The pruned line stays in the ledger hierarchy but not in the chart itself.
-    expect(html.split('aria-label="Ledger hierarchy"')[0]).not.toContain('Easter Offering');
     // The renamed salary line is still matched to the worker by its QuickBooks number: counted once.
     expect(html).toContain('<td class="num">$4,000</td><td class="num">$0</td><td class="num"><strong>$4,000</strong></td>');
     expect(html).not.toMatch(/<script/i);
+  });
+
+  it('lists every account ever used, from the other years too, so an old line can still be moved or hidden', () => {
+    const old = { classification: 'Income', category_path: 'Income:46 Fundraisers:46021 Easter Egg Hunt', account_name: '46021 Easter Egg Hunt', actual_cents: 0, budget_cents: null };
+    const html = renderAccountsPage('chart', {
+      accountsReport: { ...accountsReport, layoutRows: [...accountsReport.rows, old] }, boardLayout: layout, canManageBoardCategories: true, canManagePurposeTags: false,
+    });
+    expect(html).toContain('46021 Easter Egg Hunt');
+    expect(html).toMatch(/name="hide_\d" value="1"> Hide/);
   });
 
   it('leaves out the payroll column, and says why, for a role that cannot read Compensation', () => {

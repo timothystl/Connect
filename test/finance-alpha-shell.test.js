@@ -1428,26 +1428,17 @@ describe('Finance alpha staging shell', () => {
     expect(statements[0]).toMatch(/^SELECT\b/i);
   });
 
-  it('renders Finance-owned board-category and purpose-tag presentation with its own read budget', async () => {
+  it('renders Finance-owned board-category presentation (the synthetic chart) with its own read budget', async () => {
     statements.length = 0;
     const res = await worker.fetch(new Request('https://finance.test/?section=accounts'), env);
     const html = await res.text();
     expect(res.status).toBe(200);
-    expect(html).toContain('Synthetic Chart of Accounts');
-    expect(html).toContain('Account presentation');
-    expect(html).toContain('Total accounts');
+    expect(html).toContain('<h2>Chart of Accounts</h2>');
     expect(html).toContain('Synthetic Contributions');
-    expect(html).toContain('Income:Synthetic Contributions');
     expect(html).toContain('Synthetic Programs');
-    expect(html).toContain('Board categories');
     expect(html).toContain('Unrestricted Gifts');
-    expect(html).toContain('Purpose tags');
-    expect(html).toContain('Ministry');
-    expect(html).toContain('Presentation only; ledger paths unchanged');
-    expect(html).toContain('Ledger hierarchy');
-    expect(html).toContain('Account tree');
-    expect(html).toContain('Paths preserved');
-    expect(html).toContain('padding-left:1.95rem');
+    expect(html).toContain('No funds read under this category yet.');
+    expect(html).not.toContain('Ledger hierarchy');
     expect(statements).toHaveLength(1);
     expect(statements[0]).toMatch(/^SELECT\b/i);
   });
