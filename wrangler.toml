@@ -28,6 +28,14 @@ REPLY_TO_EMAIL = "dinger@timothystl.org"
 FINANCE_ACCESS_TEAM_DOMAIN = "timothystl.cloudflareaccess.com"
 FINANCE_ACCESS_AUD         = "74de33dfe1e65b4eea9b8bf51e04d654e470a60773175bf34d74d55e940b66eb"
 
+# Shared staff sign-in: the Cloudflare Access application "Timothy Connect Staff Entrance"
+# protects only connect.timothystl.org/admin/access-login. /admin/access-login verifies the
+# Access token against these two values and exchanges it for a normal Connect session for an
+# existing, active account with the same email. Neither value is a secret. Kept here so a deploy
+# cannot drop them; source of truth is Zero Trust > Access > Applications > that application.
+CONNECT_ACCESS_TEAM_DOMAIN = "timothystl.cloudflareaccess.com"
+CONNECT_ACCESS_AUD         = "2157e4ebad435d0a4ffc568a20a073422d8b52b61f5164dd38111b93845ff4cc"
+
 [observability]
 enabled = true
 

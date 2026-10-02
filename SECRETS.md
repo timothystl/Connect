@@ -178,7 +178,7 @@ These are not required for the app to function but unlock additional capabilitie
 | `VAPID_CONTACT` | secret or var | The `sub:` contact on the push signature; defaults to an info@ address. |
 | `STAX_SANDBOX_API_KEY`, `STAX_SANDBOX_WEB_PAYMENTS_TOKEN`, `STAX_GIVING_WEBHOOK_SECRET` | secret | Stax giving **sandbox**: server key, browser tokenization token, webhook check. |
 | `STAX_LIVE` | var | `"1"` leaves sandbox mode. Leave unset until live giving is approved. Production also sets `STAX_SANDBOX_REFUSED = "1"`, so it ignores sandbox gifts. |
-| `CONNECT_ACCESS_TEAM_DOMAIN`, `CONNECT_ACCESS_AUD` | var or secret | Cloudflare Access identity for the shared staff sign-in. Not in `wrangler.toml`; if missing, that route answers 503 and normal login still works. |
+| `CONNECT_ACCESS_TEAM_DOMAIN`, `CONNECT_ACCESS_AUD` | var or secret | Cloudflare Access identity for the shared staff sign-in. Set in `wrangler.toml` (not secrets); if missing, that route answers 503 and normal login still works. |
 | `FINANCE_ACCESS_TEAM_DOMAIN`, `FINANCE_ACCESS_AUD` | var | Verify the Access token Finance forwards on contract calls . |
 | `FINANCE_STORAGE_MODE`, `TUITION_STORAGE_MODE` | var | `connect`, `copying`, or `finance`: where Finance-owned and Tuition Aid tables live. Production is `finance`. Staging sets neither, so it runs in `connect` mode. |
 | `FINANCE_DB` | D1 binding | `timothy-finance-db` (production only). |
