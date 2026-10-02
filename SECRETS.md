@@ -50,7 +50,7 @@ map across all repositories is [docs/CLOUDFLARE_TOKENS.md](docs/CLOUDFLARE_TOKEN
 ### `EMAIL_FROM` (plain variable in `wrangler.toml`, not a secret)
 - **Purpose**: The `From:` address on every Resend email the Worker sends — birthday and anniversary greetings, scheduler assignments and reminders, Connect invites, password resets.
 - **Format**: RFC 5322 format, e.g. `Timothy Lutheran <noreply@timothystl.org>`. Domain must be verified in Resend.
-- **Change**: edit `EMAIL_FROM` under `[vars]` in `wrangler.toml` (production and staging have different values) and redeploy.
+- **Change**: edit `EMAIL_FROM` under `[vars]` in `wrangler.toml`  and redeploy.
 - **Risk if leaked**: Low — it's an email address, not a credential.
 - **⚠ This entry used to read `ADMIN_EMAIL`, which was wrong**: nothing has ever sent mail from `ADMIN_EMAIL`. `sendResend()` reads `EMAIL_FROM` and refuses outright without it, so following the old instruction produced a Worker that sent no email at all, with the one variable that mattered undocumented. See "Variables the Worker does not read" below.
 
@@ -93,15 +93,15 @@ map across all repositories is [docs/CLOUDFLARE_TOKENS.md](docs/CLOUDFLARE_TOKEN
 
 ### `FINANCE_CONTRACT_API_KEY`
 - **Purpose**: Shared secret for the server-to-server Finance contract endpoints (`/api/contracts/*` in `connect-worker.js` — `finance-church-report-v1`, `finance-balance-sheet-v1`, `finance-compensation-v1`, `finance-data-status-v1`, `finance-budget-v1`, `staff-role-v1`, `connect-giving-summary-v1`, `giving-quick-entry-v1`, and the rest of the `finance-*-v1` contracts in `src/api-contracts-service.js`). Finance's Worker (`timothy-finance-app`; code in the [Finance repository](https://github.com/timothystl/finance)) sends this as `X-Contract-Key` when calling into `timothy-connect` over the `CONNECT_SERVICE` binding — same shared-secret shape as `CHMS_INTAKE_API_KEY`/`ADMIN_PUSH_API_KEY` above, not a user session. Historical note: on 2026-09-16 this key was not provisioned and Finance's contract readers reported `not_configured`. Current provisioning is not recorded here; verify by name that it exists on both Workers of each pair before relying on it.
-- **Must be set, with the identical value, on two separate pairs of Workers**: `timothy-connect` (validates it as the server) and `timothy-finance-app` (sends it as the client) for production; `timothy-connect-staging` and `timothy-finance-app-staging` for staging. The prod and staging values do not need to match each other, but each pair must match internally.
+- **Must be set, with the identical value, on** `timothy-connect` (validates it as the server) and `timothy-finance-app` (sends it as the client).
 - **Format**: Any strong random string (≥32 chars).
-- **Rotation**: `wrangler secret put FINANCE_CONTRACT_API_KEY` on `timothy-connect`, then the identical value on `timothy-finance-app` (and separately for the staging pair). Brief window during rotation where Finance's live contract reads will fail closed to synthetic/"data unavailable" rather than being rejected insecurely.
+- **Rotation**: `wrangler secret put FINANCE_CONTRACT_API_KEY` on `timothy-connect`, then the identical value on `timothy-finance-app`. Brief window during rotation where Finance's live contract reads will fail closed to synthetic/"data unavailable" rather than being rejected insecurely.
 - **Risk if leaked**: Ability to call Finance's read contract endpoints on `timothy-connect` (church report, balance sheet, compensation roster, data status, budget, staff role, Giving summary) and to relay a `giving-quick-entry-v1` write, without a user session. No credential or payment data is directly returned by these contracts, but compensation and Giving data are sensitive — see the access notes in the [Finance repository](https://github.com/timothystl/finance).
 
 ### `FINANCE_PAYROLL_CONTRACT_KEY`
 - **Purpose**: Shared secret for Finance's payroll relay. Finance's `apps/finance/payroll-proxy-client.js` (in the [Finance repository](https://github.com/timothystl/finance), plus the payroll email and ready-notification clients) sends it as `X-Contract-Key` over the `PAYROLL_SERVICE` binding to Website's `timothy-website-admin` Worker, which checks it in `admin/payroll-contract-auth.js` (in the website repository) before relaying to the myMDO payroll RPCs. It is not used by Connect or myMDO. Website's own `PAYROLL_PROXY_SECRET` (Website → myMDO Supabase) is a separate secret and is not affected by this one.
-- **Must be set, with the identical value, on** `timothy-finance-app` and `timothy-website-admin`. Staging Finance relays to the same Website Worker, so `timothy-finance-app-staging` needs the same value too if staging payroll is used. If it is missing on Finance, Run payroll reports `Church staff could not be read: not_configured` and MDO as unavailable.
-- **Access audience**: Website also verifies the forwarded Access JWT. Its `FINANCE_ACCESS_AUD` in Website's `wrangler.toml` must list both the production and staging Finance Access AUDs (comma-separated).
+- **Must be set, with the identical value, on** `timothy-finance-app` and `timothy-website-admin`.  If it is missing on Finance, Run payroll reports `Church staff could not be read: not_configured` and MDO as unavailable.
+- **Access audience**: Website also verifies the forwarded Access JWT. Its `FINANCE_ACCESS_AUD` in Website's `wrangler.toml` must list the production Finance Access AUD.
 - **Check**: `https://finance.timothystl.org/api/v1/payroll-relay-diagnostic` (read-only) returns `ok: true` with a `staffCount` when the relay works.
 - **Rotation**: set the new value on both Workers back to back; payroll pages fail closed in between.
 - **Risk if leaked**: combined with a valid Access login for an active Website user holding `payroll_manage`, relayed payroll reads/writes. The key alone is not enough.
@@ -179,20 +179,20 @@ These are not required for the app to function but unlock additional capabilitie
 | `STAX_SANDBOX_API_KEY`, `STAX_SANDBOX_WEB_PAYMENTS_TOKEN`, `STAX_GIVING_WEBHOOK_SECRET` | secret | Stax giving **sandbox**: server key, browser tokenization token, webhook check. |
 | `STAX_LIVE` | var | `"1"` leaves sandbox mode. Leave unset until live giving is approved. Production also sets `STAX_SANDBOX_REFUSED = "1"`, so it ignores sandbox gifts. |
 | `CONNECT_ACCESS_TEAM_DOMAIN`, `CONNECT_ACCESS_AUD` | var or secret | Cloudflare Access identity for the shared staff sign-in. Not in `wrangler.toml`; if missing, that route answers 503 and normal login still works. |
-| `FINANCE_ACCESS_TEAM_DOMAIN`, `FINANCE_ACCESS_AUD` | var | Verify the Access token Finance forwards on contract calls (differ between production and staging). |
+| `FINANCE_ACCESS_TEAM_DOMAIN`, `FINANCE_ACCESS_AUD` | var | Verify the Access token Finance forwards on contract calls . |
 | `FINANCE_STORAGE_MODE`, `TUITION_STORAGE_MODE` | var | `connect`, `copying`, or `finance`: where Finance-owned and Tuition Aid tables live. Production is `finance`. Staging sets neither, so it runs in `connect` mode. |
 | `FINANCE_DB` | D1 binding | `timothy-finance-db` (production only). |
 
-### Finance Worker (`timothy-finance-app`, staging `timothy-finance-app-staging`)
+### Finance Worker (`timothy-finance-app`)
 | Name | Kind | Purpose |
 |---|---|---|
 | `FINANCE_DB` | D1 binding | Finance's own database. |
 | `FACILITY_FILES` | R2 binding | Private Facilities photos and documents. |
-| `CONNECT_SERVICE` | service binding | Calls to `timothy-connect` (staging: `timothy-connect-staging`). |
+| `CONNECT_SERVICE` | service binding | Calls to `timothy-connect` . |
 | `PAYROLL_SERVICE` | service binding | Payroll and gym-income relay to `timothy-website-admin`. |
 | `ENVIRONMENT`, `RELEASE_SHA` | var | Environment label and release id (`RELEASE_SHA` is set at deploy). |
 | `FINANCE_ACCESS_TEAM_DOMAIN`, `FINANCE_ACCESS_AUD` | var | Verify the Cloudflare Access identity of the signed-in staff member. |
-| `FINANCE_QB_ENABLED`, `FINANCE_QB_ENVIRONMENT` | var | QuickBooks on/off and `production`/`sandbox` (off in staging). |
+| `FINANCE_QB_ENABLED`, `FINANCE_QB_ENVIRONMENT` | var | QuickBooks on/off and `production`/`sandbox`. |
 | `FINANCE_QB_CLIENT_ID`, `FINANCE_QB_CLIENT_SECRET` | secret | Intuit OAuth client (see the retired-QuickBooks note above). |
 | `FINANCE_LOCAL_CONTRACT_READS` | var | `"1"`: reports read Finance's database directly instead of through Connect. |
 | `COMPENSATION_PLAN_WRITE_ENABLED`, `PROPERTY_LEDGER_WRITES_ENABLED`, `FINANCE_CSV_IMPORT_WRITES_ENABLED`, `FINANCE_XLSX_IMPORT_WRITES_ENABLED` | flag (set in no config file) | Each enables one writer. Default off; turning one on is a deliberate act. |

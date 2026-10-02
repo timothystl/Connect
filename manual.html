@@ -1065,9 +1065,7 @@ hr {
     <h3>Deploying the app</h3>
     <p>Deploy the production Worker with:</p>
     <pre><code>wrangler deploy</code></pre>
-    <p>Deploy to staging with:</p>
-    <pre><code>wrangler deploy --config wrangler.staging.toml</code></pre>
-    <p>Staging is at <code>breeze-proxy-worker-staging.timothystl.workers.dev/chms</code>. Test risky changes there first.</p>
+    <p>There is no staging copy (retired October 2026). Test risky changes with <code>npm test</code> and a dry run first.</p>
 
     <h3>Cron schedule</h3>
     <p>The daily cron is set to <code>0 14 * * *</code> (UTC) = 9:00 AM Central Standard Time / 10:00 AM CDT. Changing the time requires editing <code>wrangler.toml</code> and redeploying.</p>
