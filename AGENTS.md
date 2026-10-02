@@ -64,7 +64,7 @@ Git history preserves retired plans and diaries; do not add chronological logs t
   `timothy-connect-kv` namespace, and `PHOTOS` to `timothy-connect-photos`.
 - Finance lives in its own repository, [`timothystl/finance`](https://github.com/timothystl/finance)
   (split from this one on October 1, 2026 with its full history). It deploys separately as
-  `timothy-finance-app`, with its own `timothy-finance-db` and isolated staging. The `apps/finance`
+  `timothy-finance-app`, with its own `timothy-finance-db`. There is no staging copy of Connect or Finance (retired October 2026). The `apps/finance`
   application, its Worker configurations, deploy workflows, and runbooks are no longer here; do not
   recreate them. Connect keeps the legacy Finance screens and handlers (`src/api-finance.js`,
   `src/frontend/js-finance.js`), the contract producers Finance consumes (`contracts/`,

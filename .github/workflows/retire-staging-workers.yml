@@ -1,0 +1,55 @@
+name: Retire staging Workers (one time)
+
+# One-time removal of two retired staging Workers: Connect staging and the app launcher's staging copy.
+# `list` is read only. `delete` needs the phrase below. Remove this workflow after the delete run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: list (read only) or delete
+        required: true
+        type: choice
+        options: [list, delete]
+      confirm:
+        description: For delete, type exactly DELETE staging workers
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  retire:
+    name: Retire staging Workers
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Show what exists
+        shell: bash
+        run: |
+          set -uo pipefail
+          for w in timothy-connect-staging timothy-app-launcher-staging; do
+            echo "== $w"; npx wrangler deployments list --name "$w" 2>&1 | tail -n 6 || true
+          done
+
+      - name: Delete (only when asked and confirmed)
+        if: inputs.action == 'delete' && inputs.confirm == 'DELETE staging workers'
+        shell: bash
+        run: |
+          set -uo pipefail
+          for w in timothy-connect-staging timothy-app-launcher-staging; do
+            case "$w" in *-staging) ;; *) echo "::error::$w is not a staging name"; exit 1 ;; esac
+            npx wrangler delete --name "$w" --force || echo "$w delete did not complete"
+          done

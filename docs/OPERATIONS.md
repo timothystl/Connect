@@ -9,13 +9,12 @@ in [timothystl/finance](https://github.com/timothystl/finance).
 | Environment | Worker | Data/storage | Release |
 |---|---|---|---|
 | Connect production | `timothy-connect` | `timothy-connect-db`, `KV`, `timothy-connect-photos`; daily cron | `deploy.yml`, manual dispatch |
-| Connect staging | `timothy-connect-staging` | Separate D1/KV/R2; no cron | Staging workflow/config |
 
 Main merges do not automatically deploy. Dispatch `deploy.yml` with the tested full main SHA and an
 accurate release reason; it repeats `npm test` and the built-script check. Verify completion. A
 requested routine release needs no additional signoff. Finance releases are dispatched from the
-Finance repository. Connect staging is deployed by `deploy-connect-staging.yml` (manual dispatch)
-using `wrangler.staging.toml`.
+Finance repository. There is no Connect staging copy (retired October 2026): verify with tests and a
+`wrangler deploy --dry-run`, then release.
 
 Connect's `FINANCE_DB` binding points at Finance's production database, so Connect releases and
 Finance releases share that data; coordinate any schema change to Finance-owned tables with the

@@ -13,14 +13,13 @@ Production binds D1 `timothy-connect-db` as `DB`, KV `timothy-connect-kv` as `KV
 `timothy-connect-photos` as `PHOTOS`, and a daily 14:00 UTC cron. `wrangler.toml` is the source
 configuration; live attachment still outranks prose.
 
-Connect staging runs the same entry point as Worker `timothy-connect-staging` (renamed 2026-09-09
-from `breeze-proxy-worker-staging`) with separate D1, KV, and R2 resources and no cron. It is an
-integration environment, not a production shadow.
+There is no staging copy. Connect staging (`timothy-connect-staging`, formerly `breeze-proxy-worker-staging`)
+was retired and deleted in October 2026 with its D1 and KV resources.
 
 ## Finance and Connect
 
 Finance is its own application in [timothystl/finance](https://github.com/timothystl/finance),
-deployed as Worker `timothy-finance-app` (with staging `timothy-finance-app-staging`) over its own D1
+deployed as Worker `timothy-finance-app` over its own D1
 database `timothy-finance-db`. It was split out of this repository on October 1, 2026; its
 application code, Worker configurations, tests, deploy workflows, and runbooks live there. Its
 current scope and cutover status are in that repository's README and docs, not here.
@@ -31,7 +30,7 @@ What stays in Connect:
   Connect Worker and are routed under `ACCESS_GATE` as `finance`. Accounting tables are reached
   through `src/finance-storage.js`: `FINANCE_STORAGE_MODE` (`connect`, `copying`, or `finance`)
   selects whether they use `DB` or the `FINANCE_DB` binding to `timothy-finance-db`. Production
-  sets `finance` (`wrangler.toml`); staging sets neither and uses `connect`. QuickBooks belongs to
+  sets `finance` (`wrangler.toml`). QuickBooks belongs to
   Finance and Connect has no QuickBooks routes or credentials. The old `tlc-volunteer-db` is a
   retained pre-cutover resource, not the current source.
 - **Contract producers.** Connect produces the versioned contracts Finance consumes (see "Cross-product

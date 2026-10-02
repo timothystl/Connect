@@ -56,4 +56,3 @@ jobs:
           WRANGLER_SEND_METRICS: 'false'
         run: |
           npx wrangler deploy --dry-run --config wrangler.toml
-          npx wrangler deploy --dry-run --config wrangler.staging.toml

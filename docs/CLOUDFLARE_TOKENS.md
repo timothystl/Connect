@@ -22,8 +22,8 @@ Reference, not startup instructions. Verify against current workflows before rel
 
 | Secret | Connect | Finance | website | myMDO | app-launcher |
 | --- | --- | --- | --- | --- | --- |
-| `CLOUDFLARE_API_TOKEN` (Workers deploy) | deploy, staging deploy | deploy, staging deploy | deploy | deploy (auto-merge) | deploy |
-| `CLOUDFLARE_D1_API_TOKEN` (D1 export/import) | D1 migrations (prod and staging), QuickBooks table drop, sandbox purge, recovery check | recovery check | D1 migration, recovery check | | |
+| `CLOUDFLARE_API_TOKEN` (Workers deploy) | deploy | deploy | deploy | deploy (auto-merge) | deploy |
+| `CLOUDFLARE_D1_API_TOKEN` (D1 export/import) | D1 migrations, QuickBooks table drop, sandbox purge, recovery check | recovery check | D1 migration, recovery check | | |
 | `CLOUDFLARE_R2_API_TOKEN` (R2 buckets) | | | image migration, recovery check | | |
 | `CLOUDFLARE_KV_API_TOKEN` (KV) | RSVP store migration (one-time) | | | | |
 | `CLOUDFLARE_ACCOUNT_ID` (not secret) | several | recovery check | several | deploy | |
