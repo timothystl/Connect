@@ -25,7 +25,7 @@ Reference, not startup instructions. Verify against current workflows before rel
 | `CLOUDFLARE_API_TOKEN` (Workers deploy) | deploy | deploy | deploy | deploy (auto-merge) | deploy |
 | `CLOUDFLARE_D1_API_TOKEN` (D1 export/import) | D1 migrations, QuickBooks table drop, sandbox purge, recovery check | recovery check | D1 migration, recovery check | | |
 | `CLOUDFLARE_R2_API_TOKEN` (R2 buckets) | | | image migration, recovery check | | |
-| `CLOUDFLARE_KV_API_TOKEN` (KV) | RSVP store migration (one-time) | | | | |
+| `CLOUDFLARE_KV_API_TOKEN` (KV) | retired October 2, 2026 (RSVP migration done; the token is deleted, so `migrate-rsvp-store-kv.yml` cannot run) | | | | |
 | `CLOUDFLARE_ACCOUNT_ID` (not secret) | several | recovery check | several | deploy | |
 | R2 S3-style keys (`R2_*`) | `R2_MIGRATION_ACCESS_KEY_ID` + `_SECRET_ACCESS_KEY` (photo migration, one-time) | | `R2_RECOVERY_ACCESS_KEY_ID` + `_SECRET_ACCESS_KEY` | `R2_ACCESS_KEY_ID` + `_SECRET_ACCESS_KEY` + `R2_ACCOUNT_ID` (Supabase backups to R2) | |
 
@@ -34,7 +34,21 @@ named `production`, so their secrets belong in that environment. app-launcher se
 by run input (`production` or `staging`). The website and myMDO workflows declare no environment, so
 theirs are repository-level secrets. Check each workflow before pasting.
 
+## Status, October 2, 2026
+
+Done: `deploy` is in all five repositories and each released successfully; `d1-data` is in Connect,
+Finance, and website and each recovery check passed; `timothy-d1-data`, `CLOUDFLARE_KV_API_TOKEN`,
+and `R2_RECOVERY_TOKEN` (never used) are deleted; `CLOUDFLARE_R2_API_TOKEN` is renamed `r2-data`.
+Remaining: delete `Child-care portal` and `Github CLOUDFLARE_API_TOKEN website repo` once their
+"Last used" stops advancing after the swaps; identify or delete `Cloudflare Agent Token -
+2026-09-30`; optionally fold `timothy-workers-builds` into `deploy` (needs the Workers Builds
+permission added to `deploy`, then each Worker's build settings pointed at it); delete the unused
+GitHub secrets `CLOUDFLARE_FINANCE_D1_API_TOKEN` and `CLOUDFLARE_KV_API_TOKEN` from Connect's
+production environment.
+
 ## Cloudflare tokens that existed on October 1, 2026 (from the dashboard)
+
+The table below is the October 1 inventory; see the status above for what has changed since.
 
 | Token name | Visible scope | Probable use (inferred from name; confirm) |
 | --- | --- | --- |
