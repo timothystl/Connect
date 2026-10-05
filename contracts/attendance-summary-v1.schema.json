@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:timothy:connect:attendance-summary:v1",
+  "title": "Connect Attendance Summary v1",
+  "description": "Anonymous worship attendance for one fiscal year (the church's calendar year, America/Chicago), plus year-over-year and multi-year views. Counts only: no names, notes or free text -- special-service names are never copied out, only a fixed occasion label. Every count is one staff-entered total per service; Connect holds no registration or check-in data (countBasis). A 'weekend' is a regular Sunday service day, with any Saturday service folded into the Sunday after it. Averages are per weekend and exclude weekends with a flagged occasion (Christmas, Easter); those weekends stay in services and weekends with countsTowardAverages=false, and monthly rows carry averageIncludingFlagged as well. Optional other gatherings (Bible study, Sunday school, daycare enrollment) are not in v1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "dataClassification", "sourceProduct", "consumerProduct", "generatedAt", "fiscalYear", "fiscalYearStart", "fiscalYearEnd", "countBasis", "services", "weekends", "monthly", "history", "reconciliation"],
+  "properties": {
+    "contract": { "const": "connect.attendance-summary.v1" },
+    "dataClassification": { "const": "aggregate" },
+    "sourceProduct": { "const": "connect" },
+    "consumerProduct": { "const": "finance" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "fiscalYear": { "type": "integer", "minimum": 2000, "maximum": 2100, "description": "Requested with ?fiscal_year=YYYY; defaults to the current church year." },
+    "fiscalYearStart": { "type": "string", "format": "date" },
+    "fiscalYearEnd": { "type": "string", "format": "date" },
+    "countBasis": {
+      "type": "object", "additionalProperties": false, "required": ["method", "registrationData", "note"],
+      "properties": { "method": { "const": "staff_entered_total" }, "registrationData": { "const": false }, "note": { "type": "string" } }
+    },
+    "services": {
+      "type": "array",
+      "description": "Every service with a nonzero count in the fiscal year, oldest first. Includes midweek and special services.",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["date", "serviceTime", "serviceLabel", "kind", "occasion", "attendance", "countsTowardAverages"],
+        "properties": {
+          "date": { "type": "string", "format": "date" },
+          "serviceTime": { "type": "string", "pattern": "^(\\d{2}:\\d{2})?$", "description": "24-hour HH:MM as entered, or empty." },
+          "serviceLabel": { "type": "string", "description": "Derived, never the typed service name: 'Sunday 10:45', 'Christmas', 'Funeral', 'Midweek service'..." },
+          "kind": { "enum": ["regular", "midweek", "special"] },
+          "occasion": { "enum": ["none", "christmas", "easter", "funeral", "other"] },
+          "attendance": { "type": "integer", "minimum": 0 },
+          "countsTowardAverages": { "type": "boolean", "description": "True only for a regular service on a weekend with no flagged occasion." }
+        }
+      }
+    },
+    "weekends": {
+      "type": "array",
+      "description": "Regular worship per weekend in the fiscal year, ascending, with the same weekend 52 weeks earlier for year-over-year.",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["weekendDate", "total", "occasion", "countsTowardAverages", "priorYearWeekendDate", "priorYearTotal"],
+        "properties": {
+          "weekendDate": { "type": "string", "format": "date" },
+          "total": { "type": "integer", "minimum": 0 },
+          "occasion": { "enum": ["none", "christmas", "easter", "funeral", "other"] },
+          "countsTowardAverages": { "type": "boolean" },
+          "priorYearWeekendDate": { "type": ["string", "null"], "format": "date", "description": "weekendDate minus 364 days; null when nothing was recorded then." },
+          "priorYearTotal": { "type": ["integer", "null"], "minimum": 0 }
+        }
+      }
+    },
+    "monthly": {
+      "type": "array", "minItems": 12, "maxItems": 12,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["month", "weekendCount", "countedWeekendCount", "total", "averagePerWeekend", "averageIncludingFlagged", "priorYearAveragePerWeekend", "byService"],
+        "properties": {
+          "month": { "type": "integer", "minimum": 1, "maximum": 12 },
+          "weekendCount": { "type": "integer", "minimum": 0 },
+          "countedWeekendCount": { "type": "integer", "minimum": 0 },
+          "total": { "type": "integer", "minimum": 0, "description": "All regular attendance in the month, flagged weekends included." },
+          "averagePerWeekend": { "type": ["number", "null"], "description": "Excludes flagged weekends; one decimal." },
+          "averageIncludingFlagged": { "type": ["number", "null"] },
+          "priorYearAveragePerWeekend": { "type": ["number", "null"] },
+          "byService": {
+            "type": "array",
+            "items": {
+              "type": "object", "additionalProperties": false, "required": ["serviceTime", "total", "average"],
+              "properties": { "serviceTime": { "type": "string" }, "total": { "type": "integer", "minimum": 0 }, "average": { "type": ["number", "null"] } }
+            }
+          }
+        }
+      }
+    },
+    "history": {
+      "type": "array",
+      "description": "Every fiscal year on file up to fiscalYear, ascending: average per weekend for each month (flagged weekends excluded), null when no counted weekend.",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["fiscalYear", "averagePerWeekendByMonth"],
+        "properties": {
+          "fiscalYear": { "type": "integer", "minimum": 2000, "maximum": 2100 },
+          "averagePerWeekendByMonth": { "type": "array", "minItems": 12, "maxItems": 12, "items": { "type": ["number", "null"] } }
+        }
+      }
+    },
+    "reconciliation": {
+      "type": "object", "additionalProperties": false, "required": ["serviceRowCount", "weekendCount", "regularAttendanceTotal", "totalsMatch"],
+      "properties": {
+        "serviceRowCount": { "type": "integer", "minimum": 0 },
+        "weekendCount": { "type": "integer", "minimum": 0 },
+        "regularAttendanceTotal": { "type": "integer", "minimum": 0, "description": "Sum of regular services; must equal the sum of weekends[].total." },
+        "totalsMatch": { "const": true }
+      }
+    }
+  }
+}

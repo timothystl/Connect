@@ -30,6 +30,7 @@ import { respondWithFinanceBoardLayoutV1 } from './api-board-layout-contracts.js
 import { respondWithFinanceImportStatusV1, respondWithFinanceDaycareChurchBudgetPreviewV1, respondWithFinanceBoardPacketV1 } from './api-data-imports-contracts.js';
 import { respondWithFinanceHealthV1 } from './api-finance-health-contract.js';
 import { respondWithFinanceChurchYearV1 } from './api-finance-church-year-contract.js';
+import { respondWithAttendanceSummaryV1 } from './api-attendance-summary-contract.js';
 import {
   applyBudgetPlanOverrideRows, applySalaryPlannerWrite, resolveSalaryPlannerState,
   generateBudgetPlanRows, generateAllBudgetPlan, commitBudgetPlan, deleteBudgetPlanRow,
@@ -137,6 +138,11 @@ export async function handleContractsServiceApi(req, env, path) {
   // supplies by month and Giving by fund. Reads Giving's fund totals, so Connect serves it.
   if (path === '/api/contracts/finance-church-year-v1' && req.method === 'GET') {
     return respondWithFinanceChurchYearV1(new URL(req.url), env.DB);
+  }
+
+  // Anonymous worship attendance for Finance's unified report: counts only, no names or notes.
+  if (path === '/api/contracts/attendance-summary-v1' && req.method === 'GET') {
+    return respondWithAttendanceSummaryV1(new URL(req.url), env.DB);
   }
 
   if (path === '/api/contracts/finance-chart-of-accounts-v1' && req.method === 'GET') {
