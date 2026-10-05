@@ -34,21 +34,27 @@ named `production`, so their secrets belong in that environment. app-launcher se
 by run input (`production` or `staging`). The website and myMDO workflows declare no environment, so
 theirs are repository-level secrets. Check each workflow before pasting.
 
-## Status, October 2, 2026
+## Status, October 5, 2026: consolidation finished
 
-Done: `deploy` is in all five repositories and each released successfully; `d1-data` is in Connect,
-Finance, and website and each recovery check passed; `timothy-d1-data`, `CLOUDFLARE_KV_API_TOKEN`,
-and `R2_RECOVERY_TOKEN` (never used) are deleted; `CLOUDFLARE_R2_API_TOKEN` is renamed `r2-data`.
-Remaining: delete `Child-care portal` and `Github CLOUDFLARE_API_TOKEN website repo` once their
-"Last used" stops advancing after the swaps; identify or delete `Cloudflare Agent Token -
-2026-09-30`; optionally fold `timothy-workers-builds` into `deploy` (needs the Workers Builds
-permission added to `deploy`, then each Worker's build settings pointed at it); delete the unused
-GitHub secrets `CLOUDFLARE_FINANCE_D1_API_TOKEN` and `CLOUDFLARE_KV_API_TOKEN` from Connect's
-production environment.
+Four Cloudflare tokens remain:
+
+| Token | Used for | Where the value lives |
+| --- | --- | --- |
+| `deploy` | Worker releases | `CLOUDFLARE_API_TOKEN`: connect, finance, website, myMDO, app-launcher |
+| `d1-data` | D1 migrations and recovery checks | `CLOUDFLARE_D1_API_TOKEN`: connect, finance, website |
+| `r2-data` | website R2 image migration and recovery check | `CLOUDFLARE_R2_API_TOKEN`: website |
+| `timothy-workers-builds` | Cloudflare Workers Builds (myMDO, app-launcher); lives inside Cloudflare, not GitHub | Cloudflare build settings |
+
+Deleted October 2 to 5: the old database token, the KV token, the unused R2 recovery token, the
+old myMDO and website deploy tokens, and Cloudflare's own "Ask AI" assistant token (recreated by
+Cloudflare if the assistant is used again). Each repository released or ran its recovery check
+successfully on the new tokens first. Still open: delete the unused GitHub secrets noted earlier if
+any remain, and optionally fold `timothy-workers-builds` into `deploy` (not recommended: it needs
+the Workers Builds permission added and every Worker's build settings edited).
 
 ## Cloudflare tokens that existed on October 1, 2026 (from the dashboard)
 
-The table below is the October 1 inventory; see the status above for what has changed since.
+The table below is the October 1 inventory, kept for history; the status above is current.
 
 | Token name | Visible scope | Probable use (inferred from name; confirm) |
 | --- | --- | --- |
