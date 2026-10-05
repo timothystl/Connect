@@ -1,0 +1,335 @@
+{
+  "contract": "connect.attendance-summary.v1",
+  "dataClassification": "aggregate",
+  "sourceProduct": "connect",
+  "consumerProduct": "finance",
+  "generatedAt": "2026-10-05T18:00:00Z",
+  "fiscalYear": 2026,
+  "fiscalYearStart": "2026-01-01",
+  "fiscalYearEnd": "2026-12-31",
+  "countBasis": {
+    "method": "staff_entered_total",
+    "registrationData": false,
+    "note": "One staff-entered total per service. Connect holds no registration or check-in data."
+  },
+  "services": [
+    {
+      "date": "2026-04-05",
+      "serviceTime": "08:00",
+      "serviceLabel": "Sunday 08:00",
+      "kind": "regular",
+      "occasion": "easter",
+      "attendance": 90,
+      "countsTowardAverages": false
+    },
+    {
+      "date": "2026-04-05",
+      "serviceTime": "10:45",
+      "serviceLabel": "Sunday 10:45",
+      "kind": "regular",
+      "occasion": "easter",
+      "attendance": 180,
+      "countsTowardAverages": false
+    },
+    {
+      "date": "2026-06-02",
+      "serviceTime": "",
+      "serviceLabel": "Funeral",
+      "kind": "special",
+      "occasion": "funeral",
+      "attendance": 55,
+      "countsTowardAverages": false
+    },
+    {
+      "date": "2026-09-20",
+      "serviceTime": "08:00",
+      "serviceLabel": "Sunday 08:00",
+      "kind": "regular",
+      "occasion": "none",
+      "attendance": 58,
+      "countsTowardAverages": true
+    },
+    {
+      "date": "2026-09-20",
+      "serviceTime": "10:45",
+      "serviceLabel": "Sunday 10:45",
+      "kind": "regular",
+      "occasion": "none",
+      "attendance": 105,
+      "countsTowardAverages": true
+    },
+    {
+      "date": "2026-09-27",
+      "serviceTime": "08:00",
+      "serviceLabel": "Sunday 08:00",
+      "kind": "regular",
+      "occasion": "none",
+      "attendance": 61,
+      "countsTowardAverages": true
+    },
+    {
+      "date": "2026-09-27",
+      "serviceTime": "10:45",
+      "serviceLabel": "Sunday 10:45",
+      "kind": "regular",
+      "occasion": "none",
+      "attendance": 104,
+      "countsTowardAverages": true
+    },
+    {
+      "date": "2026-10-04",
+      "serviceTime": "08:00",
+      "serviceLabel": "Sunday 08:00",
+      "kind": "regular",
+      "occasion": "none",
+      "attendance": 60,
+      "countsTowardAverages": true
+    },
+    {
+      "date": "2026-10-04",
+      "serviceTime": "10:45",
+      "serviceLabel": "Sunday 10:45",
+      "kind": "regular",
+      "occasion": "none",
+      "attendance": 107,
+      "countsTowardAverages": true
+    }
+  ],
+  "weekends": [
+    {
+      "weekendDate": "2026-04-05",
+      "total": 270,
+      "occasion": "easter",
+      "countsTowardAverages": false,
+      "priorYearWeekendDate": null,
+      "priorYearTotal": null
+    },
+    {
+      "weekendDate": "2026-09-20",
+      "total": 163,
+      "occasion": "none",
+      "countsTowardAverages": true,
+      "priorYearWeekendDate": "2025-09-21",
+      "priorYearTotal": 161
+    },
+    {
+      "weekendDate": "2026-09-27",
+      "total": 165,
+      "occasion": "none",
+      "countsTowardAverages": true,
+      "priorYearWeekendDate": null,
+      "priorYearTotal": null
+    },
+    {
+      "weekendDate": "2026-10-04",
+      "total": 167,
+      "occasion": "none",
+      "countsTowardAverages": true,
+      "priorYearWeekendDate": "2025-10-05",
+      "priorYearTotal": 166
+    }
+  ],
+  "monthly": [
+    {
+      "month": 1,
+      "weekendCount": 0,
+      "countedWeekendCount": 0,
+      "total": 0,
+      "averagePerWeekend": null,
+      "averageIncludingFlagged": null,
+      "priorYearAveragePerWeekend": null,
+      "byService": []
+    },
+    {
+      "month": 2,
+      "weekendCount": 0,
+      "countedWeekendCount": 0,
+      "total": 0,
+      "averagePerWeekend": null,
+      "averageIncludingFlagged": null,
+      "priorYearAveragePerWeekend": null,
+      "byService": []
+    },
+    {
+      "month": 3,
+      "weekendCount": 0,
+      "countedWeekendCount": 0,
+      "total": 0,
+      "averagePerWeekend": null,
+      "averageIncludingFlagged": null,
+      "priorYearAveragePerWeekend": null,
+      "byService": []
+    },
+    {
+      "month": 4,
+      "weekendCount": 1,
+      "countedWeekendCount": 0,
+      "total": 270,
+      "averagePerWeekend": null,
+      "averageIncludingFlagged": 270,
+      "priorYearAveragePerWeekend": null,
+      "byService": []
+    },
+    {
+      "month": 5,
+      "weekendCount": 0,
+      "countedWeekendCount": 0,
+      "total": 0,
+      "averagePerWeekend": null,
+      "averageIncludingFlagged": null,
+      "priorYearAveragePerWeekend": null,
+      "byService": []
+    },
+    {
+      "month": 6,
+      "weekendCount": 0,
+      "countedWeekendCount": 0,
+      "total": 0,
+      "averagePerWeekend": null,
+      "averageIncludingFlagged": null,
+      "priorYearAveragePerWeekend": null,
+      "byService": []
+    },
+    {
+      "month": 7,
+      "weekendCount": 0,
+      "countedWeekendCount": 0,
+      "total": 0,
+      "averagePerWeekend": null,
+      "averageIncludingFlagged": null,
+      "priorYearAveragePerWeekend": null,
+      "byService": []
+    },
+    {
+      "month": 8,
+      "weekendCount": 0,
+      "countedWeekendCount": 0,
+      "total": 0,
+      "averagePerWeekend": null,
+      "averageIncludingFlagged": null,
+      "priorYearAveragePerWeekend": null,
+      "byService": []
+    },
+    {
+      "month": 9,
+      "weekendCount": 2,
+      "countedWeekendCount": 2,
+      "total": 328,
+      "averagePerWeekend": 164,
+      "averageIncludingFlagged": 164,
+      "priorYearAveragePerWeekend": 161,
+      "byService": [
+        {
+          "serviceTime": "08:00",
+          "total": 119,
+          "average": 59.5
+        },
+        {
+          "serviceTime": "10:45",
+          "total": 209,
+          "average": 104.5
+        }
+      ]
+    },
+    {
+      "month": 10,
+      "weekendCount": 1,
+      "countedWeekendCount": 1,
+      "total": 167,
+      "averagePerWeekend": 167,
+      "averageIncludingFlagged": 167,
+      "priorYearAveragePerWeekend": 163,
+      "byService": [
+        {
+          "serviceTime": "08:00",
+          "total": 60,
+          "average": 60
+        },
+        {
+          "serviceTime": "10:45",
+          "total": 107,
+          "average": 107
+        }
+      ]
+    },
+    {
+      "month": 11,
+      "weekendCount": 0,
+      "countedWeekendCount": 0,
+      "total": 0,
+      "averagePerWeekend": null,
+      "averageIncludingFlagged": null,
+      "priorYearAveragePerWeekend": null,
+      "byService": []
+    },
+    {
+      "month": 12,
+      "weekendCount": 0,
+      "countedWeekendCount": 0,
+      "total": 0,
+      "averagePerWeekend": null,
+      "averageIncludingFlagged": null,
+      "priorYearAveragePerWeekend": null,
+      "byService": []
+    }
+  ],
+  "history": [
+    {
+      "fiscalYear": 2024,
+      "averagePerWeekendByMonth": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        150,
+        156,
+        null,
+        null
+      ]
+    },
+    {
+      "fiscalYear": 2025,
+      "averagePerWeekendByMonth": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        161,
+        163,
+        null,
+        null
+      ]
+    },
+    {
+      "fiscalYear": 2026,
+      "averagePerWeekendByMonth": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        164,
+        167,
+        null,
+        null
+      ]
+    }
+  ],
+  "reconciliation": {
+    "serviceRowCount": 9,
+    "weekendCount": 4,
+    "regularAttendanceTotal": 765,
+    "totalsMatch": true
+  }
+}

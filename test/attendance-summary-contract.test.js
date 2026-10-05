@@ -132,3 +132,10 @@ describe('GET /api/contracts/attendance-summary-v1', () => {
     expect((await call('?fiscal_year=abc')).status).toBe(400);
   });
 });
+
+describe('synthetic example', () => {
+  it('validates against the consumer', () => {
+    const example = JSON.parse(readFileSync(new URL('../contracts/examples/attendance-summary-v1.synthetic.json', import.meta.url), 'utf8'));
+    expect(validateAttendanceSummaryV1(example)).toEqual({ ok: true, errors: [] });
+  });
+});
