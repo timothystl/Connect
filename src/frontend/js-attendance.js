@@ -556,6 +556,64 @@ function attExportHistoryCsv() {
   a.click();
   URL.revokeObjectURL(url);
 }
+// Saves the card around a "Save image" button as a PNG. The card is cloned with its computed
+// styles baked in, wrapped in an SVG foreignObject, and drawn to a canvas (no library needed).
+function attExportCardPng(btn, name) {
+  var card = btn.closest('.att-card') || btn.closest('[data-att-export]');
+  if (!card) return;
+  var scale = 2;
+  var w = card.offsetWidth, h = card.offsetHeight;
+  var clone = card.cloneNode(true);
+  var extra = 0;
+  var srcAll = [card].concat([].slice.call(card.querySelectorAll('*')));
+  var cloneAll = [clone].concat([].slice.call(clone.querySelectorAll('*')));
+  for (var i = 0; i < srcAll.length; i++) {
+    var cs = window.getComputedStyle(srcAll[i]);
+    var txt = '';
+    for (var j = 0; j < cs.length; j++) txt += cs[j] + ':' + cs.getPropertyValue(cs[j]) + ';';
+    cloneAll[i].setAttribute('style', txt);
+    if (i > 0 && srcAll[i].scrollWidth > srcAll[i].clientWidth + 2 && /auto|scroll/.test(cs.overflowX)) {
+      extra = Math.max(extra, srcAll[i].scrollWidth - srcAll[i].clientWidth);
+      cloneAll[i].style.overflow = 'visible';
+      cloneAll[i].style.width = srcAll[i].scrollWidth + 'px';
+      cloneAll[i].style.maxWidth = 'none';
+    }
+  }
+  [].slice.call(clone.querySelectorAll('[data-no-export]')).forEach(function(n) { n.parentNode.removeChild(n); });
+  w += extra;
+  clone.style.width = w + 'px';
+  clone.style.height = h + 'px';
+  clone.style.margin = '0';
+  clone.style.boxShadow = 'none';
+  clone.style.borderRadius = '0';
+  clone.style.background = '#fff';
+  clone.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+  var xml = new XMLSerializer().serializeToString(clone);
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"><foreignObject width="100%" height="100%">' + xml + '</foreignObject></svg>';
+  var img = new Image();
+  img.onload = function() {
+    var cv = document.createElement('canvas');
+    cv.width = w * scale; cv.height = h * scale;
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.scale(scale, scale);
+    ctx.drawImage(img, 0, 0, w, h);
+    try {
+      cv.toBlob(function(blob) {
+        if (!blob) { alert('Could not save the image in this browser.'); return; }
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'attendance-' + name + '-' + new Date().toISOString().slice(0, 10) + '.png';
+        a.click();
+        setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+      }, 'image/png');
+    } catch (e) { alert('Could not save the image in this browser.'); }
+  };
+  img.onerror = function() { alert('Could not save the image in this browser.'); };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
 function toggleAttEdit(dk) {
   var form = document.getElementById('att-edit-' + dk);
   if (!form) return;
@@ -791,7 +849,7 @@ function renderYoYChart(d, chartH) {
   });
   legend+='</div>';
   var svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:'+H+'px;">'+grid+lines+xlbls+ylbls+'</svg>';
-  return '<div style="background:var(--white);border:1px solid var(--border);border-radius:12px;padding:16px 16px 8px;margin-bottom:16px;"><div style="font-weight:700;color:var(--steel-anchor);font-size:.9rem;margin-bottom:8px;">Year-over-Year Trend</div>'+svg+legend+'</div>';
+  return '<div data-att-export style="background:var(--white);border:1px solid var(--border);border-radius:12px;padding:16px 16px 8px;margin-bottom:16px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:700;color:var(--steel-anchor);font-size:.9rem;">Year-over-Year Trend</div><button class="att-link" data-no-export onclick="attExportCardPng(this,\'yoy-trend\')">Save image</button></div>'+svg+legend+'</div>';
 }
 
 function renderByServiceChart(d, chartH) {
@@ -835,7 +893,7 @@ function renderByServiceChart(d, chartH) {
     +'<span style="display:flex;align-items:center;gap:5px;font-size:.8rem;"><span style="display:inline-block;width:24px;height:3px;background:var(--color-teal);"></span>10:45am</span>'
     +'</div>';
   var svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:'+H+'px;">'+grid+line8+line1045+xlbls+ylbls+'</svg>';
-  return '<div style="background:var(--white);border:1px solid var(--border);border-radius:12px;padding:16px 16px 8px;margin-bottom:16px;"><div style="font-weight:700;color:var(--steel-anchor);font-size:.9rem;margin-bottom:8px;">8am vs 10:45am Trend</div>'+svg+legend+'</div>';
+  return '<div data-att-export style="background:var(--white);border:1px solid var(--border);border-radius:12px;padding:16px 16px 8px;margin-bottom:16px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:700;color:var(--steel-anchor);font-size:.9rem;">8am vs 10:45am Trend</div><button class="att-link" data-no-export onclick="attExportCardPng(this,\'service-trend\')">Save image</button></div>'+svg+legend+'</div>';
 }
 
 function _buildAttYoYHtml(d, h) {
