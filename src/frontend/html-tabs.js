@@ -638,6 +638,7 @@ export const HTML_TABS_1 = String.raw`<!-- ═══ HOME / DASHBOARD TAB ══
             <div class="att-card-hdr" style="margin-bottom:8px;">
               <div class="att-card-title" style="font-size:1rem;">Sundays This Year</div>
               <div class="att-card-subtitle" style="margin:0;">Gold = 8:00 service &middot; Teal = 10:45 service</div>
+              <button class="att-link" data-no-export onclick="attExportCardPng(this,&#39;sundays-this-year&#39;)">Save image</button>
             </div>
             <div class="att-bars26" id="att-bars26"></div>
             <div class="att-bars-foot" id="att-bars26-foot"></div>
@@ -647,8 +648,10 @@ export const HTML_TABS_1 = String.raw`<!-- ═══ HOME / DASHBOARD TAB ══
       <div class="att-row2b">
         <!-- C. Heat grid -->
         <div class="att-card">
+          <div class="att-card-hdr" style="align-items:flex-start;"><div>
           <div class="att-card-title">Every Sunday, five years</div>
           <div class="att-card-subtitle" style="margin-bottom:14px;">Darker &#61; fuller. Hover any week for the exact count.</div>
+          </div><button class="att-link" data-no-export onclick="attExportCardPng(this,&#39;five-year-grid&#39;)">Save image</button></div>
           <div id="att-heat-grid"></div>
           <div class="att-heat-foot" id="att-heat-foot"></div>
         </div>
@@ -666,20 +669,26 @@ export const HTML_TABS_1 = String.raw`<!-- ═══ HOME / DASHBOARD TAB ══
     <!-- ═══ TRENDS ═══ -->
     <div class="att-panel" id="att-panel-trends">
       <div class="att-card">
+        <div class="att-card-hdr" style="align-items:flex-start;"><div>
         <div class="att-card-title">Monthly rhythm</div>
         <div class="att-card-subtitle" id="att-month-subtitle" style="margin-bottom:14px;">Average Sunday attendance per month</div>
+        </div><button class="att-link" data-no-export onclick="attExportCardPng(this,&#39;monthly-rhythm&#39;)">Save image</button></div>
         <div class="att-month-wrap" id="att-month-bars"></div>
         <div class="att-month-foot" id="att-month-foot"></div>
       </div>
       <div class="att-row2b">
         <div class="att-card">
+          <div class="att-card-hdr" style="align-items:flex-start;"><div>
           <div class="att-card-title">Year over year</div>
           <div class="att-card-subtitle" style="margin-bottom:14px;">Average Sunday attendance by month</div>
+          </div><button class="att-link" data-no-export onclick="attExportCardPng(this,&#39;year-over-year&#39;)">Save image</button></div>
           <div id="att-yoy-table"></div>
         </div>
         <div class="att-card">
+          <div class="att-card-hdr" style="align-items:flex-start;"><div>
           <div class="att-card-title">Service mix</div>
           <div class="att-card-subtitle" style="margin-bottom:14px;">8:00 vs. 10:45, by quarter</div>
+          </div><button class="att-link" data-no-export onclick="attExportCardPng(this,&#39;service-mix&#39;)">Save image</button></div>
           <div id="att-service-mix"></div>
         </div>
       </div>
