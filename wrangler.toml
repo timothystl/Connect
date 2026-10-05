@@ -121,4 +121,3 @@ crons = ["0 14 * * *"]
 binding = "FINANCE_DB"
 database_name = "timothy-finance-db"
 database_id = "04988828-94b7-43bc-9689-ff570951f1c7"
-migrations_dir = "apps/finance/migrations"
