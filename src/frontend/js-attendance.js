@@ -589,7 +589,8 @@ function attExportCardPng(btn, name) {
   clone.style.background = '#fff';
   clone.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
   var xml = new XMLSerializer().serializeToString(clone);
-  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"><foreignObject width="100%" height="100%">' + xml + '</foreignObject></svg>';
+  attLoadExportFonts().then(function(fontCss) {
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"><foreignObject width="100%" height="100%"><style xmlns="http://www.w3.org/1999/xhtml">' + fontCss + '</style>' + xml + '</foreignObject></svg>';
   var img = new Image();
   img.onload = function() {
     var cv = document.createElement('canvas');
@@ -613,6 +614,33 @@ function attExportCardPng(btn, name) {
   };
   img.onerror = function() { alert('Could not save the image in this browser.'); };
   img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  });
+}
+// A picture can't borrow the page's web fonts, so the page font is fetched once and embedded in
+// the image. Without it the image falls back to a wider system font and the text overlaps.
+var _attExportFontCss = null;
+function attLoadExportFonts() {
+  if (_attExportFontCss !== null) return Promise.resolve(_attExportFontCss);
+  var links = [].slice.call(document.querySelectorAll('link[rel=stylesheet][href*="fonts.googleapis.com"]'));
+  return Promise.all(links.map(function(l) {
+    return fetch(l.href).then(function(r) { return r.text(); }).then(function(css) {
+      var blocks = css.match(/\/\*[^*]*\*\/\s*@font-face\s*\{[^}]*\}/g) || [];
+      return Promise.all(blocks.filter(function(b) { return /\/\*\s*latin\s*\*\//.test(b); }).map(function(b) {
+        var m = b.match(/url\(([^)]+)\)/);
+        if (!m) return '';
+        return fetch(m[1].replace(/['"]/g, '')).then(function(r) { return r.blob(); }).then(function(blob) {
+          return new Promise(function(resolve) {
+            var fr = new FileReader();
+            fr.onload = function() { resolve(b.replace(/\/\*[^*]*\*\//, '').replace(/url\([^)]+\)/, 'url(' + fr.result + ')')); };
+            fr.readAsDataURL(blob);
+          });
+        });
+      }));
+    });
+  })).then(function(parts) {
+    _attExportFontCss = [].concat.apply([], parts).join('\n');
+    return _attExportFontCss;
+  }).catch(function() { return ''; });
 }
 function toggleAttEdit(dk) {
   var form = document.getElementById('att-edit-' + dk);
