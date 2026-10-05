@@ -68,4 +68,4 @@ The church-app design system adopted for Connect is in [ADR 0001](adr/0001-open-
 | Item | Source | Status |
 |---|---|---|
 | `npm audit` was clean on 2026-08-23 and drifts back; run it periodically. | PLAN.md `P27-C` | Recurring. |
-| `wrangler.toml` still sets `migrations_dir = "apps/finance/migrations"` for the `FINANCE_DB` binding and code comments mention `apps/finance/`; those paths left with the Finance split. Configuration was out of scope for the documentation cleanup. | This cleanup | Checked. Decide whether the binding should keep a migrations directory. |
+| Code comments still mention `apps/finance/`; that path left with the Finance split (the stale `migrations_dir` for `FINANCE_DB` was removed from `wrangler.toml`; Finance migrations live in `timothystl/finance`). | This cleanup | Comment-only; update as files are touched. |
