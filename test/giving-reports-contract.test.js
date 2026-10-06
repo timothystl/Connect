@@ -115,7 +115,7 @@ describe('Giving analysis reports for Finance (giving-reports-v1, giving-impact-
     insertUser(db, { username: 'carl', email: 'carl@example.test', role: 'council' });
     insertUser(db, { username: 'ada', email: 'ada@example.test', role: 'admin' });
     raw.prepare("INSERT INTO households (id, name) VALUES (1, 'Sample Household')").run();
-    raw.prepare("INSERT INTO people (first_name, last_name, household_id) VALUES ('Ada','Sample',1), ('Ben','Sample',1), ('Cara','Example',NULL)").run();
+    raw.prepare("INSERT INTO people (first_name, last_name, household_id, member_type) VALUES ('Ada','Sample',1,'member'), ('Ben','Sample',1,'visitor'), ('Cara','Example',NULL,'visitor')").run();
     raw.prepare("INSERT INTO giving_batches (batch_date) VALUES ('2025-03-02'), ('2026-03-01'), ('2026-03-08')").run();
     const add = (batch, person, fund, cents, date, method = 'check') => raw.prepare(
       'INSERT INTO giving_entries (batch_id, person_id, fund_id, amount, method, contribution_date) VALUES (?,?,?,?,?,?)'
@@ -158,8 +158,13 @@ describe('Giving analysis reports for Finance (giving-reports-v1, giving-impact-
     const insights = await (await report(db, 'insights', '&year=2026')).json();
     expect(insights.lapsed.map((p) => p.first_name)).toEqual(['Cara']);
     const plateaus = await (await report(db, 'plateaus', '&year=2025&scope=household')).json();
-    expect(plateaus.summary.total_givers).toBe(1);
     expect(plateaus).not.toHaveProperty('givers');
+    // Nudges are for member households only: Cara gave in 2025 but is a visitor, so she is not nudged
+    // until she becomes a member.
+    expect(plateaus.summary.total_givers).toBe(0);
+    db._raw.prepare("UPDATE people SET member_type='member' WHERE first_name='Cara'").run();
+    const withCara = await (await report(db, 'plateaus', '&year=2025&scope=household')).json();
+    expect(withCara.summary.total_givers).toBe(1);
   });
 
   it('compares the current year to date with last year to the same day, and projects each year-end', async () => {

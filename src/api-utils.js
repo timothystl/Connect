@@ -968,6 +968,12 @@ export function plateauWeeksElapsed(year, now = new Date()) {
   const days = Math.floor((now.getTime() - Date.UTC(year, 0, 1)) / 86400000) + 1;
   return Math.max(1, Math.min(52, Math.ceil(days / 7)));
 }
+// "Member household" for nudges: the giver is an active member, or lives in a household that has an
+// active member. Guests, visitors and friends who give are thanked in other ways and are not nudged.
+// `alias` is the people table in the query this is appended to.
+export function memberHouseholdSql(alias = 'p') {
+  return ` AND (LOWER(COALESCE(${alias}.member_type,''))='member' OR (${alias}.household_id IS NOT NULL AND ${alias}.household_id != 0 AND EXISTS (SELECT 1 FROM people mh WHERE mh.household_id=${alias}.household_id AND mh.active=1 AND LOWER(mh.member_type)='member')))`;
+}
 export async function fetchGivingPlateauRows(db, { year, scope, fundId }) {
   const start = year + '-01-01', end = year + '-12-31';
   const effDate = "COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date)";
@@ -1001,7 +1007,7 @@ export async function fetchGivingPlateauRows(db, { year, scope, fundId }) {
        LEFT JOIN households h ON h.id = p.household_id
        WHERE ${effDate} >= ? AND ${effDate} <= ?
          AND ge.person_id IS NOT NULL
-         AND LOWER(COALESCE(p.member_type,'')) != 'organization'${fundClause}
+         AND LOWER(COALESCE(p.member_type,'')) != 'organization'${memberHouseholdSql('p')}${fundClause}
        GROUP BY ${keyExpr}`
     ).bind(start, end, ...fundBind).all()).results || [];
   }
@@ -1018,7 +1024,7 @@ export async function fetchGivingPlateauRows(db, { year, scope, fundId }) {
      JOIN people p ON p.id = ge.person_id
      WHERE ${effDate} >= ? AND ${effDate} <= ?
        AND ge.person_id IS NOT NULL
-       AND LOWER(COALESCE(p.member_type,'')) != 'organization'${fundClause}
+       AND LOWER(COALESCE(p.member_type,'')) != 'organization'${memberHouseholdSql('p')}${fundClause}
      GROUP BY ge.person_id`
   ).bind(start, end, ...fundBind).all()).results || [];
 }

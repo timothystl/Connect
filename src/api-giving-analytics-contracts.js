@@ -23,7 +23,7 @@ import { verifyAccessJwt } from './access-jwt.js';
 import { applyFundCleanupWrite, buildFundCleanup } from './api-fund-cleanup-contracts.js';
 import {
   getRolePermissions, permissionsForRole, resolveGeneralFundIds, normalizeFundCategory, fundCategoryLabel, sameDayLastYear, yearElapsedShare,
-  resolveGeneralFundBudget, accountRowMatchesFundCode, fundNumericPrefix,
+  resolveGeneralFundBudget, accountRowMatchesFundCode, fundNumericPrefix, memberHouseholdSql,
 } from './api-utils.js';
 import { resolveChurchYearPrecedence, computeYearSummary, readCashPolicy } from './api-finance.js';
 
@@ -523,7 +523,7 @@ async function readNamedWindows(db, asOf) {
        JOIN people p ON p.id=ge.person_id
        LEFT JOIN households h ON h.id=p.household_id
       WHERE ge.contribution_date BETWEEN ? AND ?
-        AND LOWER(COALESCE(p.member_type,'')) != 'organization'
+        AND LOWER(COALESCE(p.member_type,'')) != 'organization'${memberHouseholdSql('p')}
       GROUP BY hk`
   ).bind(
     recentStart, asOf,
@@ -625,7 +625,7 @@ export async function respondWithGivingAnalyticsPeopleV1(url, db) {
                 WHERE person_id IS NOT NULL AND contribution_date != '' GROUP BY person_id) f
          JOIN people p ON p.id=f.person_id
         WHERE f.first_day BETWEEN ? AND ?
-          AND LOWER(COALESCE(p.member_type,'')) != 'organization'
+          AND LOWER(COALESCE(p.member_type,'')) != 'organization'${memberHouseholdSql('p')}
         ORDER BY f.first_day DESC LIMIT 60`
     ).bind(firstFrom, asOf).all(),
     db.prepare(
@@ -633,7 +633,7 @@ export async function respondWithGivingAnalyticsPeopleV1(url, db) {
               COALESCE((SELECT SUM(ge.amount) FROM giving_entries ge
                          WHERE ge.person_id=pl.person_id AND ge.contribution_date BETWEEN ? AND ?),0) AS received_cents
          FROM pledges pl JOIN people p ON p.id=pl.person_id
-        WHERE pl.fiscal_year=? AND pl.amount_cents > 0`
+        WHERE pl.fiscal_year=? AND pl.amount_cents > 0${memberHouseholdSql('p')}`
     ).bind(`${year}-01-01`, asOf, year).all(),
     db.prepare(`SELECT kind, subject_key, episode, assigned_to, status, done_at, done_by FROM giving_followups`).all(),
     // A first gift thanked from Connect's receipt queue is already done: same recipient key.
