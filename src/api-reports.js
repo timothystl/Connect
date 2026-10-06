@@ -1,7 +1,7 @@
 // ── Reports, Engagement, Prayer API handlers ─────────────────────────────────
 import { json } from './auth.js';
 import { makeBreezeClient } from './breeze.js';
-import { isoWeekKey, bucketGivingMethod, projectYearEnd, sundaysElapsedThroughDate, sundaysInYear, nthSundayOfYear, periodAsOfDate, monthElapsedFraction, spreadBudgetYtd, computeConcentration, computeGivingPlateaus, fetchGivingPlateauRows, plateauWeeksElapsed, computeGivingBands, computeGivingDistribution, inflationAdjustCents, CPI_U_ANNUAL, FUND_CATEGORIES, normalizeFundCategory, resolveGeneralFundIds, resolveGeneralFundBudget, buildBoardCategoryBlock, SACRAMENT_YES, csvRow, safeFilenamePart, sameDayLastYear, yearElapsedShare} from './api-utils.js';
+import { fundCodeScope, isoWeekKey, bucketGivingMethod, projectYearEnd, sundaysElapsedThroughDate, sundaysInYear, nthSundayOfYear, periodAsOfDate, monthElapsedFraction, spreadBudgetYtd, computeConcentration, computeGivingPlateaus, fetchGivingPlateauRows, plateauWeeksElapsed, computeGivingBands, computeGivingDistribution, inflationAdjustCents, CPI_U_ANNUAL, FUND_CATEGORIES, normalizeFundCategory, resolveGeneralFundIds, resolveGeneralFundBudget, buildBoardCategoryBlock, SACRAMENT_YES, csvRow, safeFilenamePart, sameDayLastYear, yearElapsedShare} from './api-utils.js';
 import { resolveChurchYearPrecedence, readCashPolicy } from './api-finance.js';
 import { loadGivingYearTrendRows } from './giving-rollups.js';
 
@@ -673,8 +673,7 @@ if (seg === 'reports/giving-plateaus' && method === 'GET') {
   const lowFrequencyMax = Math.max(1, Math.min(parseInt(url.searchParams.get('low_frequency_max') || '3', 10) || 3, 51));
   const start = year + '-01-01', end = year + '-12-31';
   const effDate = "COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date)";
-  const fundClause = fundId ? ' AND ge.fund_id = ?' : '';
-  const fundBind = fundId ? [fundId] : [];
+  const { clause: fundClause, bind: fundBind } = await fundCodeScope(db, fundId);
   // One row per giver with their WHOLE-YEAR total + gift count — every fund
   // they gave to sums into one figure, nothing discounted. Pass fund_id to
   // scope the whole analysis to one fund instead (e.g. only Tuition Aid, or
@@ -738,8 +737,7 @@ if (seg === 'reports/giving-bands' && method === 'GET') {
   const fundId = parseInt(url.searchParams.get('fund_id') || '', 10) || 0;
   const start = year + '-01-01', end = year + '-12-31';
   const effDate = "COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date)";
-  const fundClause = fundId ? ' AND ge.fund_id = ?' : '';
-  const fundBind = fundId ? [fundId] : [];
+  const { clause: fundClause, bind: fundBind } = await fundCodeScope(db, fundId);
 
   let rows;
   if (scope === 'household') {
