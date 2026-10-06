@@ -12,6 +12,8 @@
 //                               needs Giving view or edit (or admin); 'anon' is refused.
 //   giving-followup-write-v1    Assigns a nudge or marks it done (giving_followups). Needs Giving
 //                               edit or admin. Nothing here sends a message.
+//   giving-nudge-group-write-v1 Moves a household into a different nudge group by hand, or back to
+//                               automatic (giving_nudge_group_overrides). Needs Giving edit or admin.
 //
 // Identity works like the Gift Entry batch contracts: the caller has already checked
 // X-Contract-Key (the request came from Finance's Worker); the Cf-Access-Jwt-Assertion is
@@ -23,7 +25,7 @@ import { verifyAccessJwt } from './access-jwt.js';
 import { applyFundCleanupWrite, buildFundCleanup } from './api-fund-cleanup-contracts.js';
 import {
   getRolePermissions, permissionsForRole, resolveGeneralFundIds, normalizeFundCategory, fundCategoryLabel, sameDayLastYear, yearElapsedShare,
-  resolveGeneralFundBudget, accountRowMatchesFundCode, fundNumericPrefix, memberHouseholdSql,
+  resolveGeneralFundBudget, accountRowMatchesFundCode, fundNumericPrefix, memberHouseholdSql, GIVER_GROUPS,
 } from './api-utils.js';
 import { resolveChurchYearPrecedence, computeYearSummary, readCashPolicy } from './api-finance.js';
 
@@ -756,6 +758,29 @@ export async function applyGivingFollowupWrite(db, body, email) {
   return { status: 200, ok: true };
 }
 
+// Moves a household or person into a nudge group by hand, or (group '') back to automatic.
+const GROUP_KEY_RE = /^[hp]\d{1,9}$/;
+export async function applyNudgeGroupWrite(db, body, email) {
+  const key = String(body?.recipient_key || '');
+  const group = String(body?.group || '');
+  if (!GROUP_KEY_RE.test(key)) return { status: 400, error: 'That household could not be identified' };
+  if (group && !GIVER_GROUPS.some((g) => g.key === group)) return { status: 400, error: 'Unknown group' };
+  const before = await db.prepare('SELECT group_key FROM giving_nudge_group_overrides WHERE recipient_key=?').bind(key).first();
+  if (!group) {
+    await db.prepare('DELETE FROM giving_nudge_group_overrides WHERE recipient_key=?').bind(key).run();
+  } else {
+    await db.prepare(
+      `INSERT INTO giving_nudge_group_overrides (recipient_key, group_key, set_by) VALUES (?, ?, ?)
+       ON CONFLICT(recipient_key) DO UPDATE SET group_key=excluded.group_key, set_by=excluded.set_by, updated_at=datetime('now')`
+    ).bind(key, group, email || '').run();
+  }
+  await db.prepare(
+    `INSERT INTO audit_log(action,entity_type,entity_id,person_name,field,old_value,new_value)
+     VALUES('giving_nudge_group_via_finance', 'giving_nudge_group_overrides', NULL, '', ?, ?, ?)`
+  ).bind(key, before?.group_key || '', `${group || 'automatic'} by ${email || ''}`).run().catch(() => {});
+  return { status: 200, ok: true };
+}
+
 const EMAIL_RE = /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]+$/;
 
 export async function sendGivingBoardEmail(env, db, body) {
@@ -847,6 +872,14 @@ export async function handleGivingAnalyticsContracts(req, env, path) {
     let body = {};
     try { body = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
     const result = await applyGivingFollowupWrite(env.DB, body, auth.email);
+    return result.ok ? json({ ok: true }) : json({ error: result.error }, result.status);
+  }
+  if (path === '/api/contracts/giving-nudge-group-write-v1' && req.method === 'POST') {
+    const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'write' });
+    if (auth.response) return auth.response;
+    let body = {};
+    try { body = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+    const result = await applyNudgeGroupWrite(env.DB, body, auth.email);
     return result.ok ? json({ ok: true }) : json({ error: result.error }, result.status);
   }
   return null;

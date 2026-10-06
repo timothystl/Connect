@@ -446,6 +446,22 @@ describe('Giving analytics contracts (giving-analytics-*-v1, giving-followup-wri
     expect((await call(db, '/api/contracts/giving-followup-write-v1', { method: 'POST', body: { op: 'done', kind: 'stopped', subject_key: "p:1' OR 1=1", episode: '2026-05-03' } })).status).toBe(400);
   });
 
+  it('moves a household into another nudge group by hand, and back to automatic (giving-nudge-group-write-v1)', async () => {
+    const { db } = setup();
+    const post = (body, email = 'sarah@timothystl.org') => call(db, '/api/contracts/giving-nudge-group-write-v1', { email, method: 'POST', body });
+    expect((await post({ recipient_key: 'h1', group: 'irregular' })).status).toBe(200);
+    expect(db._raw.prepare("SELECT group_key, set_by FROM giving_nudge_group_overrides WHERE recipient_key='h1'").get()).toEqual({ group_key: 'irregular', set_by: 'sarah@timothystl.org' });
+    expect((await post({ recipient_key: 'h1', group: 'regular' })).status).toBe(200);
+    expect(db._raw.prepare('SELECT COUNT(*) AS n FROM giving_nudge_group_overrides').get().n).toBe(1);
+    expect((await post({ recipient_key: 'h1', group: '' })).status).toBe(200);
+    expect(db._raw.prepare('SELECT COUNT(*) AS n FROM giving_nudge_group_overrides').get().n).toBe(0);
+    expect((await post({ recipient_key: 'h1', group: 'bogus' })).status).toBe(400);
+    expect((await post({ recipient_key: "h1' OR 1=1", group: 'regular' })).status).toBe(400);
+    expect(db._raw.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action='giving_nudge_group_via_finance'").get().n).toBe(3);
+    // Council cannot move anyone.
+    expect([401, 403]).toContain((await post({ recipient_key: 'h1', group: 'regular' }, 'carl@timothystl.org')).status);
+  });
+
   it('treats a first gift already thanked from Connect as done, and summarizes statement runs', async () => {
     const { db, ids } = setup();
     db._raw.prepare(`INSERT INTO giving_letter_sends (person_id, year, letter_type, channel, recipient_key, sent_at) VALUES (?, 2026, 'thank_you', 'email', ?, '2026-09-14 10:00:00')`).run(ids.jordan, `ge${ids.jordan}:2026-09-13`);

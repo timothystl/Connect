@@ -314,6 +314,26 @@ describe('group asks', () => {
   });
 });
 
+describe('moving a giver by hand', () => {
+  const rows = [row(1, 'Meyer', 20000, 8, { months_given: 6, link_kind: 'household', link_id: 7 })];
+  it('puts a household in the group it was moved to, and says where the rule would have put it', () => {
+    const auto = computeGivingPlateaus(rows, { periodsElapsed: 40 }).givers[0];
+    expect(auto.recipient_key).toBe('h7');
+    expect(auto.moved_from).toBeNull();
+    const moved = computeGivingPlateaus(rows, { periodsElapsed: 40, groupOverrides: { h7: 'irregular' } });
+    expect(moved.givers[0].group).toBe('irregular');
+    expect(moved.givers[0].moved_from).toBe(auto.group);
+    expect(moved.groups.find(g => g.key === 'irregular').num_people).toBe(1);
+    expect(moved.groups.find(g => g.key === auto.group).num_people).toBe(0);
+    expect(moved.givers[0].options.length).toBe(1);   // irregular is asked only to automate
+  });
+  it('ignores a move to the group the rule already chose', () => {
+    const auto = computeGivingPlateaus(rows, { periodsElapsed: 40 }).givers[0];
+    const same = computeGivingPlateaus(rows, { periodsElapsed: 40, groupOverrides: { h7: auto.group } }).givers[0];
+    expect(same.moved_from).toBeNull();
+  });
+});
+
 describe('fund code rule', () => {
   const db = { prepare: () => ({ all: async () => ({ results: [
     { id: 1, name: '40085 General Fund' }, { id: 2, name: '40085 Lent' }, { id: 3, name: '40085 Retirement Distribution' },
