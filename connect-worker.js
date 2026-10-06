@@ -25,6 +25,7 @@ import {
   renderStaxGivingMockupReviewHtml, renderStaxGivingMockupFundsAdminHtml,
 } from './src/stax-giving-mockup.js';
 import { handleContractsServiceApi } from './src/api-contracts-service.js';
+import { handleMemberPortalContracts } from './src/api-member-portal-contract.js';
 import { handleMemberSetup } from './src/api-people.js';
 import { LOGIN_HTML, PUBLIC_HTML, PUBLIC_APP_CSS, PUBLIC_APP_JS } from './src/html-templates.js';
 import { chmsHtmlForRole, CHMS_MANIFEST_JSON, SW_JS, BACKLOG_HTML, CHMS_APP_MEMBER_JS, CHMS_APP_STAFF_JS, CHMS_APP_EXT_JS, CHMS_APP_FINANCE_JS, CHMS_APP_CSS, CHMS_SCHEDULER_HTML, CHMS_SCHEDULER_JS } from './src/html-chms.js';
@@ -625,6 +626,9 @@ async function _fetchRouted(req, env, url, path, method) {
     // session. Must stay above the /api/* Breeze-proxy catch-all further down or it never matches.
     if (path.startsWith('/api/contracts/')) {
       try {
+        // The launcher's member app has its own shared secret, separate from Finance's.
+        const memberPortal = await handleMemberPortalContracts(req, env, path);
+        if (memberPortal) return memberPortal;
         return await handleContractsServiceApi(req, env, path);
       } catch (e) {
         console.error('Contracts API error [' + method + ' ' + path + ']:', e?.message, e?.stack);
