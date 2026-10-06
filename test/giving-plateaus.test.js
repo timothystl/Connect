@@ -246,25 +246,28 @@ describe('computeGivingPlateaus', () => {
 });
 
 describe('giver groups', () => {
-  const g = (gifts, monthsGiven, totalCents, weeks = 52, opts) => classifyGiverGroup({ gifts, monthsGiven, totalCents }, weeks, opts);
-  it('counts a monthly giver with ten gifts by October as regular, not irregular', () => {
-    expect(g(10, 10, 200000, 40)).toBe('regular');
+  const g = (gifts, monthsGiven, totalCents, weeks = 52, extra) => classifyGiverGroup(Object.assign({ gifts, monthsGiven, totalCents }, extra || {}), weeks);
+  it('counts a monthly giver with ten gifts by October as regular', () => {
+    expect(g(10, 10, 200000, 40, { firstMonth: '2026-01', lastMonth: '2026-10' })).toBe('regular');
   });
   it('counts a weekly giver as regular', () => expect(g(52, 12, 260000)).toBe('regular'));
-  it('puts someone who gave in only a few months in the rare or irregular group', () => {
-    expect(g(2, 2, 20000)).toBe('rare');
-    expect(g(6, 5, 60000)).toBe('irregular');
+  it('counts more than a gift a month over the months someone has been giving as regular, even if they started late', () => {
+    expect(g(8, 6, 2000000, 40, { firstMonth: '2026-04', lastMonth: '2026-09' })).toBe('regular');   // 8 gifts in 6 months
+    expect(g(14, 6, 618800, 40, { firstMonth: '2026-04', lastMonth: '2026-09' })).toBe('regular');
+    expect(g(7, 7, 540000, 40, { firstMonth: '2026-03', lastMonth: '2026-09' })).toBe('regular');    // exactly one a month
+  });
+  it('calls someone irregular when their gifts are spread thinner than one a month', () => {
+    expect(g(5, 5, 60000, 40, { firstMonth: '2026-01', lastMonth: '2026-10' })).toBe('irregular');
+    expect(g(4, 4, 40000, 40, { firstMonth: '2026-02', lastMonth: '2026-09' })).toBe('irregular');
+  });
+  it('calls someone rare when they gave a few times at most and not monthly', () => {
+    expect(g(2, 2, 20000, 40, { firstMonth: '2026-02', lastMonth: '2026-08' })).toBe('rare');
   });
   it('treats one or two gifts in the thousands as a large annual gift, not a rare giver', () => {
     expect(g(1, 1, 300000)).toBe('large_gift');
     expect(g(2, 2, 450000)).toBe('large_gift');
     expect(g(2, 2, 150000)).toBe('rare');
-    // Many large gifts is just a generous regular giver.
     expect(g(12, 12, 3600000)).toBe('regular');
-  });
-  it('does not call anyone regular in the first weeks of the year on one month of giving', () => {
-    expect(g(3, 1, 3000, 4)).toBe('regular'); // every month so far
-    expect(g(2, 1, 2000, 17)).toBe('rare');   // five months in, only one gave
   });
 });
 
@@ -276,14 +279,23 @@ describe('group asks', () => {
     expect(one(7800, 52, 12).options.map(o => o.delta_cents / 100)).toEqual([20, 45, 70]);    // $150/wk
     expect(one(520, 52, 12).step_label).toBe('+$10/wk band');
   });
-  it('asks a rare or irregular giver for a standing monthly gift above what they give per month', () => {
+  it('asks a rare giver for a standing monthly gift above what they give per month', () => {
     const rare = one(300, 2, 2); // $300 a year = $25 a month
     expect(rare.group).toBe('rare');
     expect(rare.options.map(o => o.new_annual_total_cents / 1200)).toEqual([30, 40, 50]);
     expect(rare.options.map(o => o.annual_delta_cents)).toEqual([6000, 18000, 30000]);
-    const irregular = one(600, 6, 5);
-    expect(irregular.group).toBe('irregular');
-    irregular.options.forEach(o => expect(o.annual_delta_cents).toBeGreaterThan(0));
+    expect(rare.group).toBe('rare');
+  });
+  it('asks an irregular giver only to automate at their average gift, with no guessed increase', () => {
+    // $500, $200 and $500 over ten months: average gift $400, so $4,800 a year if automated.
+    const r = computeGivingPlateaus([row(1, 'X', 1200, 3, { months_given: 3, first_month: '2026-01', last_month: '2026-10' }), row(2, 'Y', 2000, 5, { months_given: 5, first_month: '2026-01', last_month: '2026-10' })], { periodsElapsed: 52, lowFrequencyMax: 2 });
+    const x = r.givers.find(gv => gv.name === 'X');
+    expect(x.group).toBe('irregular');
+    expect(x.options.length).toBe(1);
+    expect(x.options[0].new_annual_total_cents).toBe(480000);
+    expect(x.options[0].annual_delta_cents).toBe(480000 - 120000);
+    const y = r.givers.find(gv => gv.name === 'Y');   // $2,000 over 5 gifts: average $400, same figure
+    expect(y.options[0].new_annual_total_cents).toBe(480000);
   });
   it('offers a large annual giver a percentage rounded to $100, never a weekly step', () => {
     const big = one(3000, 1, 1);
@@ -295,6 +307,7 @@ describe('group asks', () => {
     const rows = [row(1, 'A', 2600, 52, { months_given: 12 }), row(2, 'B', 2600, 52, { months_given: 12 }), row(3, 'C', 300, 2, { months_given: 2 }), row(4, 'D', 5000, 1, { months_given: 1 })];
     const r = computeGivingPlateaus(rows, { periodsElapsed: 52 });
     expect(r.groups.map(x => [x.key, x.num_people])).toEqual([['rare', 1], ['irregular', 0], ['regular', 2], ['large_gift', 1]]);
+    expect(r.groups[2].not_automated).toBe(2);
     expect(r.groups.reduce((s, x) => s + x.upside_modest_annual_cents, 0)).toBe(r.summary.total_upside_modest_annual_cents);
     expect(r.groups.reduce((s, x) => s + x.upside_generous_annual_cents, 0)).toBe(r.summary.total_upside_generous_annual_cents);
     expect(r.groups[2].steps[0].num_people).toBe(2);
