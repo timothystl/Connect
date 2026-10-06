@@ -1109,6 +1109,20 @@ function monthSpan(first, last) {
   if (!f || !l) return null;
   return Math.max(1, (Number(l[1]) - Number(f[1])) * 12 + Number(l[2]) - Number(f[2]) + 1);
 }
+// The household/person keys the nudge letters and the group overrides share: "h12" / "p34".
+export function nudgeRecipientKey(linkKind, linkId) {
+  return (linkKind === 'household' ? 'h' : 'p') + linkId;
+}
+// Groups moved by hand: { "h12": "regular", … }. Missing table or bad rows read as no overrides, so a
+// problem here can never stop the report.
+export async function readNudgeGroupOverrides(db) {
+  try {
+    const rows = (await db.prepare('SELECT recipient_key, group_key FROM giving_nudge_group_overrides').all()).results || [];
+    const out = {};
+    for (const r of rows) if (GIVER_GROUPS.some(g => g.key === r.group_key)) out[r.recipient_key] = r.group_key;
+    return out;
+  } catch { return {}; }
+}
 export function classifyGiverGroup({ gifts, monthsGiven, totalCents, firstMonth, lastMonth }, periodsElapsed, { lowFrequencyMax = 3, largeGiftMinAvgCents = LARGE_GIFT_MIN_AVG_CENTS } = {}) {
   const weeks = Math.max(1, Math.min(52, Number(periodsElapsed) || 52));
   const elapsedMonths = Math.max(1, Math.min(12, Math.ceil(weeks * 12 / 52)));
@@ -1175,6 +1189,7 @@ export function computeGivingPlateaus(rows, opts = {}) {
   const peopleCap = opts.peopleCap || 500;
   const impactStatements = opts.impactStatements || [];
   const lowFrequencyMax = opts.lowFrequencyMax || 3;
+  const groupOverrides = opts.groupOverrides || {};
   const elapsedMonths = Math.max(1, Math.min(12, Math.ceil(periodsElapsed * 12 / 52)));
 
   const byPerson = new Map();
@@ -1209,7 +1224,11 @@ export function computeGivingPlateaus(rows, opts = {}) {
     if (weeklyDollars <= 0) continue;
     const weeklyCents = weeklyDollars * 100;
     const cadence = classifyGivingCadence(p.gifts, periodsElapsed);
-    const group = classifyGiverGroup({ gifts: p.gifts, monthsGiven: p.months_given, totalCents: p.total_cents, firstMonth: p.first_month, lastMonth: p.last_month }, periodsElapsed, { lowFrequencyMax });
+    const naturalGroup = classifyGiverGroup({ gifts: p.gifts, monthsGiven: p.months_given, totalCents: p.total_cents, firstMonth: p.first_month, lastMonth: p.last_month }, periodsElapsed, { lowFrequencyMax });
+    // A person's own call outranks the rule: someone moved by hand stays where they were put.
+    const recipientKey = nudgeRecipientKey(p.link_kind, p.link_id);
+    const moved = groupOverrides[recipientKey];
+    const group = moved && moved !== naturalGroup ? moved : naturalGroup;
     // Annualised from the elapsed window so a part-year figure isn't reported as a full year's
     // giving, and taken from the raw total rather than the rounded weekly figure (see
     // cadenceAmountCents). This is the number the giver themselves would recognize.
@@ -1250,7 +1269,10 @@ export function computeGivingPlateaus(rows, opts = {}) {
       gifts: p.gifts,
       months_given: p.months_given,
       first_month: p.first_month, last_month: p.last_month,
+      recipient_key: recipientKey,
       group,
+      // Moved by hand: the group the rule would have chosen, so the page can say so.
+      moved_from: group !== naturalGroup ? naturalGroup : null,
       step_key: standard.step_key, step_label: standard.step_label, step_sort: standard.step_sort,
       // The rhythm this giver actually gives in, and their current level expressed in it — what
       // a letter addressed to them should say instead of the weekly-equivalent figure.

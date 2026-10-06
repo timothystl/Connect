@@ -2393,6 +2393,14 @@ async function _doInitDb(db) {
         SET original_amount_cents = amount,
             amount = CASE WHEN voided_at != '' THEN 0 ELSE MAX(amount - refunded_cents, 0) END
       WHERE original_amount_cents = 0 AND (voided_at != '' OR refunded_cents > 0)`,
+    // (see migrations/0062_giving_nudge_group_overrides.sql): a household or person moved by hand
+    // into a different nudge group, kept until it is set back to automatic.
+    `CREATE TABLE IF NOT EXISTS giving_nudge_group_overrides (
+       recipient_key TEXT PRIMARY KEY,
+       group_key TEXT NOT NULL,
+       set_by TEXT NOT NULL DEFAULT '',
+       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+     )`,
     // (see migrations/0061_giving_test_gifts.sql): Stax test-mode gifts are kept apart from the
     // real ledger (Andrew, 2026-09-28: test on the live system, never count test gifts, and a
     // button to remove them). Nothing that totals or reports giving reads this table.
