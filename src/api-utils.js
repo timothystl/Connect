@@ -674,6 +674,27 @@ export function fundNumericPrefix(name) {
   return m ? m[1] : null;
 }
 
+// Funds that share a leading account code are one fund for giving analysis: "40085 General Fund",
+// "40085 Lent" and "40085 Retirement Distribution" are all the General Fund as far as the ledger and
+// the board are concerned. Picking any one of them in a giving report therefore means all of them.
+// A fund with no numeric code stands alone. Returns the SQL to append to a giving_entries query
+// aliased `ge`, with its bind values; no fund chosen means no restriction.
+export async function expandFundCodeIds(db, fundId) {
+  const id = Number(fundId) || 0;
+  if (!id) return [];
+  const funds = (await db.prepare('SELECT id, name FROM funds').all()).results || [];
+  const chosen = funds.find(f => Number(f.id) === id);
+  const code = chosen ? fundNumericPrefix(chosen.name) : null;
+  if (!code) return [id];
+  const ids = funds.filter(f => fundNumericPrefix(f.name) === code).map(f => Number(f.id));
+  return ids.length ? ids : [id];
+}
+export async function fundCodeScope(db, fundId) {
+  const ids = await expandFundCodeIds(db, fundId);
+  if (!ids.length) return { clause: '', bind: [] };
+  return { clause: ` AND ge.fund_id IN (${ids.map(() => '?').join(',')})`, bind: ids };
+}
+
 // One-time default categories for a set of existing funds, used by the 0033 backfill: every
 // fund sharing the leading numeric code of the fund literally named "General Fund" becomes
 // 'general' (matching what the board report already treated as the General Fund family);
@@ -950,8 +971,7 @@ export function plateauWeeksElapsed(year, now = new Date()) {
 export async function fetchGivingPlateauRows(db, { year, scope, fundId }) {
   const start = year + '-01-01', end = year + '-12-31';
   const effDate = "COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date)";
-  const fundClause = fundId ? ' AND ge.fund_id = ?' : '';
-  const fundBind = fundId ? [fundId] : [];
+  const { clause: fundClause, bind: fundBind } = await fundCodeScope(db, fundId);
   // Same automatic/recurring method set as bucketGivingMethod()'s 'ach' bucket — used only to
   // flag whether a low-frequency giver already gives via some form of autopay.
   const autoMethodClause = "LOWER(ge.method) IN ('ach','online','card','credit','credit card','debit','eft','bank','auto','recurring','paypal','venmo','zelle')";
@@ -973,6 +993,7 @@ export async function fetchGivingPlateauRows(db, { year, scope, fundId }) {
               CASE WHEN ${housed} THEN 'household' ELSE 'person' END AS link_kind,
               SUM(ge.amount) AS total_cents,
               COUNT(*) AS gifts,
+              COUNT(DISTINCT substr(${effDate},1,7)) AS months_given,
               SUM(CASE WHEN ${autoMethodClause} THEN 1 ELSE 0 END) AS auto_gifts
        FROM giving_entries ge
        JOIN giving_batches gb ON gb.id = ge.batch_id
@@ -990,6 +1011,7 @@ export async function fetchGivingPlateauRows(db, { year, scope, fundId }) {
             p.id AS link_id, 'person' AS link_kind,
             SUM(ge.amount) AS total_cents,
             COUNT(*) AS gifts,
+            COUNT(DISTINCT substr(${effDate},1,7)) AS months_given,
             SUM(CASE WHEN ${autoMethodClause} THEN 1 ELSE 0 END) AS auto_gifts
      FROM giving_entries ge
      JOIN giving_batches gb ON gb.id = ge.batch_id
@@ -1038,11 +1060,90 @@ export function cadenceAmountCents(annualCents, periodsPerYear) {
   const per = Math.max(1, Number(periodsPerYear) || 1);
   return Math.round((Number(annualCents) || 0) / per / 100) * 100;
 }
+// ── Giver groups ──────────────────────────────────────────────────────────
+// Every giver is put in one of four groups, and each group has its own goal and its own ask, because
+// "give a bit more" is the wrong thing to say to someone who has never given regularly:
+//   rare       gave a few times at most          → start giving (a standing monthly gift)
+//   irregular  gave several times, no rhythm     → give consistently (a steady monthly gift)
+//   regular    gave in most of the months so far → increase (a step set by what they give now)
+//   large_gift a few gifts, each in the thousands (typically a retirement distribution or stock
+//              transfer) → thanked and offered a modest percentage, never asked to "start giving"
+// Regular is judged on how many DIFFERENT MONTHS they gave in, not on the gift count, so a monthly
+// giver (ten gifts by October) is regular and a weekly giver is too. See classifyGiverGroup.
+export const GIVER_GROUPS = [
+  { key: 'rare',       label: 'Rare givers',       goal: 'Start giving',          ask: 'a standing monthly gift' },
+  { key: 'irregular',  label: 'Irregular givers',  goal: 'Give consistently',     ask: 'a steady monthly gift' },
+  { key: 'regular',    label: 'Regular givers',    goal: 'Increase',              ask: 'a weekly increase' },
+  { key: 'large_gift', label: 'Large annual gifts', goal: 'Thank and invite more', ask: 'a percentage more' },
+];
+// What a regular giver is asked to add each week, by what they give now (weekly equivalent). The
+// middle figure is the band's own step (Standard); Modest and Generous bracket it.
+export const REGULAR_INCREASE_BANDS = [
+  { upToWeeklyDollars: 25,       step: 10, options: [5, 10, 15] },
+  { upToWeeklyDollars: 75,       step: 25, options: [10, 25, 40] },
+  { upToWeeklyDollars: Infinity, step: 45, options: [20, 45, 70] },
+];
+export const LARGE_GIFT_PERCENTS = [5, 10, 15];
+export const LARGE_GIFT_MIN_AVG_CENTS = 100000;
+
+export function regularIncreaseBand(weeklyDollars) {
+  return REGULAR_INCREASE_BANDS.find(b => weeklyDollars < b.upToWeeklyDollars) || REGULAR_INCREASE_BANDS[REGULAR_INCREASE_BANDS.length - 1];
+}
+export function classifyGiverGroup({ gifts, monthsGiven, totalCents }, periodsElapsed, { lowFrequencyMax = 3, largeGiftMinAvgCents = LARGE_GIFT_MIN_AVG_CENTS } = {}) {
+  const weeks = Math.max(1, Math.min(52, Number(periodsElapsed) || 52));
+  const elapsedMonths = Math.max(1, Math.min(12, Math.ceil(weeks * 12 / 52)));
+  const n = Math.max(0, Math.round(Number(gifts) || 0));
+  const months = Math.min(elapsedMonths, Math.max(0, Math.round(Number(monthsGiven) || 0)));
+  if (n > 0 && n <= lowFrequencyMax && (Number(totalCents) || 0) / n >= largeGiftMinAvgCents) return 'large_gift';
+  // Three-quarters of the months so far, and never fewer than three (or every month, early in the year).
+  if (months >= Math.max(Math.min(3, elapsedMonths), Math.ceil(elapsedMonths * 0.75))) return 'regular';
+  if (n <= lowFrequencyMax) return 'rare';
+  return 'irregular';
+}
+
+// The three asks for one giver, each as a change to their ANNUAL giving, so every figure in the
+// report (weekly, monthly, a year) reconciles. Returns [{ label, annual_delta_cents, new_annual_cents,
+// step_key, step_label, step_sort }].
+function groupNudgeSteps(group, weeklyDollars, annualCents) {
+  if (group === 'regular') {
+    const band = regularIncreaseBand(weeklyDollars);
+    return band.options.map((delta, i) => ({
+      label: NUDGE_OPTION_LABELS[i],
+      annual_delta_cents: delta * 100 * 52,
+      new_annual_cents: (weeklyDollars + delta) * 100 * 52,
+      step_key: 'w' + band.step, step_label: `+$${band.step}/wk band`, step_sort: band.step,
+    }));
+  }
+  if (group === 'large_gift') {
+    return LARGE_GIFT_PERCENTS.map((pct, i) => {
+      // Rounded to a clean $100, and never less than $100.
+      const delta = Math.max(10000, Math.round(annualCents * pct / 100 / 10000) * 10000);
+      return {
+        label: NUDGE_OPTION_LABELS[i],
+        annual_delta_cents: delta, new_annual_cents: annualCents + delta,
+        step_key: 'pct', step_label: `+${LARGE_GIFT_PERCENTS[0]}–${LARGE_GIFT_PERCENTS[2]}% of the annual gift`, step_sort: 0,
+      };
+    });
+  }
+  // Rare and irregular: a standing MONTHLY gift, the next three round monthly amounts above what
+  // they have given per month on average, so the ask is always more than they gave and never odd.
+  const monthlyBase = Math.max(1, Math.floor(annualCents / 12 / 100));
+  const opts = computeNudgeOptions(monthlyBase);
+  const standard = opts[1] ? opts[1].target_dollars : 0;
+  return opts.map(o => ({
+    label: o.label,
+    annual_delta_cents: o.target_dollars * 100 * 12 - annualCents,
+    new_annual_cents: o.target_dollars * 100 * 12,
+    step_key: 'm' + standard, step_label: `$${standard}/mo`, step_sort: standard,
+  }));
+}
+
 export function computeGivingPlateaus(rows, opts = {}) {
   const periodsElapsed = Math.max(1, Math.min(52, opts.periodsElapsed || 52));
   const peopleCap = opts.peopleCap || 500;
   const impactStatements = opts.impactStatements || [];
   const lowFrequencyMax = opts.lowFrequencyMax || 3;
+  const elapsedMonths = Math.max(1, Math.min(12, Math.ceil(periodsElapsed * 12 / 52)));
 
   const byPerson = new Map();
   for (const r of rows || []) {
@@ -1050,6 +1151,7 @@ export function computeGivingPlateaus(rows, opts = {}) {
     if (pid == null) continue;
     const cents = Math.round(Number(r.total_cents) || 0);
     if (cents <= 0) continue;
+    const gifts = Math.max(0, Math.round(Number(r.gifts) || 0));
     byPerson.set(pid, {
       id: pid, name: r.name || '',
       // Where a row in this tier should link. Defaults to the person; the
@@ -1057,7 +1159,10 @@ export function computeGivingPlateaus(rows, opts = {}) {
       link_id: r.link_id != null ? r.link_id : pid,
       link_kind: r.link_kind || 'person',
       total_cents: cents,
-      gifts: Math.max(0, Math.round(Number(r.gifts) || 0)),
+      gifts,
+      // How many different calendar months they gave in. A row without it is read as one gift a
+      // month, the most that can be said from a count alone.
+      months_given: r.months_given != null ? Math.max(0, Math.round(Number(r.months_given) || 0)) : Math.min(gifts, elapsedMonths),
       // Gifts recorded under an automatic/recurring method (ACH, card, auto-
       // draft, etc. — see bucketGivingMethod) — used only to flag whether a
       // low-frequency giver is already on some form of autopay.
@@ -1071,36 +1176,36 @@ export function computeGivingPlateaus(rows, opts = {}) {
     if (weeklyDollars <= 0) continue;
     const weeklyCents = weeklyDollars * 100;
     const cadence = classifyGivingCadence(p.gifts, periodsElapsed);
+    const group = classifyGiverGroup({ gifts: p.gifts, monthsGiven: p.months_given, totalCents: p.total_cents }, periodsElapsed, { lowFrequencyMax });
     // Annualised from the elapsed window so a part-year figure isn't reported as a full year's
     // giving, and taken from the raw total rather than the rounded weekly figure (see
     // cadenceAmountCents). This is the number the giver themselves would recognize.
     const annualisedCents = Math.round(p.total_cents * 52 / periodsElapsed);
     const cadenceNowCents = cadenceAmountCents(annualisedCents, cadence.periodsPerYear);
-    const options = computeNudgeOptions(weeklyDollars).map(o => {
-      const deltaCents = o.delta_dollars * 100;
-      const annualDeltaCents = deltaCents * 52;
-      const monthlyDeltaCents = Math.round(deltaCents * 52 / 12);
-      const targetCents = o.target_dollars * 100;
+    const options = groupNudgeSteps(group, weeklyDollars, annualisedCents).map(o => {
+      const annualDeltaCents = o.annual_delta_cents;
+      const monthlyDeltaCents = Math.round(annualDeltaCents / 12);
+      const deltaCents = Math.round(annualDeltaCents / 52);
       // The same option restated in the giver's own rhythm — what the letter actually says. The
-      // delta is the difference of the two ROUNDED cadence figures, not the rounded weekly delta
-      // rescaled, so "from $185 to $215" always reads as exactly +$30 rather than +$29.67. The
-      // annual figure is then rebuilt FROM that delta, so every number in one letter reconciles
-      // against the others — "+$30 a month" and "about $360 over a year" can never disagree.
-      const cadenceTargetCents = cadenceAmountCents(targetCents * 52, cadence.periodsPerYear);
+      // delta is the difference of the two ROUNDED cadence figures, so "from $185 to $215" always
+      // reads as exactly +$30 rather than +$29.67, and the annual figure is rebuilt FROM that delta
+      // so every number in one letter reconciles against the others.
+      const cadenceTargetCents = cadenceAmountCents(o.new_annual_cents, cadence.periodsPerYear);
       const cadenceDeltaCents = cadenceTargetCents - cadenceNowCents;
       return {
         label: o.label,
-        target_cents: targetCents,
+        target_cents: weeklyCents + deltaCents,
         delta_cents: deltaCents,
-        pct_increase: o.pct_increase,
+        pct_increase: Math.round((annualDeltaCents / Math.max(1, annualisedCents)) * 1000) / 10,
         // Always a concrete annual dollar figure — the baseline "impact" —
         // whether or not a custom ministry phrase is configured below.
         annual_delta_cents: annualDeltaCents,
-        new_annual_total_cents: o.target_dollars * 100 * 52,
+        new_annual_total_cents: o.new_annual_cents,
         impact_text: pickImpactPhrase(monthlyDeltaCents, impactStatements),
         cadence_target_cents: cadenceTargetCents,
         cadence_delta_cents: cadenceDeltaCents,
         cadence_annual_delta_cents: cadenceDeltaCents * cadence.periodsPerYear,
+        step_key: o.step_key, step_label: o.step_label, step_sort: o.step_sort,
       };
     });
     const standard = options[1] || options[options.length - 1];
@@ -1110,6 +1215,9 @@ export function computeGivingPlateaus(rows, opts = {}) {
       weekly_cents: weeklyCents,
       total_cents: p.total_cents,
       gifts: p.gifts,
+      months_given: p.months_given,
+      group,
+      step_key: standard.step_key, step_label: standard.step_label, step_sort: standard.step_sort,
       // The rhythm this giver actually gives in, and their current level expressed in it — what
       // a letter addressed to them should say instead of the weekly-equivalent figure.
       cadence: cadence.key,
@@ -1138,7 +1246,54 @@ export function computeGivingPlateaus(rows, opts = {}) {
     .map(([plateau_dollars, n]) => ({ plateau_dollars, n }))
     .sort((a, b) => a.plateau_dollars - b.plateau_dollars);
 
-  // Tiers grouped by the Standard option's target.
+  const lowOf = g => g.options[0] || g.options[g.options.length - 1];
+  const highOf = g => g.options[g.options.length - 1];
+
+  // The report's main view: one block per group, each broken into steps (the band for regular
+  // givers, the monthly amount asked of rare and irregular ones), with the people behind each step.
+  const groups = GIVER_GROUPS.map(def => {
+    const members = givers.filter(g => g.group === def.key);
+    const stepMap = new Map();
+    for (const g of members) {
+      let s = stepMap.get(g.step_key);
+      if (!s) {
+        s = { key: g.step_key, label: g.step_label, sort: g.step_sort, people: [], upside_standard: 0, upside_modest: 0, upside_generous: 0,
+              now_min: Infinity, now_max: 0, sum_now: 0, sum_weekly_inc: 0 };
+        stepMap.set(g.step_key, s);
+      }
+      s.people.push(g);
+      s.upside_standard += g.upside_annual_cents;
+      s.upside_modest += lowOf(g).annual_delta_cents;
+      s.upside_generous += highOf(g).annual_delta_cents;
+      s.now_min = Math.min(s.now_min, g.weekly_cents);
+      s.now_max = Math.max(s.now_max, g.weekly_cents);
+      s.sum_now += g.weekly_cents;
+      s.sum_weekly_inc += g.weekly_increase_cents;
+    }
+    const steps = [...stepMap.values()].sort((a, b) => a.sort - b.sort).map(s => {
+      s.people.sort((a, b) => b.upside_annual_cents - a.upside_annual_cents);
+      return {
+        key: s.key, label: s.label, num_people: s.people.length,
+        now_min_cents: s.now_min === Infinity ? 0 : s.now_min, now_max_cents: s.now_max,
+        avg_now_cents: s.people.length ? Math.round(s.sum_now / s.people.length) : 0,
+        avg_weekly_increase_cents: s.people.length ? Math.round(s.sum_weekly_inc / s.people.length) : 0,
+        upside_modest_annual_cents: s.upside_modest, upside_standard_annual_cents: s.upside_standard, upside_generous_annual_cents: s.upside_generous,
+        people: s.people.slice(0, peopleCap),
+      };
+    });
+    return {
+      key: def.key, label: def.label, goal: def.goal, ask: def.ask,
+      num_people: members.length,
+      total_given_cents: members.reduce((sum, g) => sum + g.total_cents, 0),
+      upside_modest_annual_cents: steps.reduce((sum, s) => sum + s.upside_modest_annual_cents, 0),
+      upside_standard_annual_cents: steps.reduce((sum, s) => sum + s.upside_standard_annual_cents, 0),
+      upside_generous_annual_cents: steps.reduce((sum, s) => sum + s.upside_generous_annual_cents, 0),
+      steps,
+    };
+  });
+
+  // Tiers grouped by the Standard option's target. Kept for the older Giving › Reports screen,
+  // which still reads this shape.
   const tierMap = new Map();
   for (const g of givers) {
     let t = tierMap.get(g.target_cents);
@@ -1151,8 +1306,8 @@ export function computeGivingPlateaus(rows, opts = {}) {
     t.people.push(g);
     t.num_people++;
     t.upside_annual_cents += g.upside_annual_cents;
-    t.upside_modest_annual_cents += (g.options[0] || g.options[g.options.length - 1]).annual_delta_cents;
-    t.upside_generous_annual_cents += (g.options[g.options.length - 1]).annual_delta_cents;
+    t.upside_modest_annual_cents += lowOf(g).annual_delta_cents;
+    t.upside_generous_annual_cents += highOf(g).annual_delta_cents;
     t.plateau_min_cents = Math.min(t.plateau_min_cents, g.weekly_cents);
     t.plateau_max_cents = Math.max(t.plateau_max_cents, g.weekly_cents);
     t.sum_plateau_cents += g.weekly_cents;
@@ -1202,11 +1357,12 @@ export function computeGivingPlateaus(rows, opts = {}) {
       total_upside_modest_annual_cents: tiers.reduce((s, t) => s + t.upside_modest_annual_cents, 0),
       total_upside_generous_annual_cents: tiers.reduce((s, t) => s + t.upside_generous_annual_cents, 0),
     },
+    groups,
     tiers,
     distribution,
     low_frequency_givers_list: lowFrequencyGivers,
-    // The flat per-giver list behind every tier. The report doesn't serialize this (it renders
-    // from `tiers`, and shipping every giver twice would double a 500-person payload) — it exists
+    // The flat per-giver list behind every group. The report doesn't serialize this (it renders
+    // from `groups`, and shipping every giver twice would double a 500-person payload) — it exists
     // for giving/nudges/status, which needs one row per person to address a letter to.
     givers,
   };

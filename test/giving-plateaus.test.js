@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeNudgeOptions, pickImpactPhrase, computeGivingPlateaus } from '../src/api-utils.js';
+import { computeNudgeOptions, pickImpactPhrase, computeGivingPlateaus, classifyGiverGroup, expandFundCodeIds, fundCodeScope } from '../src/api-utils.js';
 
 describe('computeNudgeOptions', () => {
   it('returns fixed, familiar round numbers — not percentage-derived figures', () => {
@@ -75,26 +75,21 @@ function row(person_id, name, totalDollars, gifts, extra) {
 }
 
 describe('computeGivingPlateaus', () => {
-  it('gives every giver a weekly-equivalent = total ÷ 52, regardless of how often they actually gave', () => {
-    // A weekly giver ($50 × 52 = $2,600) and a single December stock/IRA (QCD)
-    // gift of $2,600 both read as the exact same $50/wk level.
-    const weekly = row(1, 'Weekly Wanda', 2600, 52);
-    const oneTime = row(2, 'One-Time Otto', 2600, 1);
+  it('gives every giver the same weekly-equivalent = total ÷ 52, but asks each group for something different', () => {
+    // A weekly giver ($50 × 52 = $2,600) and a single December retirement distribution of $2,600
+    // both read as $50/wk, yet one is asked to increase and the other is thanked.
+    const weekly = row(1, 'Weekly Wanda', 2600, 52, { months_given: 12 });
+    const oneTime = row(2, 'One-Time Otto', 2600, 1, { months_given: 1 });
     const r = computeGivingPlateaus([weekly, oneTime], { periodsElapsed: 52 });
     expect(r.summary.total_givers).toBe(2);
-    const wanda = r.tiers[0].people.find(p => p.name === 'Weekly Wanda');
-    const otto = r.tiers[0].people.find(p => p.name === 'One-Time Otto');
+    const wanda = r.givers.find(p => p.name === 'Weekly Wanda');
+    const otto = r.givers.find(p => p.name === 'One-Time Otto');
     expect(wanda.weekly_cents).toBe(5000);
     expect(otto.weekly_cents).toBe(5000);
-    // Identical nudge treatment — the ANALYSIS is frequency-blind by design. Compared field by
-    // field rather than wholesale because the cadence fields added alongside these are
-    // deliberately NOT frequency-blind; see the assertion below.
-    const analysisFields = o => ({
-      label: o.label, target_cents: o.target_cents, delta_cents: o.delta_cents,
-      pct_increase: o.pct_increase, annual_delta_cents: o.annual_delta_cents,
-      new_annual_total_cents: o.new_annual_total_cents, impact_text: o.impact_text,
-    });
-    expect(wanda.options.map(analysisFields)).toEqual(otto.options.map(analysisFields));
+    expect(wanda.group).toBe('regular');
+    expect(otto.group).toBe('large_gift');
+    expect(wanda.options.map(o => o.delta_cents)).toEqual([1000, 2500, 4000]);
+    expect(otto.options.map(o => o.annual_delta_cents)).toEqual([10000, 30000, 40000]);
   });
 
   it('but states each of them their figure in the rhythm they actually give in', () => {
@@ -117,8 +112,8 @@ describe('computeGivingPlateaus', () => {
     const r = computeGivingPlateaus([oneTime, weekly], { periodsElapsed: 52 });
     expect(r.summary.total_givers).toBe(2); // nobody excluded
     expect(r.summary.low_frequency_givers).toBe(1);
-    const otto = r.tiers[0].people.find(p => p.name === 'Otto');
-    const wanda = r.tiers[0].people.find(p => p.name === 'Wanda');
+    const otto = r.givers.find(p => p.name === 'Otto');
+    const wanda = r.givers.find(p => p.name === 'Wanda');
     expect(otto.low_frequency).toBe(true);
     expect(wanda.low_frequency).toBe(false);
   });
@@ -161,13 +156,13 @@ describe('computeGivingPlateaus', () => {
 
   it('groups givers by their Standard option into tiers', () => {
     const rows = [
-      row(1, 'A', 2600, 52), row(2, 'B', 2600, 52), row(3, 'C', 2600, 52), // $50/wk -> Standard $75
-      row(4, 'D', 4316, 52), row(5, 'E', 4316, 52), // $83/wk -> Standard $125
+      row(1, 'A', 2600, 52), row(2, 'B', 2600, 52), row(3, 'C', 2600, 52), // $50/wk -> Standard $75 (the +$25 band)
+      row(4, 'D', 4316, 52), row(5, 'E', 4316, 52), // $83/wk -> Standard $128 (the +$45 band)
     ];
     const r = computeGivingPlateaus(rows, { periodsElapsed: 52 });
     expect(r.tiers.length).toBe(2);
     const t75 = r.tiers.find(t => t.target_cents === 7500);
-    const t125 = r.tiers.find(t => t.target_cents === 12500);
+    const t125 = r.tiers.find(t => t.target_cents === 12800);
     expect(t75.num_people).toBe(3);
     expect(t125.num_people).toBe(2);
     expect(r.tiers[0].target_cents).toBeLessThan(r.tiers[1].target_cents);
@@ -247,5 +242,77 @@ describe('computeGivingPlateaus', () => {
       expect(computeGivingPlateaus(rows, { periodsElapsed: 52, lowFrequencyMax: 3 }).low_frequency_givers_list.length).toBe(0);
       expect(computeGivingPlateaus(rows, { periodsElapsed: 52, lowFrequencyMax: 5 }).low_frequency_givers_list.length).toBe(1);
     });
+  });
+});
+
+describe('giver groups', () => {
+  const g = (gifts, monthsGiven, totalCents, weeks = 52, opts) => classifyGiverGroup({ gifts, monthsGiven, totalCents }, weeks, opts);
+  it('counts a monthly giver with ten gifts by October as regular, not irregular', () => {
+    expect(g(10, 10, 200000, 40)).toBe('regular');
+  });
+  it('counts a weekly giver as regular', () => expect(g(52, 12, 260000)).toBe('regular'));
+  it('puts someone who gave in only a few months in the rare or irregular group', () => {
+    expect(g(2, 2, 20000)).toBe('rare');
+    expect(g(6, 5, 60000)).toBe('irregular');
+  });
+  it('treats one or two gifts in the thousands as a large annual gift, not a rare giver', () => {
+    expect(g(1, 1, 300000)).toBe('large_gift');
+    expect(g(2, 2, 450000)).toBe('large_gift');
+    expect(g(2, 2, 150000)).toBe('rare');
+    // Many large gifts is just a generous regular giver.
+    expect(g(12, 12, 3600000)).toBe('regular');
+  });
+  it('does not call anyone regular in the first weeks of the year on one month of giving', () => {
+    expect(g(3, 1, 3000, 4)).toBe('regular'); // every month so far
+    expect(g(2, 1, 2000, 17)).toBe('rare');   // five months in, only one gave
+  });
+});
+
+describe('group asks', () => {
+  const one = (total, gifts, months, extra) => computeGivingPlateaus([row(1, 'X', total, gifts, { months_given: months })], Object.assign({ periodsElapsed: 52 }, extra)).givers[0];
+  it('sets a regular giver\'s increase by what they give now: +$10, +$25 or +$45 a week', () => {
+    expect(one(520, 52, 12).options.map(o => o.delta_cents / 100)).toEqual([5, 10, 15]);      // $10/wk
+    expect(one(2600, 52, 12).options.map(o => o.delta_cents / 100)).toEqual([10, 25, 40]);    // $50/wk
+    expect(one(7800, 52, 12).options.map(o => o.delta_cents / 100)).toEqual([20, 45, 70]);    // $150/wk
+    expect(one(520, 52, 12).step_label).toBe('+$10/wk band');
+  });
+  it('asks a rare or irregular giver for a standing monthly gift above what they give per month', () => {
+    const rare = one(300, 2, 2); // $300 a year = $25 a month
+    expect(rare.group).toBe('rare');
+    expect(rare.options.map(o => o.new_annual_total_cents / 1200)).toEqual([30, 40, 50]);
+    expect(rare.options.map(o => o.annual_delta_cents)).toEqual([6000, 18000, 30000]);
+    const irregular = one(600, 6, 5);
+    expect(irregular.group).toBe('irregular');
+    irregular.options.forEach(o => expect(o.annual_delta_cents).toBeGreaterThan(0));
+  });
+  it('offers a large annual giver a percentage rounded to $100, never a weekly step', () => {
+    const big = one(3000, 1, 1);
+    expect(big.group).toBe('large_gift');
+    expect(big.options.map(o => o.annual_delta_cents)).toEqual([20000, 30000, 50000]);
+    expect(one(1200, 1, 1).options[0].annual_delta_cents).toBe(10000);
+  });
+  it('builds groups with steps, and the group totals add up to the report totals', () => {
+    const rows = [row(1, 'A', 2600, 52, { months_given: 12 }), row(2, 'B', 2600, 52, { months_given: 12 }), row(3, 'C', 300, 2, { months_given: 2 }), row(4, 'D', 5000, 1, { months_given: 1 })];
+    const r = computeGivingPlateaus(rows, { periodsElapsed: 52 });
+    expect(r.groups.map(x => [x.key, x.num_people])).toEqual([['rare', 1], ['irregular', 0], ['regular', 2], ['large_gift', 1]]);
+    expect(r.groups.reduce((s, x) => s + x.upside_modest_annual_cents, 0)).toBe(r.summary.total_upside_modest_annual_cents);
+    expect(r.groups.reduce((s, x) => s + x.upside_generous_annual_cents, 0)).toBe(r.summary.total_upside_generous_annual_cents);
+    expect(r.groups[2].steps[0].num_people).toBe(2);
+  });
+});
+
+describe('fund code rule', () => {
+  const db = { prepare: () => ({ all: async () => ({ results: [
+    { id: 1, name: '40085 General Fund' }, { id: 2, name: '40085 Lent' }, { id: 3, name: '40085 Retirement Distribution' },
+    { id: 4, name: '40120 Tuition Aid' }, { id: 5, name: 'Memorial' },
+  ] }) }) };
+  it('treats every fund sharing a leading account code as one fund', async () => {
+    expect(await expandFundCodeIds(db, 2)).toEqual([1, 2, 3]);
+    expect((await fundCodeScope(db, 3)).clause).toBe(' AND ge.fund_id IN (?,?,?)');
+  });
+  it('leaves a fund with no code on its own, and no fund means no restriction', async () => {
+    expect(await expandFundCodeIds(db, 5)).toEqual([5]);
+    expect(await expandFundCodeIds(db, 4)).toEqual([4]);
+    expect(await fundCodeScope(db, 0)).toEqual({ clause: '', bind: [] });
   });
 });
