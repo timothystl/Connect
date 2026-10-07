@@ -1,6 +1,6 @@
 // ── Giving Entries, Batches, Quick Entry API handlers ──────────────────────
 import { json, getAuthInfo } from './auth.js';
-import { readNudgeGroupOverrides, isoWeekKey, LETTER_TYPES, mergeLetterRecipients, computeReceiptQueue, computeGivingPlateaus, fetchGivingPlateauRows, plateauWeeksElapsed, computeDepositTotals, batchDepositStatus, batchDepositStatusFromCounts } from './api-utils.js';
+import { readRegularBands, DEFAULT_REGULAR_BANDS, readNudgeGroupOverrides, isoWeekKey, LETTER_TYPES, mergeLetterRecipients, computeReceiptQueue, computeGivingPlateaus, fetchGivingPlateauRows, plateauWeeksElapsed, computeDepositTotals, batchDepositStatus, batchDepositStatusFromCounts } from './api-utils.js';
 import { ensureGivingYearRollups } from './giving-rollups.js';
 import { readOfferingsSummary } from './giving-deposits.js';
 import { applyGiftReduction } from './giving-gift-corrections.js';
@@ -468,7 +468,7 @@ if (seg === 'giving/nudges/status' && method === 'GET') {
     if (impRow?.value) impactStatements = JSON.parse(impRow.value);
   } catch {}
   const weeksElapsed = plateauWeeksElapsed(year);
-  const analysis = computeGivingPlateaus(rows, { periodsElapsed: weeksElapsed, impactStatements, lowFrequencyMax, groupOverrides: await readNudgeGroupOverrides(db) });
+  const analysis = computeGivingPlateaus(rows, { periodsElapsed: weeksElapsed, impactStatements, lowFrequencyMax, groupOverrides: await readNudgeGroupOverrides(db), regularBands: await readRegularBands(db) });
   const givers = analysis.givers || [];
 
   // Contact details, in two bulk lookups rather than one per giver. A household writes to the

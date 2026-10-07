@@ -74,7 +74,7 @@ export async function handleContractsServiceApi(req, env, path) {
 
   // Giving analytics (Finance v3): aggregate for any Giving access including council's anonymous
   // one; named statements/nudges need Giving view -- see api-giving-analytics-contracts.js.
-  if (path.startsWith('/api/contracts/giving-analytics-') || path === '/api/contracts/giving-followup-write-v1' || path === '/api/contracts/giving-nudge-group-write-v1' || path === '/api/contracts/giving-fund-passthrough-write-v1' || path === '/api/contracts/giving-fund-cleanup-v1' || path === '/api/contracts/giving-fund-cleanup-write-v1' || path === '/api/contracts/giving-board-v1' || path === '/api/contracts/giving-board-email-v1') {
+  if (path.startsWith('/api/contracts/giving-analytics-') || path === '/api/contracts/giving-followup-write-v1' || path === '/api/contracts/giving-nudge-group-write-v1' || path === '/api/contracts/giving-nudge-bands-write-v1' || path === '/api/contracts/giving-fund-passthrough-write-v1' || path === '/api/contracts/giving-fund-cleanup-v1' || path === '/api/contracts/giving-fund-cleanup-write-v1' || path === '/api/contracts/giving-board-v1' || path === '/api/contracts/giving-board-email-v1') {
     const analyticsResponse = await handleGivingAnalyticsContracts(req, env, path);
     if (analyticsResponse) return analyticsResponse;
   }

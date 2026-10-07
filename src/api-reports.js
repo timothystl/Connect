@@ -1,7 +1,7 @@
 // ── Reports, Engagement, Prayer API handlers ─────────────────────────────────
 import { json } from './auth.js';
 import { makeBreezeClient } from './breeze.js';
-import { fetchNonGivers, readNudgeGroupOverrides, fundCodeScope, isoWeekKey, bucketGivingMethod, projectYearEnd, sundaysElapsedThroughDate, sundaysInYear, nthSundayOfYear, periodAsOfDate, monthElapsedFraction, spreadBudgetYtd, computeConcentration, computeGivingPlateaus, fetchGivingPlateauRows, plateauWeeksElapsed, computeGivingBands, computeGivingDistribution, inflationAdjustCents, CPI_U_ANNUAL, FUND_CATEGORIES, normalizeFundCategory, resolveGeneralFundIds, resolveGeneralFundBudget, buildBoardCategoryBlock, SACRAMENT_YES, csvRow, safeFilenamePart, sameDayLastYear, yearElapsedShare} from './api-utils.js';
+import { readRegularBands, DEFAULT_REGULAR_BANDS, fetchNonGivers, readNudgeGroupOverrides, fundCodeScope, isoWeekKey, bucketGivingMethod, projectYearEnd, sundaysElapsedThroughDate, sundaysInYear, nthSundayOfYear, periodAsOfDate, monthElapsedFraction, spreadBudgetYtd, computeConcentration, computeGivingPlateaus, fetchGivingPlateauRows, plateauWeeksElapsed, computeGivingBands, computeGivingDistribution, inflationAdjustCents, CPI_U_ANNUAL, FUND_CATEGORIES, normalizeFundCategory, resolveGeneralFundIds, resolveGeneralFundBudget, buildBoardCategoryBlock, SACRAMENT_YES, csvRow, safeFilenamePart, sameDayLastYear, yearElapsedShare} from './api-utils.js';
 import { resolveChurchYearPrecedence, readCashPolicy } from './api-finance.js';
 import { loadGivingYearTrendRows } from './giving-rollups.js';
 
@@ -714,11 +714,12 @@ if (seg === 'reports/giving-plateaus' && method === 'GET') {
 
   // `givers` is the flat per-giver list the nudge letters are addressed from; this report renders
   // from `tiers` and doesn't need it, and shipping every giver twice would double the payload.
-  const { givers, ...result } = computeGivingPlateaus(rows, { periodsElapsed: weeksElapsed, impactStatements, lowFrequencyMax, groupOverrides: await readNudgeGroupOverrides(db) });
+  const { givers, ...result } = computeGivingPlateaus(rows, { periodsElapsed: weeksElapsed, impactStatements, lowFrequencyMax, groupOverrides: await readNudgeGroupOverrides(db), regularBands: await readRegularBands(db) });
   return json({
     year, scope, fund_id: fundId || null, partial: year === now.getUTCFullYear(), low_frequency_max: lowFrequencyMax,
     excluded_organizations: { count: orgExclRow?.n || 0, total_cents: orgExclRow?.total_cents || 0 },
     non_givers: await fetchNonGivers(db, { year, scope, fundId }),
+    regular_bands: await readRegularBands(db), regular_bands_default: DEFAULT_REGULAR_BANDS,
     ...result,
   });
 }

@@ -1199,19 +1199,60 @@ export const GIVER_GROUPS = [
   { key: 'regular',    label: 'Regular givers',    goal: 'Increase',              ask: 'a weekly increase' },
   { key: 'large_gift', label: 'Large annual gifts', goal: 'Thank and invite more', ask: 'a percentage more' },
 ];
-// What a regular giver is asked to add each week, by what they give now (weekly equivalent). The
-// middle figure is the band's own step (Standard); Modest and Generous bracket it.
-export const REGULAR_INCREASE_BANDS = [
-  { upToWeeklyDollars: 25,       step: 10, options: [5, 10, 15] },
-  { upToWeeklyDollars: 75,       step: 25, options: [10, 25, 40] },
-  { upToWeeklyDollars: Infinity, step: 45, options: [20, 45, 70] },
+// What a regular giver is asked to add each week, by what they give now (weekly equivalent).
+// Each band starts at `from` dollars a week and runs to the next band; `step` is the increase asked
+// of everyone in it (the Standard option). Modest and Generous bracket it, 40% and 160% of the step
+// to the nearest $5 (so +$10 reads 5 / 10 / 15, +$25 reads 10 / 25 / 40, +$45 reads 20 / 45 / 70).
+// Staff edit these on Nudges and next steps; the saved set is one JSON list in giving_settings, read
+// by the report and the nudge letters alike so they can never disagree.
+export const DEFAULT_REGULAR_BANDS = [
+  { from: 0, step: 10 }, { from: 25, step: 25 }, { from: 75, step: 45 }, { from: 150, step: 50 }, { from: 300, step: 75 },
 ];
+const REGULAR_BANDS_KEY = 'giving_nudge_regular_bands_json';
+// Cleans an edited list: whole dollars, a band at $0, in order, no duplicates, at most 12.
+export function normalizeRegularBands(list) {
+  const seen = new Set();
+  const bands = (Array.isArray(list) ? list : [])
+    .map(b => ({ from: Math.round(Number(b?.from)), step: Math.round(Number(b?.step)) }))
+    .filter(b => Number.isFinite(b.from) && b.from >= 0 && b.from <= 100000 && Number.isFinite(b.step) && b.step >= 1 && b.step <= 5000)
+    .sort((x, y) => x.from - y.from)
+    .filter(b => (seen.has(b.from) ? false : (seen.add(b.from), true)))
+    .slice(0, 12);
+  if (!bands.length) return null;
+  if (bands[0].from > 0) bands.unshift({ from: 0, step: bands[0].step });
+  return bands;
+}
+export function regularBandOptions(step) {
+  const near5 = x => Math.round(x / 5) * 5;
+  return [Math.min(step, Math.max(5, near5(step * 0.4))), step, Math.max(step, near5(step * 1.6))];
+}
+export function findRegularBand(weeklyDollars, bands = DEFAULT_REGULAR_BANDS) {
+  let i = 0;
+  for (let k = 0; k < bands.length; k++) if (weeklyDollars >= bands[k].from) i = k;
+  const next = bands[i + 1];
+  return { from: bands[i].from, to: next ? next.from - 1 : null, step: bands[i].step, options: regularBandOptions(bands[i].step) };
+}
+export async function readRegularBands(db) {
+  try {
+    const row = await db.prepare(`SELECT value FROM giving_settings WHERE key='${REGULAR_BANDS_KEY}'`).first();
+    return (row?.value && normalizeRegularBands(JSON.parse(row.value))) || DEFAULT_REGULAR_BANDS;
+  } catch { return DEFAULT_REGULAR_BANDS; }
+}
+// A list saves those bands; null puts the defaults back. Returns the bands now in force.
+export async function writeRegularBands(db, list) {
+  if (list == null) {
+    await db.prepare('DELETE FROM giving_settings WHERE key=?').bind(REGULAR_BANDS_KEY).run();
+    return DEFAULT_REGULAR_BANDS;
+  }
+  const bands = normalizeRegularBands(list);
+  if (!bands) return null;
+  await db.prepare(`INSERT INTO giving_settings(key,value) VALUES('${REGULAR_BANDS_KEY}',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`)
+    .bind(JSON.stringify(bands)).run();
+  return bands;
+}
 export const LARGE_GIFT_PERCENTS = [5, 10, 15];
 export const LARGE_GIFT_MIN_AVG_CENTS = 100000;
 
-export function regularIncreaseBand(weeklyDollars) {
-  return REGULAR_INCREASE_BANDS.find(b => weeklyDollars < b.upToWeeklyDollars) || REGULAR_INCREASE_BANDS[REGULAR_INCREASE_BANDS.length - 1];
-}
 // Calendar months from `first` through `last` inclusive, both "YYYY-MM". Null when either is missing.
 function monthSpan(first, last) {
   const m = /^(\d{4})-(\d{2})$/;
@@ -1249,14 +1290,15 @@ export function classifyGiverGroup({ gifts, monthsGiven, totalCents, firstMonth,
 // The three asks for one giver, each as a change to their ANNUAL giving, so every figure in the
 // report (weekly, monthly, a year) reconciles. Returns [{ label, annual_delta_cents, new_annual_cents,
 // step_key, step_label, step_sort }].
-function groupNudgeSteps(group, weeklyDollars, annualCents, totalCents = 0, gifts = 1) {
+function groupNudgeSteps(group, weeklyDollars, annualCents, totalCents = 0, gifts = 1, regularBands = DEFAULT_REGULAR_BANDS) {
   if (group === 'regular') {
-    const band = regularIncreaseBand(weeklyDollars);
+    const band = findRegularBand(weeklyDollars, regularBands);
+    const range = band.to == null ? `$${band.from}+/wk` : `$${band.from}–$${band.to}/wk`;
     return band.options.map((delta, i) => ({
       label: NUDGE_OPTION_LABELS[i],
       annual_delta_cents: delta * 100 * 52,
       new_annual_cents: (weeklyDollars + delta) * 100 * 52,
-      step_key: 'w' + band.step, step_label: `+$${band.step}/wk band`, step_sort: band.step,
+      step_key: 'w' + band.from, step_label: `${range}: +$${band.step}`, step_sort: band.from,
     }));
   }
   if (group === 'large_gift') {
@@ -1300,6 +1342,7 @@ export function computeGivingPlateaus(rows, opts = {}) {
   const impactStatements = opts.impactStatements || [];
   const lowFrequencyMax = opts.lowFrequencyMax || 3;
   const groupOverrides = opts.groupOverrides || {};
+  const regularBands = opts.regularBands || DEFAULT_REGULAR_BANDS;
   const elapsedMonths = Math.max(1, Math.min(12, Math.ceil(periodsElapsed * 12 / 52)));
 
   const byPerson = new Map();
@@ -1344,7 +1387,7 @@ export function computeGivingPlateaus(rows, opts = {}) {
     // cadenceAmountCents). This is the number the giver themselves would recognize.
     const annualisedCents = Math.round(p.total_cents * 52 / periodsElapsed);
     const cadenceNowCents = cadenceAmountCents(annualisedCents, cadence.periodsPerYear);
-    const options = groupNudgeSteps(group, weeklyDollars, annualisedCents, p.total_cents, p.gifts).map(o => {
+    const options = groupNudgeSteps(group, weeklyDollars, annualisedCents, p.total_cents, p.gifts, regularBands).map(o => {
       const annualDeltaCents = o.annual_delta_cents;
       const monthlyDeltaCents = Math.round(annualDeltaCents / 12);
       const deltaCents = Math.round(annualDeltaCents / 52);
