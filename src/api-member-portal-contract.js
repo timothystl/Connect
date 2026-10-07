@@ -7,6 +7,7 @@
 //                          { op: 'verify_code',  email, code }
 //                          { op: 'giving',       email, year? }
 //                          { op: 'statement',    email, year }
+//                          { op: 'serving',      email }
 //
 // Who may call: only the launcher Worker, holding MEMBER_PORTAL_CONTRACT_API_KEY (a secret separate
 // from Finance's). That key proves the call came from the launcher; the launcher only asks about an
@@ -15,7 +16,7 @@
 // Identity is the mailbox: every active person record carrying that email address (a couple who share
 // one address see their gifts together). A code is never revealed to the caller; request_code answers
 // the same way whether or not the address is on file, so the form cannot be used to look people up.
-import { json, timingSafeEqual } from './auth.js';
+import { json, timingSafeEqual, authCookieHeader, isPhoneUserAgent } from './auth.js';
 import { sendBrevoTransactionalEmail } from './api-emails.js';
 import { readLetterConfig, readStatement } from './api-giving-letters-contract.js';
 
@@ -200,6 +201,106 @@ async function statement(env, body) {
   });
 }
 
+
+// ── Where this person is scheduled and signed up to serve ───────────────────────────────────────
+// The worship Scheduler stores each month's Sunday rows in scheduler_data 'ws_schedule_v2' (roles filled by the
+// Scheduler's own volunteer ids from 'ws_people'); confirmations live in scheduler_confirmations. Those ids
+// are not people ids, so a mailbox is matched to them by email and by the migration link on scheduler_volunteers.
+const PER_SERVICE_ROLES = ['Elder', 'Acolyte', 'PowerPoint', 'Lector', 'Liturgist'];
+const SHARED_ROLES = ['Preacher', 'Childrens Message'];
+const SERVICE_LABELS = { '8am': '8:00 AM', '10:45am': '10:45 AM' };
+
+const chicagoToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+const parseJson = (text, fallback) => { try { const v = JSON.parse(text); return v ?? fallback; } catch { return fallback; } };
+
+async function volunteerIdsFor(db, email, people) {
+  const ids = new Set(people.map((p) => String(p.id)));
+  const marks = people.map(() => '?').join(',');
+  const linked = (await db.prepare(
+    `SELECT migrated_from_legacy_id AS legacy FROM scheduler_volunteers WHERE person_id IN (${marks})`
+  ).bind(...people.map((p) => p.id)).all().catch(() => ({ results: [] }))).results || [];
+  for (const row of linked) if (row.legacy) ids.add(String(row.legacy));
+  const wsRow = await db.prepare(`SELECT value FROM scheduler_data WHERE key='ws_people'`).first().catch(() => null);
+  const legacy = parseJson(wsRow?.value, []);
+  for (const lp of Array.isArray(legacy) ? legacy : []) {
+    if (!lp || lp.id == null) continue;
+    const emails = [lp.email, lp.notifyEmail, lp.reminderEmail].map((v) => String(v || '').trim().toLowerCase());
+    if (emails.includes(email)) ids.add(String(lp.id));
+  }
+  return ids;
+}
+
+function scheduledFor(months, ids, confirmations, today) {
+  const out = [];
+  const mine = (v) => v != null && ids.has(String(v));
+  const status = (date, role, svc) => confirmations[`${date}|${role}|${svc}`] || 'pending';
+  for (const month of Object.values(months || {})) {
+    for (const row of Array.isArray(month?.rows) ? month.rows : []) {
+      const date = row?.dateISO;
+      if (!date || date < today) continue;
+      if (row.type === 'special') {
+        for (const svc of Array.isArray(row.services) ? row.services : []) {
+          const key = svc.time || 'shared';
+          for (const role of Array.isArray(svc.roles) ? svc.roles : []) {
+            if (mine(svc.assignments?.[role])) out.push({ date, what: row.name || 'Special service', service: svc.time || '', role, status: status(date, role, key) });
+          }
+        }
+        continue;
+      }
+      const assigned = row.assignments && typeof row.assignments === 'object' ? row.assignments : {};
+      for (const role of PER_SERVICE_ROLES) {
+        for (const svc of ['8am', '10:45am']) {
+          if (mine(assigned[role]?.[svc])) out.push({ date, what: row.label || 'Sunday worship', service: SERVICE_LABELS[svc], role, status: status(date, role, svc) });
+        }
+      }
+      for (const role of SHARED_ROLES) {
+        if (mine(assigned[role]?.shared)) out.push({ date, what: row.label || 'Sunday worship', service: 'All services', role, status: status(date, role, 'shared') });
+      }
+    }
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date) || a.service.localeCompare(b.service));
+}
+
+async function signupsFor(db, email, today) {
+  const rows = (await db.prepare(
+    `SELECT s.ministry, s.roles, s.service, s.sundays, s.status, e.name AS event_name, e.event_date
+     FROM signups s LEFT JOIN serve_events e ON e.id = s.event_id
+     WHERE LOWER(TRIM(s.email)) = ? AND NOT (s.ministry = 'worship' AND (s.event_id IS NULL OR s.event_id = 0))
+       AND COALESCE(s.status, 'new') != 'declined'
+     ORDER BY COALESCE(e.event_date, ''), s.created_at DESC LIMIT 100`
+  ).bind(email).all().catch(() => ({ results: [] }))).results || [];
+  return rows
+    .filter((r) => !r.event_date || r.event_date >= today)
+    .map((r) => ({
+      what: r.event_name || r.ministry || 'Ministry',
+      date: r.event_date || '',
+      roles: parseJson(r.roles, []).filter((x) => typeof x === 'string').slice(0, 10),
+      status: r.status || 'new',
+    }));
+}
+
+async function serving(env, body) {
+  const email = normalizeEmail(body.email);
+  if (!validEmail(email)) return json({ error: 'invalid_email' }, 400);
+  const people = await peopleForEmail(env.DB, email);
+  if (!people.length) return json({ error: 'not_found' }, 404);
+  const today = chicagoToday();
+  const [ids, scheduleRow, confRows, signups] = await Promise.all([
+    volunteerIdsFor(env.DB, email, people),
+    env.DB.prepare(`SELECT value FROM scheduler_data WHERE key='ws_schedule_v2'`).first().catch(() => null),
+    env.DB.prepare(`SELECT date_iso, role, svc, status FROM scheduler_confirmations WHERE date_iso >= ?`).bind(today).all().catch(() => ({ results: [] })),
+    signupsFor(env.DB, email, today),
+  ]);
+  const confirmations = {};
+  for (const r of confRows.results || []) confirmations[`${r.date_iso}|${r.role}|${r.svc}`] = r.status;
+  return json({
+    contract: 'connect.member-portal-serving.v1',
+    first_name: people[0].first_name,
+    scheduled: scheduledFor(parseJson(scheduleRow?.value, {}), ids, confirmations, today).slice(0, 60),
+    signups,
+  });
+}
+
 export async function handleMemberPortalContracts(req, env, path) {
   if (path !== '/api/contracts/member-portal-v1') return null;
   const expectedKey = env.MEMBER_PORTAL_CONTRACT_API_KEY || '';
@@ -213,6 +314,83 @@ export async function handleMemberPortalContracts(req, env, path) {
     case 'verify_code': return verifyCode(env, body);
     case 'giving': return giving(env, body);
     case 'statement': return statement(env, body);
+    case 'serving': return serving(env, body);
     default: return json({ error: 'Unknown op' }, 400);
   }
+}
+
+// ── Opening Connect from the member app without a second sign-in ───────────────────────────────
+// The launcher signs a short-lived link for a member who has already proved their email address. Connect checks
+// it with the same shared secret, spends it once, and signs that person in as a MEMBER. It never signs anyone in
+// as staff or an administrator: those roles keep their own sign-in.
+const SSO_LINK_SECONDS = 90;
+
+function fromB64url(part) {
+  const padded = String(part).replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(String(part).length / 4) * 4, '=');
+  return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+}
+
+async function ssoSignature(key, payload) {
+  const hmac = await crypto.subtle.importKey('raw', new TextEncoder().encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', hmac, new TextEncoder().encode(`member-sso|${payload}`)));
+  return btoa(String.fromCharCode(...sig)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// Returns the verified, not-yet-spent email in the link, or null.
+export async function acceptMemberSsoLink(env, token) {
+  const key = env.MEMBER_PORTAL_CONTRACT_API_KEY || '';
+  const [payload, signature, extra] = String(token || '').split('.');
+  if (!key || !env.KV || !payload || !signature || extra !== undefined) return null;
+  if (!(await timingSafeEqual(signature, await ssoSignature(key, payload)))) return null;
+  let claims;
+  try { claims = JSON.parse(new TextDecoder().decode(fromB64url(payload))); } catch { return null; }
+  const email = normalizeEmail(claims?.e);
+  const now = Math.floor(Date.now() / 1000);
+  if (!validEmail(email) || typeof claims.exp !== 'number' || claims.exp < now || claims.exp > now + SSO_LINK_SECONDS + 30) return null;
+  if (typeof claims.n !== 'string' || !/^[A-Za-z0-9_-]{16,64}$/.test(claims.n)) return null;
+  const spent = `mp:sso:${claims.n}`;
+  if (await env.KV.get(spent)) return null;
+  await env.KV.put(spent, '1', { expirationTtl: 300 });
+  return email;
+}
+
+// The member account for this mailbox, created on first use for active members only. Staff, council, and
+// administrator accounts are never touched or signed in here.
+export async function memberAccountFor(db, email) {
+  const found = await peopleForEmail(db, email);
+  if (!found.length) return null;
+  const person = await db.prepare(`SELECT id, first_name, last_name, member_type FROM people WHERE id = ?`).bind(found[0].id).first();
+  if (!person) return null;
+  const existing = await db.prepare(
+    `SELECT id, username, role, active FROM app_users WHERE people_id = ? OR LOWER(username) = ? OR LOWER(email) = ? LIMIT 1`
+  ).bind(person.id, email, email).first();
+  // A session cookie can only carry letters, digits, "_" and "-" in the username (see authCookieHeader), so a member
+  // account gets a plain name. An account invited under an email address is renamed once, on first use here.
+  const safeName = `member-${person.id}`;
+  if (existing) {
+    if (existing.role !== 'member' || !existing.active) return null;
+    if (/^[A-Za-z0-9_-]+$/.test(existing.username)) return { username: existing.username };
+    const taken = await db.prepare(`SELECT 1 AS n FROM app_users WHERE LOWER(username) = ? AND id != ?`).bind(safeName, existing.id).first();
+    if (taken) return null;
+    await db.prepare(`UPDATE app_users SET username = ? WHERE id = ?`).bind(safeName, existing.id).run();
+    return { username: safeName };
+  }
+  if (String(person.member_type || '').toLowerCase() !== 'member') return null;
+  // No password: this account can only be entered through the member app (a person can still set one by invitation).
+  const unusable = `disabled:${crypto.randomUUID()}`;
+  await db.prepare(
+    `INSERT INTO app_users (username, password_hash, display_name, email, role, people_id, active) VALUES (?,?,?,?,'member',?,1)`
+  ).bind(safeName, unusable, `${person.first_name} ${person.last_name}`.trim(), email, person.id).run();
+  return { username: safeName };
+}
+
+export async function handleMemberSso(req, env, url) {
+  const home = Response.redirect(`${url.origin}/`, 302);
+  if (req.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+  const email = await acceptMemberSsoLink(env, url.searchParams.get('t'));
+  if (!email) return home;
+  const account = await memberAccountFor(env.DB, email);
+  if (!account) return home;
+  const cookie = await authCookieHeader(env, 'member', account.username, isPhoneUserAgent(req));
+  return new Response(null, { status: 302, headers: { Location: `${url.origin}/`, 'Set-Cookie': cookie, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
 }

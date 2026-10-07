@@ -214,3 +214,128 @@ describe('giving and statements', () => {
     expect((await call(env, { op: 'statement', email: 'm@example.com', year: 'abc' })).status).toBe(400);
   });
 });
+
+// ── Serving list ────────────────────────────────────────────────────────────────────────────────
+const dayFromNow = (n) => new Date(Date.now() + n * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+
+function setBlob(key, value) {
+  db._raw.prepare(`INSERT OR REPLACE INTO scheduler_data (key, value) VALUES (?, ?)`).run(key, JSON.stringify(value));
+}
+
+describe('serving list', () => {
+  it('lists upcoming scheduled roles for the person, matched by email, with confirmation status', async () => {
+    addPerson('Margaret', 'Hale', 'm@example.com');
+    const soon = dayFromNow(7); const past = dayFromNow(-7);
+    setBlob('ws_people', [
+      { id: 'w1', name: 'Margaret Hale', email: 'M@Example.com' },
+      { id: 'w2', name: 'Someone Else', email: 'else@example.com' },
+    ]);
+    setBlob('ws_schedule_v2', { month: { rows: [
+      { dateISO: soon, label: '3rd Sunday', assignments: { Lector: { '8am': 'w1', '10:45am': 'w2' }, Preacher: { shared: 'w2' }, Acolyte: { '10:45am': 'w1' } } },
+      { dateISO: past, label: 'Old', assignments: { Lector: { '8am': 'w1' } } },
+      { dateISO: dayFromNow(14), type: 'special', name: 'Christmas Eve', services: [{ time: '7:00 PM', roles: ['Lector'], assignments: { Lector: 'w1' } }] },
+    ] } });
+    db._raw.prepare(`INSERT INTO scheduler_confirmations (date_iso, role, svc, status) VALUES (?, 'Lector', '8am', 'confirmed')`).run(soon);
+
+    const res = await (await call(env, { op: 'serving', email: 'm@example.com' })).json();
+    expect(res.first_name).toBe('Margaret');
+    expect(res.scheduled).toEqual([
+      { date: soon, what: '3rd Sunday', service: '10:45 AM', role: 'Acolyte', status: 'pending' },
+      { date: soon, what: '3rd Sunday', service: '8:00 AM', role: 'Lector', status: 'confirmed' },
+      { date: dayFromNow(14), what: 'Christmas Eve', service: '7:00 PM', role: 'Lector', status: 'pending' },
+    ]);
+  });
+
+  it('matches through the migration link when the schedule still uses the old volunteer id', async () => {
+    const id = addPerson('Margaret', 'Hale', 'm@example.com');
+    db._raw.prepare(`INSERT INTO scheduler_volunteers (person_id, migrated_from_legacy_id) VALUES (?, 'legacy-7')`).run(id);
+    const soon = dayFromNow(3);
+    setBlob('ws_schedule_v2', { month: { rows: [{ dateISO: soon, assignments: { Elder: { '8am': 'legacy-7' } } }] } });
+    const res = await (await call(env, { op: 'serving', email: 'm@example.com' })).json();
+    expect(res.scheduled.map((s) => s.role)).toEqual(['Elder']);
+  });
+
+  it('lists event and ministry sign-ups, not declined or past ones, and never someone else’s', async () => {
+    addPerson('Margaret', 'Hale', 'm@example.com');
+    const evt = Number(db._raw.prepare(`INSERT INTO serve_events (name, event_date) VALUES ('Christmas Market', ?)`).run(dayFromNow(30)).lastInsertRowid);
+    const old = Number(db._raw.prepare(`INSERT INTO serve_events (name, event_date) VALUES ('Old Event', ?)`).run(dayFromNow(-30)).lastInsertRowid);
+    const add = (event, email, status, ministry = 'events') => db._raw.prepare(
+      `INSERT INTO signups (event_id, ministry, name, email, roles, status) VALUES (?,?,?,?,?,?)`).run(event, ministry, 'N', email, '["Baking"]', status);
+    add(evt, 'M@example.com', 'confirmed'); add(evt, 'm@example.com', 'declined'); add(old, 'm@example.com', 'new'); add(evt, 'other@example.com', 'new');
+    add(null, 'm@example.com', 'new', 'worship'); // a pending worship interest form, not a place they serve
+    const res = await (await call(env, { op: 'serving', email: 'm@example.com' })).json();
+    expect(res.signups).toEqual([{ what: 'Christmas Market', date: dayFromNow(30), roles: ['Baking'], status: 'confirmed' }]);
+  });
+
+  it('answers not_found for an unknown address', async () => {
+    expect((await call(env, { op: 'serving', email: 'ghost@example.com' })).status).toBe(404);
+  });
+});
+
+// ── Opening Connect from the member app ─────────────────────────────────────────────────────────
+import { handleMemberSso, acceptMemberSsoLink } from '../src/api-member-portal-contract.js';
+import { getAuthInfo } from '../src/auth.js';
+
+async function ssoToken(email, { key = KEY, expIn = 60, nonce = `n${Math.random().toString(36).slice(2)}abcdefghijkl` } = {}) {
+  const payload = Buffer.from(JSON.stringify({ e: email, exp: Math.floor(Date.now() / 1000) + expIn, n: nonce })).toString('base64url');
+  const hmac = await crypto.subtle.importKey('raw', new TextEncoder().encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = Buffer.from(await crypto.subtle.sign('HMAC', hmac, new TextEncoder().encode(`member-sso|${payload}`))).toString('base64url');
+  return `${payload}.${sig}`;
+}
+const sso = (token) => handleMemberSso(new Request(`https://connect.timothystl.org/member-sso?t=${encodeURIComponent(token)}`), { ...env, SESSION_SECRET: 'test-session-secret-0123456789abcdef' }, new URL(`https://connect.timothystl.org/member-sso?t=${encodeURIComponent(token)}`));
+const sessionOf = async (response) => getAuthInfo(new Request('https://connect.timothystl.org/', { headers: { cookie: response.headers.get('set-cookie')?.split(';')[0] || '' } }), { ...env, SESSION_SECRET: 'test-session-secret-0123456789abcdef' });
+
+describe('member sign-in link into Connect', () => {
+  it('signs an active member in as a member, and creates their account on first use', async () => {
+    addPerson('Margaret', 'Hale', 'm@example.com');
+    const response = await sso(await ssoToken('m@example.com'));
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('https://connect.timothystl.org/');
+    const info = await sessionOf(response);
+    expect(info).toMatchObject({ role: 'member', username: expect.stringMatching(/^member-\d+$/) });
+    const row = db._raw.prepare(`SELECT role, active, password_hash FROM app_users WHERE LOWER(email)='m@example.com'`).get();
+    expect(row.role).toBe('member');
+    expect(row.password_hash.startsWith('disabled:')).toBe(true);
+  });
+
+  it('uses each link once, and rejects forged, expired, wrong-key, or stale links', async () => {
+    addPerson('Margaret', 'Hale', 'm@example.com');
+    const good = await ssoToken('m@example.com');
+    expect(await acceptMemberSsoLink(env, good)).toBe('m@example.com');
+    expect(await acceptMemberSsoLink(env, good)).toBeNull(); // spent
+    expect(await acceptMemberSsoLink(env, await ssoToken('m@example.com', { expIn: -5 }))).toBeNull();
+    expect(await acceptMemberSsoLink(env, await ssoToken('m@example.com', { key: 'some-other-key-0123456789abcdef0123' }))).toBeNull();
+    expect(await acceptMemberSsoLink(env, await ssoToken('m@example.com', { expIn: 3600 }))).toBeNull();
+    const [payload] = good.split('.');
+    expect(await acceptMemberSsoLink(env, `${payload}.AAAA`)).toBeNull();
+    expect(await acceptMemberSsoLink({ ...env, MEMBER_PORTAL_CONTRACT_API_KEY: '' }, await ssoToken('m@example.com'))).toBeNull();
+    for (const bad of ['', 'x', 'a.b.c']) expect(await acceptMemberSsoLink(env, bad)).toBeNull();
+  });
+
+  it('never signs anyone in as staff or an administrator, even with a valid link', async () => {
+    const id = addPerson('Pat', 'Staff', 'pat@example.com');
+    db._raw.prepare(`INSERT INTO app_users (username, password_hash, role, active, email, people_id) VALUES ('pat','x','admin',1,'pat@example.com',?)`).run(id);
+    const response = await sso(await ssoToken('pat@example.com'));
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(response.headers.get('location')).toBe('https://connect.timothystl.org/');
+  });
+
+  it('renames an account that was invited under an email address, so its session cookie works', async () => {
+    const id = addPerson('Margaret', 'Hale', 'm@example.com');
+    db._raw.prepare(`INSERT INTO app_users (username, password_hash, role, active, email, people_id) VALUES ('m@example.com','x','member',1,'m@example.com',?)`).run(id);
+    const info = await sessionOf(await sso(await ssoToken('m@example.com')));
+    expect(info).toMatchObject({ role: 'member', username: `member-${id}` });
+    expect(db._raw.prepare(`SELECT COUNT(*) AS n FROM app_users WHERE people_id=?`).get(id).n).toBe(1);
+  });
+
+  it('does not sign in inactive accounts, visitors, or unknown addresses', async () => {
+    const id = addPerson('Old', 'Member', 'old@example.com');
+    db._raw.prepare(`INSERT INTO app_users (username, password_hash, role, active, email, people_id) VALUES ('old@example.com','x','member',0,'old@example.com',?)`).run(id);
+    addPerson('Vera', 'Visitor', 'v@example.com', { member_type: 'visitor' });
+    for (const email of ['old@example.com', 'v@example.com', 'ghost@example.com']) {
+      const response = await sso(await ssoToken(email));
+      expect(response.headers.get('set-cookie'), email).toBeNull();
+    }
+    expect(db._raw.prepare(`SELECT COUNT(*) AS n FROM app_users WHERE LOWER(email)='v@example.com'`).get().n).toBe(0);
+  });
+});
