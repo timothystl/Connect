@@ -167,6 +167,24 @@ describe('Giving analysis reports for Finance (giving-reports-v1, giving-impact-
     expect(withCara.summary.total_givers).toBe(1);
   });
 
+  it('lists members who are not giving this year, split by whether they gave last year, and flags members with no household', async () => {
+    const { db, general } = setup();
+    const raw = db._raw;
+    raw.prepare("INSERT INTO households (id, name) VALUES (2, 'Lapsed Household'), (3, 'Dormant Household')").run();
+    raw.prepare("INSERT INTO people (first_name, last_name, household_id, member_type, active) VALUES ('Eve','Lapsed',2,'member',1), ('Fay','Dormant',3,'member',0), ('Gus','Visitor',3,'visitor',1)").run();
+    raw.prepare("INSERT INTO people (first_name, last_name, member_type) VALUES ('Dana','Alone','member')").run();
+    const eve = raw.prepare("SELECT id FROM people WHERE first_name='Eve'").get().id;
+    raw.prepare("INSERT INTO giving_entries (batch_id, person_id, fund_id, amount, method, contribution_date) VALUES (1, ?, ?, 70000, 'check', '2025-03-02')").run(eve, general);
+    const r = await (await report(db, 'plateaus', '&year=2026&scope=household')).json();
+    expect(r.non_givers.lapsed.people.map((x) => [x.name, x.last_year_cents])).toEqual([['Lapsed Household', 70000]]);
+    // Fay's record is marked inactive, which is shown so a moved-away member is not mistaken for a lapsed one.
+    expect(r.non_givers.dormant.people.map((x) => [x.name, x.inactive])).toEqual(expect.arrayContaining([['Dormant Household', true], ['Dana Alone', false]]));
+    expect(r.non_givers.dormant.people.map((x) => x.name)).not.toContain('Sample Household'); // gave this year
+    expect(r.non_givers.members_without_household.people.map((x) => x.name)).toContain('Dana Alone');
+    // Someone with no gifts but not a member is left out.
+    expect(JSON.stringify(r.non_givers)).not.toContain('Gus');
+  });
+
   it('compares the current year to date with last year to the same day, and projects each year-end', async () => {
     const { db, general } = setup();
     const raw = db._raw;
