@@ -974,6 +974,49 @@ export function plateauWeeksElapsed(year, now = new Date()) {
 export function memberHouseholdSql(alias = 'p') {
   return ` AND (LOWER(COALESCE(${alias}.member_type,''))='member' OR (${alias}.household_id IS NOT NULL AND ${alias}.household_id != 0 AND EXISTS (SELECT 1 FROM people mh WHERE mh.household_id=${alias}.household_id AND mh.active=1 AND LOWER(mh.member_type)='member')))`;
 }
+// Several families can share a last name ("Smith Family"). Wherever a household is named, when its
+// name is shared with another household the first names of its adults are added, so staff know who
+// to contact: "Smith Family (Ann & Bob)". A name that is not shared is left alone. `items` are
+// objects with a `name`; `householdIdOf(item)` returns the household id or null for a lone person.
+export async function addFirstNamesToSharedHouseholds(db, items, householdIdOf) {
+  const list = (items || []).filter(it => householdIdOf(it));
+  if (!list.length) return items;
+  const all = (await db.prepare(
+    `SELECT h.id,
+            COALESCE(NULLIF(h.name,''),
+              (SELECT hp.last_name || ' Household' FROM people hp WHERE hp.household_id = h.id AND hp.last_name != '' LIMIT 1),
+              'Household #' || h.id) AS name
+       FROM households h WHERE EXISTS (SELECT 1 FROM people p WHERE p.household_id = h.id)`
+  ).all()).results || [];
+  const norm = n => String(n || '').trim().toLowerCase();
+  const counts = new Map();
+  for (const h of all) counts.set(norm(h.name), (counts.get(norm(h.name)) || 0) + 1);
+  const shared = list.filter(it => (counts.get(norm(it.name)) || 0) > 1);
+  if (!shared.length) return items;
+  const ids = [...new Set(shared.map(it => Number(householdIdOf(it))))];
+  const firstNames = new Map();
+  for (let i = 0; i < ids.length; i += 80) {
+    const chunk = ids.slice(i, i + 80);
+    const rows = (await db.prepare(
+      `SELECT household_id, first_name, family_role FROM people
+        WHERE household_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(active,1) = 1 AND COALESCE(deceased,0) = 0
+          AND TRIM(COALESCE(first_name,'')) != ''
+        ORDER BY CASE family_role WHEN 'head' THEN 0 WHEN 'spouse' THEN 1 ELSE 2 END, id`
+    ).bind(...chunk).all()).results || [];
+    for (const r of rows) {
+      const entry = firstNames.get(r.household_id) || [];
+      // The adults when the roles say who they are; otherwise whoever is first on the record.
+      if (r.family_role === 'head' || r.family_role === 'spouse' || !entry.length) entry.push({ name: r.first_name, adult: r.family_role === 'head' || r.family_role === 'spouse' });
+      firstNames.set(r.household_id, entry);
+    }
+  }
+  for (const it of shared) {
+    const entry = firstNames.get(Number(householdIdOf(it))) || [];
+    const names = (entry.some(e => e.adult) ? entry.filter(e => e.adult) : entry).slice(0, 2).map(e => e.name);
+    if (names.length && it.name) it.name = `${it.name} (${names.join(' & ')})`;
+  }
+  return items;
+}
 export async function fetchGivingPlateauRows(db, { year, scope, fundId }) {
   const start = year + '-01-01', end = year + '-12-31';
   const effDate = "COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date)";
@@ -987,7 +1030,7 @@ export async function fetchGivingPlateauRows(db, { year, scope, fundId }) {
     // ge.person_id column and SQLite would group by the person, not the household, so spouses'
     // gifts wouldn't merge).
     const keyExpr = `CASE WHEN ${housed} THEN 'h:' || p.household_id ELSE 'p:' || p.id END`;
-    return (await db.prepare(
+    const housedRows = (await db.prepare(
       `SELECT ${keyExpr} AS person_id,
               CASE WHEN ${housed}
                    THEN COALESCE(NULLIF(h.name,''),
@@ -1014,6 +1057,7 @@ export async function fetchGivingPlateauRows(db, { year, scope, fundId }) {
          AND LOWER(COALESCE(p.member_type,'')) != 'organization'${memberHouseholdSql('p')}${fundClause}
        GROUP BY ${keyExpr}`
     ).bind(start, end, ...fundBind).all()).results || [];
+    return addFirstNamesToSharedHouseholds(db, housedRows, r => (r.link_kind === 'household' ? r.link_id : null));
   }
   return (await db.prepare(
     `SELECT ge.person_id AS person_id,
@@ -1079,6 +1123,10 @@ export async function fetchNonGivers(db, { year, scope, fundId, peopleCap = 500 
     const row = { key: m.k, name: m.name || '', inactive: !m.any_active, last_gift: g.last_gift ? String(g.last_gift).slice(0, 10) : '' };
     if ((g.last_year_cents || 0) > 0) lapsed.push({ ...row, last_year_cents: g.last_year_cents });
     else dormant.push(row);
+  }
+  if (scope === 'household') {
+    const householdOf = r => (/^h\d+$/.test(r.key) ? Number(r.key.slice(1)) : null);
+    await addFirstNamesToSharedHouseholds(db, [...lapsed, ...dormant], householdOf);
   }
   lapsed.sort((a, b) => b.last_year_cents - a.last_year_cents);
   dormant.sort((a, b) => String(b.last_gift).localeCompare(String(a.last_gift)) || a.name.localeCompare(b.name));
