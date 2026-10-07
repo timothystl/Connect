@@ -240,9 +240,9 @@ describe('serving list', () => {
     const res = await (await call(env, { op: 'serving', email: 'm@example.com' })).json();
     expect(res.first_name).toBe('Margaret');
     expect(res.scheduled).toEqual([
-      { date: soon, what: '3rd Sunday', service: '10:45 AM', role: 'Acolyte', status: 'pending' },
-      { date: soon, what: '3rd Sunday', service: '8:00 AM', role: 'Lector', status: 'confirmed' },
-      { date: dayFromNow(14), what: 'Christmas Eve', service: '7:00 PM', role: 'Lector', status: 'pending' },
+      { date: soon, what: '3rd Sunday', service: '10:45 AM', svc: '10:45am', role: 'Acolyte', status: 'pending' },
+      { date: soon, what: '3rd Sunday', service: '8:00 AM', svc: '8am', role: 'Lector', status: 'confirmed' },
+      { date: dayFromNow(14), what: 'Christmas Eve', service: '7:00 PM', svc: '7:00 PM', role: 'Lector', status: 'pending' },
     ]);
   });
 
@@ -269,6 +269,57 @@ describe('serving list', () => {
 
   it('answers not_found for an unknown address', async () => {
     expect((await call(env, { op: 'serving', email: 'ghost@example.com' })).status).toBe(404);
+  });
+});
+
+describe('responding to a scheduled role', () => {
+  const setup = () => {
+    const id = addPerson('Margaret', 'Hale', 'm@example.com');
+    const soon = dayFromNow(7);
+    setBlob('ws_people', [{ id: 'w1', name: 'Margaret Hale', email: 'm@example.com' }, { id: 'w2', name: 'Other', email: 'o@example.com' }]);
+    setBlob('ws_schedule_v2', { month: { rows: [{ dateISO: soon, label: '3rd Sunday', assignments: { Lector: { '8am': 'w1' }, Acolyte: { '8am': 'w2' } } }] } });
+    return { id, soon };
+  };
+  const answer = (body) => call(env, { op: 'respond', email: 'm@example.com', ...body });
+
+  it('records the answer for the slot, in the confirmations table and the volunteer\u2019s reminder record', async () => {
+    const { soon } = setup();
+    db._raw.prepare(`INSERT INTO scheduler_rsvp_tokens (person_id, token, name) VALUES ('w1', 'tok1', 'Margaret Hale')`).run();
+    kv.store.set('tok1', JSON.stringify({ token: 'tok1', name: 'Margaret Hale', notifyEmail: 'sched@example.org', assignments: [{ dateISO: soon, date: soon, svc: '8am', role: 'Lector', status: 'pending' }] }));
+    const res = await answer({ date: soon, role: 'Lector', svc: '8am', status: 'confirmed' });
+    expect(await res.json()).toMatchObject({ ok: true, status: 'confirmed' });
+    expect(db._raw.prepare(`SELECT status FROM scheduler_confirmations WHERE date_iso=? AND role='Lector' AND svc='8am'`).get(soon).status).toBe('confirmed');
+    expect(JSON.parse(kv.store.get('tok1')).assignments[0].status).toBe('confirmed');
+    const serving = await (await call(env, { op: 'serving', email: 'm@example.com' })).json();
+    expect(serving.scheduled[0].status).toBe('confirmed');
+  });
+
+  it('works for someone with no reminder record, and tells the office (email and push)', async () => {
+    const { soon } = setup();
+    env.RESEND_API_KEY = 'resend-test'; env.EMAIL_FROM = 'office@example.org';
+    const res = await answer({ date: soon, role: 'Lector', svc: '8am', status: 'declined' });
+    expect((await res.json()).ok).toBe(true);
+    const mail = sent.find((m) => m.subject && m.subject.startsWith('Worship Scheduler: Margaret Hale'));
+    expect(mail).toBeTruthy();
+    expect(mail.to).toBe('office@timothystl.org');
+    expect(mail.text).toContain('Declined');
+    expect(db._raw.prepare(`SELECT status FROM scheduler_confirmations WHERE date_iso=? AND role='Lector'`).get(soon).status).toBe('declined');
+  });
+
+  it('only changes the one slot, never anyone else\u2019s answer', async () => {
+    const { soon } = setup();
+    db._raw.prepare(`INSERT INTO scheduler_confirmations (date_iso, role, svc, status) VALUES (?, 'Acolyte', '8am', 'confirmed')`).run(soon);
+    await answer({ date: soon, role: 'Lector', svc: '8am', status: 'needs_changes' });
+    expect(db._raw.prepare(`SELECT status FROM scheduler_confirmations WHERE role='Acolyte'`).get().status).toBe('confirmed');
+  });
+
+  it('refuses a role the person is not scheduled for, and bad input', async () => {
+    const { soon } = setup();
+    expect((await answer({ date: soon, role: 'Acolyte', svc: '8am', status: 'confirmed' })).status).toBe(404); // belongs to someone else
+    expect((await answer({ date: dayFromNow(-3), role: 'Lector', svc: '8am', status: 'confirmed' })).status).toBe(404);
+    expect((await answer({ date: soon, role: 'Lector', svc: '8am', status: 'maybe' })).status).toBe(400);
+    expect((await answer({ date: 'soon', role: 'Lector', svc: '8am', status: 'confirmed' })).status).toBe(400);
+    expect(db._raw.prepare(`SELECT COUNT(*) AS n FROM scheduler_confirmations`).get().n).toBe(0);
   });
 });
 
