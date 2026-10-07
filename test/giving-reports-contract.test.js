@@ -185,6 +185,23 @@ describe('Giving analysis reports for Finance (giving-reports-v1, giving-impact-
     expect(JSON.stringify(r.non_givers)).not.toContain('Gus');
   });
 
+  it('adds first names when two households share a name, so staff know who to contact', async () => {
+    const { db, general } = setup();
+    const raw = db._raw;
+    raw.prepare("INSERT INTO households (id, name) VALUES (2, 'Smith Family'), (3, 'Smith Family')").run();
+    raw.prepare("INSERT INTO people (first_name, last_name, household_id, member_type, family_role) VALUES ('Ann','Smith',2,'member','head'), ('Bob','Smith',2,'member','spouse'), ('Kid','Smith',2,'member','child'), ('Carl','Smith',3,'member','head')").run();
+    raw.prepare("INSERT INTO giving_batches (batch_date) VALUES ('2026-04-05')").run();
+    const batch = raw.prepare("SELECT MAX(id) AS id FROM giving_batches").get().id;
+    for (const first of ['Ann', 'Carl']) {
+      const id = raw.prepare("SELECT id FROM people WHERE first_name=?").get(first).id;
+      raw.prepare("INSERT INTO giving_entries (batch_id, person_id, fund_id, amount, method, contribution_date) VALUES (?, ?, ?, 50000, 'check', '2026-04-05')").run(batch, id, general);
+    }
+    const r = await (await report(db, 'plateaus', '&year=2026&scope=household')).json();
+    const names = r.groups.flatMap((g) => g.steps.flatMap((s) => s.people.map((x) => x.name)));
+    expect(names).toEqual(expect.arrayContaining(['Smith Family (Ann & Bob)', 'Smith Family (Carl)', 'Sample Household']));
+    expect(names).not.toContain('Smith Family');
+  });
+
   it('compares the current year to date with last year to the same day, and projects each year-end', async () => {
     const { db, general } = setup();
     const raw = db._raw;

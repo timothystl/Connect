@@ -25,7 +25,7 @@ import { verifyAccessJwt } from './access-jwt.js';
 import { applyFundCleanupWrite, buildFundCleanup } from './api-fund-cleanup-contracts.js';
 import {
   getRolePermissions, permissionsForRole, resolveGeneralFundIds, normalizeFundCategory, fundCategoryLabel, sameDayLastYear, yearElapsedShare,
-  resolveGeneralFundBudget, accountRowMatchesFundCode, fundNumericPrefix, memberHouseholdSql, GIVER_GROUPS,
+  resolveGeneralFundBudget, accountRowMatchesFundCode, fundNumericPrefix, memberHouseholdSql, GIVER_GROUPS, addFirstNamesToSharedHouseholds,
 } from './api-utils.js';
 import { resolveChurchYearPrecedence, computeYearSummary, readCashPolicy } from './api-finance.js';
 
@@ -513,7 +513,7 @@ async function readNamedWindows(db, asOf) {
   const priorStart = shiftDay(asOf, -364);
   const quietStart = shiftDay(asOf, -89);
   const regularStart = shiftDay(asOf, -454);
-  return (await db.prepare(
+  const namedRows = (await db.prepare(
     `SELECT ${HOUSEHOLD_KEY} AS hk,
             MAX(CASE WHEN p.household_id IS NOT NULL AND p.household_id != 0 THEN h.name ELSE p.first_name || ' ' || p.last_name END) AS name,
             MAX(ge.contribution_date) AS last_day,
@@ -534,6 +534,7 @@ async function readNamedWindows(db, asOf) {
     regularStart, shiftDay(quietStart, -1),
     regularStart, asOf,
   ).all()).results || [];
+  return addFirstNamesToSharedHouseholds(db, namedRows, (r) => (/^h:\d+$/.test(r.hk) ? Number(r.hk.slice(2)) : null));
 }
 
 function half(asOf) {
