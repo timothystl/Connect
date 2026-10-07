@@ -1033,6 +1033,68 @@ export async function fetchGivingPlateauRows(db, { year, scope, fundId }) {
   ).bind(start, end, ...fundBind).all()).results || [];
 }
 
+// Members who are NOT giving, for the year chosen. Every member counts (the people record's type is
+// "member", whether or not the record is active or the giving person is the member), grouped the way
+// the report is: a household, or a lone person with no household. Two categories:
+//   lapsed   gave in the year before, nothing in this one
+//   dormant  no gift in either of the last two years (including never)
+// Households whose member records are all marked inactive are flagged so staff can tell a lapsed
+// member from one who has moved away. No dollar ask is made. Also returns members who are not in a
+// household at all, because every member should be in one.
+export async function fetchNonGivers(db, { year, scope, fundId, peopleCap = 500 }) {
+  const effDate = "COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date)";
+  const { clause: fundClause, bind: fundBind } = await fundCodeScope(db, fundId);
+  const housed = "p.household_id IS NOT NULL AND p.household_id != 0";
+  const unitKey = scope === 'household' ? `CASE WHEN ${housed} THEN 'h' || p.household_id ELSE 'p' || p.id END` : "'p' || p.id";
+  const unitName = scope === 'household'
+    ? `CASE WHEN ${housed}
+            THEN COALESCE(NULLIF(h.name,''),
+                 (SELECT hp.last_name || ' Household' FROM people hp WHERE hp.household_id = p.household_id AND hp.last_name != '' LIMIT 1),
+                 'Household #' || p.household_id)
+            ELSE (p.first_name || ' ' || p.last_name) END`
+    : "(p.first_name || ' ' || p.last_name)";
+  const members = (await db.prepare(
+    `SELECT ${unitKey} AS k, MAX(${unitName}) AS name, MAX(COALESCE(p.active,1)) AS any_active
+       FROM people p LEFT JOIN households h ON h.id = p.household_id
+      WHERE LOWER(COALESCE(p.member_type,'')) = 'member'
+      GROUP BY k`
+  ).all()).results || [];
+  const y0 = String(year), y1 = String(year - 1);
+  const gifts = new Map(((await db.prepare(
+    `SELECT ${unitKey} AS k,
+            SUM(CASE WHEN substr(${effDate},1,4) = ? THEN ge.amount ELSE 0 END) AS this_year_cents,
+            SUM(CASE WHEN substr(${effDate},1,4) = ? THEN ge.amount ELSE 0 END) AS last_year_cents,
+            MAX(${effDate}) AS last_gift
+       FROM giving_entries ge
+       JOIN giving_batches gb ON gb.id = ge.batch_id
+       JOIN people p ON p.id = ge.person_id
+      WHERE ge.person_id IS NOT NULL AND substr(${effDate},1,4) <= ?
+        AND LOWER(COALESCE(p.member_type,'')) != 'organization'${fundClause}
+      GROUP BY k`
+  ).bind(y0, y1, y0, ...fundBind).all()).results || []).map(r => [r.k, r]));
+  const lapsed = [], dormant = [];
+  for (const m of members) {
+    const g = gifts.get(m.k) || {};
+    if ((g.this_year_cents || 0) > 0) continue;
+    const row = { key: m.k, name: m.name || '', inactive: !m.any_active, last_gift: g.last_gift ? String(g.last_gift).slice(0, 10) : '' };
+    if ((g.last_year_cents || 0) > 0) lapsed.push({ ...row, last_year_cents: g.last_year_cents });
+    else dormant.push(row);
+  }
+  lapsed.sort((a, b) => b.last_year_cents - a.last_year_cents);
+  dormant.sort((a, b) => String(b.last_gift).localeCompare(String(a.last_gift)) || a.name.localeCompare(b.name));
+  const noHousehold = (await db.prepare(
+    `SELECT id, (first_name || ' ' || last_name) AS name, COALESCE(active,1) AS active FROM people
+      WHERE LOWER(COALESCE(member_type,'')) = 'member' AND (household_id IS NULL OR household_id = 0)
+      ORDER BY last_name, first_name`
+  ).all()).results || [];
+  return {
+    year, last_year: year - 1,
+    lapsed: { num_people: lapsed.length, people: lapsed.slice(0, peopleCap) },
+    dormant: { num_people: dormant.length, people: dormant.slice(0, peopleCap) },
+    members_without_household: { count: noHousehold.length, people: noHousehold.slice(0, 300).map(r => ({ id: r.id, name: r.name, inactive: !r.active })) },
+  };
+}
+
 // ── Giving cadence ────────────────────────────────────────────────────────
 // The plateau analysis deliberately normalizes everyone to a weekly-equivalent figure, so a
 // weekly regular, a monthly giver and a single annual gift are all comparable. That is right for
