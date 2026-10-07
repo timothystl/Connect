@@ -25,7 +25,7 @@ import {
   renderStaxGivingMockupReviewHtml, renderStaxGivingMockupFundsAdminHtml,
 } from './src/stax-giving-mockup.js';
 import { handleContractsServiceApi } from './src/api-contracts-service.js';
-import { handleMemberPortalContracts } from './src/api-member-portal-contract.js';
+import { handleMemberPortalContracts, handleMemberSso } from './src/api-member-portal-contract.js';
 import { handleMemberSetup } from './src/api-people.js';
 import { LOGIN_HTML, PUBLIC_HTML, PUBLIC_APP_CSS, PUBLIC_APP_JS } from './src/html-templates.js';
 import { chmsHtmlForRole, CHMS_MANIFEST_JSON, SW_JS, BACKLOG_HTML, CHMS_APP_MEMBER_JS, CHMS_APP_STAFF_JS, CHMS_APP_EXT_JS, CHMS_APP_FINANCE_JS, CHMS_APP_CSS, CHMS_SCHEDULER_HTML, CHMS_SCHEDULER_JS } from './src/html-chms.js';
@@ -568,6 +568,8 @@ async function _fetchRouted(req, env, url, path, method) {
     // Connect member invite setup (Phase 2) — public, token-gated, same pattern as
     // /admin/reset above.
     if (path === '/member-setup' && (method === 'GET' || method === 'POST')) return handleMemberSetup(req, env, url);
+    // The member app (app.timothystl.org) opens Connect with a short-lived signed link instead of a second sign-in.
+    if (path === '/member-sso') return handleMemberSso(req, env, url);
     if (path === '/admin/logout') {
       return new Response(null, { status: 302, headers: {
         'Location': isChmsHost ? '/' : '/admin',
