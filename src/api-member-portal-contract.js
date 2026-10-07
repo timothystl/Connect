@@ -8,6 +8,7 @@
 //                          { op: 'giving',       email, year? }
 //                          { op: 'statement',    email, year }
 //                          { op: 'serving',      email }
+//                          { op: 'respond',      email, date, role, svc, status }
 //
 // Who may call: only the launcher Worker, holding MEMBER_PORTAL_CONTRACT_API_KEY (a secret separate
 // from Finance's). That key proves the call came from the launcher; the launcher only asks about an
@@ -19,6 +20,7 @@
 import { json, timingSafeEqual, authCookieHeader, isPhoneUserAgent } from './auth.js';
 import { sendBrevoTransactionalEmail } from './api-emails.js';
 import { readLetterConfig, readStatement } from './api-giving-letters-contract.js';
+import { finishRsvp, schedKvGet, schedKvPut } from './api-scheduler.js';
 
 export const CODE_TTL_SECONDS = 15 * 60;
 export const MAX_CODE_TRIES = 5;
@@ -242,7 +244,7 @@ function scheduledFor(months, ids, confirmations, today) {
         for (const svc of Array.isArray(row.services) ? row.services : []) {
           const key = svc.time || 'shared';
           for (const role of Array.isArray(svc.roles) ? svc.roles : []) {
-            if (mine(svc.assignments?.[role])) out.push({ date, what: row.name || 'Special service', service: svc.time || '', role, status: status(date, role, key) });
+            if (mine(svc.assignments?.[role])) out.push({ date, what: row.name || 'Special service', service: svc.time || '', svc: key, role, status: status(date, role, key) });
           }
         }
         continue;
@@ -250,11 +252,11 @@ function scheduledFor(months, ids, confirmations, today) {
       const assigned = row.assignments && typeof row.assignments === 'object' ? row.assignments : {};
       for (const role of PER_SERVICE_ROLES) {
         for (const svc of ['8am', '10:45am']) {
-          if (mine(assigned[role]?.[svc])) out.push({ date, what: row.label || 'Sunday worship', service: SERVICE_LABELS[svc], role, status: status(date, role, svc) });
+          if (mine(assigned[role]?.[svc])) out.push({ date, what: row.label || 'Sunday worship', service: SERVICE_LABELS[svc], svc, role, status: status(date, role, svc) });
         }
       }
       for (const role of SHARED_ROLES) {
-        if (mine(assigned[role]?.shared)) out.push({ date, what: row.label || 'Sunday worship', service: 'All services', role, status: status(date, role, 'shared') });
+        if (mine(assigned[role]?.shared)) out.push({ date, what: row.label || 'Sunday worship', service: 'All services', svc: 'shared', role, status: status(date, role, 'shared') });
       }
     }
   }
@@ -301,6 +303,57 @@ async function serving(env, body) {
   });
 }
 
+// ── Answering "waiting for your reply" ──────────────────────────────────────────────────────────
+// The same answers the emailed links record (confirmed, needs changes, declined), written to the same places and
+// announced to the office the same way (src/api-scheduler.js finishRsvp). The slot must be one this mailbox is
+// actually scheduled for; nothing the caller sends can answer for someone else.
+const RSVP_STATUSES = ['confirmed', 'needs_changes', 'declined'];
+
+async function respond(env, body) {
+  const email = normalizeEmail(body.email);
+  const date = String(body.date || '');
+  const role = String(body.role || '').slice(0, 80);
+  const svc = String(body.svc || '').slice(0, 40);
+  const status = String(body.status || '');
+  if (!validEmail(email) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !role || !svc || !RSVP_STATUSES.includes(status)) return json({ error: 'invalid_request' }, 400);
+  const people = await peopleForEmail(env.DB, email);
+  if (!people.length) return json({ error: 'not_found' }, 404);
+  const today = chicagoToday();
+  const [ids, scheduleRow, confRows] = await Promise.all([
+    volunteerIdsFor(env.DB, email, people),
+    env.DB.prepare(`SELECT value FROM scheduler_data WHERE key='ws_schedule_v2'`).first().catch(() => null),
+    env.DB.prepare(`SELECT date_iso, role, svc, status FROM scheduler_confirmations WHERE date_iso >= ?`).bind(today).all().catch(() => ({ results: [] })),
+  ]);
+  const confirmations = {};
+  for (const r of confRows.results || []) confirmations[`${r.date_iso}|${r.role}|${r.svc}`] = r.status;
+  const slot = scheduledFor(parseJson(scheduleRow?.value, {}), ids, confirmations, today).find((x) => x.date === date && x.role === role && x.svc === svc);
+  if (!slot) return json({ error: 'not_scheduled' }, 404);
+
+  const fullName = `${people[0].first_name} ${people[0].last_name}`.trim();
+  const notifyRow = await env.DB.prepare(`SELECT value FROM chms_config WHERE key='volunteer_public_email'`).first().catch(() => null);
+  const notifyFallback = notifyRow?.value || env.REPLY_TO_EMAIL || 'office@timothystl.org';
+  // Keep the volunteer's own reminder record (if one was sent) in step, so the emailed link shows the same answer.
+  const marks = [...ids].map(() => '?').join(',');
+  const tokens = (await env.DB.prepare(`SELECT token FROM scheduler_rsvp_tokens WHERE person_id IN (${marks})`).bind(...ids).all().catch(() => ({ results: [] }))).results || [];
+  let notifyEmail = notifyFallback;
+  for (const { token } of tokens) {
+    const record = await schedKvGet(env, token);
+    const match = (record?.assignments || []).find((a) => a.dateISO === date && a.role === role && (a.svc === 'both services' ? 'shared' : a.svc) === svc);
+    if (!match) continue;
+    match.status = status;
+    record.overallStatus = status;
+    record.updatedAt = new Date().toISOString();
+    await schedKvPut(env, token, record);
+    notifyEmail = record.notifyEmail || notifyFallback;
+  }
+  // Only this one slot is written to the confirmations table, so no one else's answer is touched.
+  await finishRsvp(env, null, {
+    name: fullName, email, notifyEmail,
+    assignments: [{ dateISO: date, date: slot.date, svc, role, status }],
+  }, status);
+  return json({ ok: true, date, role, svc, status });
+}
+
 export async function handleMemberPortalContracts(req, env, path) {
   if (path !== '/api/contracts/member-portal-v1') return null;
   const expectedKey = env.MEMBER_PORTAL_CONTRACT_API_KEY || '';
@@ -315,6 +368,7 @@ export async function handleMemberPortalContracts(req, env, path) {
     case 'giving': return giving(env, body);
     case 'statement': return statement(env, body);
     case 'serving': return serving(env, body);
+    case 'respond': return respond(env, body);
     default: return json({ error: 'Unknown op' }, 400);
   }
 }

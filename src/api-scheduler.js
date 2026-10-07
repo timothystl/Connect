@@ -1147,24 +1147,12 @@ export async function handleSchedRsvpPortal(req, env, url) {
   return schedHtmlPage('Your Worship Schedule', body);
 }
 
-// ── /rsvp ────────────────────────────────────────────────────────────────────
-export async function handleSchedRsvp(req, env, url) {
-  const token  = url.searchParams.get('token')  || '';
-  const status = url.searchParams.get('status') || '';
-  const idx    = url.searchParams.get('idx');
-  if (!token || !status) return schedHtmlPage('Error', '<p>Invalid link.</p>');
-  const record = await schedKvGet(env, token);
-  if (!record) return schedHtmlPage('Not Found', '<p>This link has expired or is invalid.</p>');
-  if (!['confirmed','needs_changes','declined'].includes(status)) return schedHtmlPage('Error', '<p>Unknown status.</p>');
-  if (idx !== null && idx !== undefined) {
-    const i = parseInt(idx, 10);
-    if (!isNaN(i) && record.assignments[i]) record.assignments[i].status = status;
-  } else {
-    record.assignments.forEach(function(a) { a.status = status; });
-  }
+// Stores a volunteer's response and tells the office. Shared by the email link (/rsvp) and the member app,
+// so an answer given either way is recorded and announced identically.
+export async function finishRsvp(env, token, record, status) {
   record.overallStatus = status;
   record.updatedAt = new Date().toISOString();
-  await schedKvPut(env, token, record);
+  if (token) await schedKvPut(env, token, record);
   await writeConfirmationsToD1(env, record.assignments);
   // Notify admin (non-fatal)
   const notifyEmail = record.notifyEmail || '';
@@ -1200,6 +1188,25 @@ export async function handleSchedRsvp(req, env, url) {
       url: '/#scheduler',
     });
   }
+
+}
+
+// ── /rsvp ────────────────────────────────────────────────────────────────────
+export async function handleSchedRsvp(req, env, url) {
+  const token  = url.searchParams.get('token')  || '';
+  const status = url.searchParams.get('status') || '';
+  const idx    = url.searchParams.get('idx');
+  if (!token || !status) return schedHtmlPage('Error', '<p>Invalid link.</p>');
+  const record = await schedKvGet(env, token);
+  if (!record) return schedHtmlPage('Not Found', '<p>This link has expired or is invalid.</p>');
+  if (!['confirmed','needs_changes','declined'].includes(status)) return schedHtmlPage('Error', '<p>Unknown status.</p>');
+  if (idx !== null && idx !== undefined) {
+    const i = parseInt(idx, 10);
+    if (!isNaN(i) && record.assignments[i]) record.assignments[i].status = status;
+  } else {
+    record.assignments.forEach(function(a) { a.status = status; });
+  }
+  await finishRsvp(env, token, record, status);
 
   const msgMap = {
     confirmed:     { h: 'Thank you!',         b: "You're confirmed. We look forward to serving with you." },
