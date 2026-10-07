@@ -462,6 +462,20 @@ describe('Giving analytics contracts (giving-analytics-*-v1, giving-followup-wri
     expect([401, 403]).toContain((await post({ recipient_key: 'h1', group: 'regular' }, 'carl@timothystl.org')).status);
   });
 
+  it('saves the weekly increase asked of regular givers by band, and puts the defaults back (giving-nudge-bands-write-v1)', async () => {
+    const { db } = setup();
+    const post = (body, email = 'sarah@timothystl.org') => call(db, '/api/contracts/giving-nudge-bands-write-v1', { email, method: 'POST', body });
+    const stored = () => db._raw.prepare("SELECT value FROM giving_settings WHERE key='giving_nudge_regular_bands_json'").get();
+    expect((await post({ bands: [{ from: 100, step: 40 }, { from: 0, step: 15 }] })).status).toBe(200);
+    expect(JSON.parse(stored().value)).toEqual([{ from: 0, step: 15 }, { from: 100, step: 40 }]);
+    expect((await post({ bands: [] })).status).toBe(400);
+    expect((await post({ bands: [{ from: 'x', step: 'y' }] })).status).toBe(400);
+    expect((await post({ reset: true })).status).toBe(200);
+    expect(stored()).toBeUndefined();
+    expect(db._raw.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action='giving_nudge_bands_via_finance'").get().n).toBe(2);
+    expect([401, 403]).toContain((await post({ bands: [{ from: 0, step: 15 }] }, 'carl@timothystl.org')).status);
+  });
+
   it('treats a first gift already thanked from Connect as done, and summarizes statement runs', async () => {
     const { db, ids } = setup();
     db._raw.prepare(`INSERT INTO giving_letter_sends (person_id, year, letter_type, channel, recipient_key, sent_at) VALUES (?, 2026, 'thank_you', 'email', ?, '2026-09-14 10:00:00')`).run(ids.jordan, `ge${ids.jordan}:2026-09-13`);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeNudgeOptions, pickImpactPhrase, computeGivingPlateaus, classifyGiverGroup, expandFundCodeIds, fundCodeScope } from '../src/api-utils.js';
+import { computeNudgeOptions, pickImpactPhrase, computeGivingPlateaus, classifyGiverGroup, expandFundCodeIds, fundCodeScope, normalizeRegularBands } from '../src/api-utils.js';
 
 describe('computeNudgeOptions', () => {
   it('returns fixed, familiar round numbers — not percentage-derived figures', () => {
@@ -276,8 +276,8 @@ describe('group asks', () => {
   it('sets a regular giver\'s increase by what they give now: +$10, +$25 or +$45 a week', () => {
     expect(one(520, 52, 12).options.map(o => o.delta_cents / 100)).toEqual([5, 10, 15]);      // $10/wk
     expect(one(2600, 52, 12).options.map(o => o.delta_cents / 100)).toEqual([10, 25, 40]);    // $50/wk
-    expect(one(7800, 52, 12).options.map(o => o.delta_cents / 100)).toEqual([20, 45, 70]);    // $150/wk
-    expect(one(520, 52, 12).step_label).toBe('+$10/wk band');
+    expect(one(7800, 52, 12).options.map(o => o.delta_cents / 100)).toEqual([20, 50, 80]);    // $150/wk
+    expect(one(520, 52, 12).step_label).toBe('$0–$24/wk: +$10');
   });
   it('asks a rare giver for a standing monthly gift above what they give per month', () => {
     const rare = one(300, 2, 2); // $300 a year = $25 a month
@@ -311,6 +311,27 @@ describe('group asks', () => {
     expect(r.groups.reduce((s, x) => s + x.upside_modest_annual_cents, 0)).toBe(r.summary.total_upside_modest_annual_cents);
     expect(r.groups.reduce((s, x) => s + x.upside_generous_annual_cents, 0)).toBe(r.summary.total_upside_generous_annual_cents);
     expect(r.groups[2].steps[0].num_people).toBe(2);
+  });
+});
+
+describe('regular increase bands', () => {
+  const one = (weekly, extra) => computeGivingPlateaus([row(1, 'X', weekly * 52, 52, { months_given: 12 })], Object.assign({ periodsElapsed: 52 }, extra)).givers[0];
+  it('asks a $78 household for less than a $500 household', () => {
+    expect(one(78).options.map(o => o.delta_cents / 100)).toEqual([20, 45, 70]);
+    expect(one(78).step_label).toBe('$75–$149/wk: +$45');
+    expect(one(500).options.map(o => o.delta_cents / 100)).toEqual([30, 75, 120]);
+    expect(one(500).step_label).toBe('$300+/wk: +$75');
+  });
+  it('uses edited bands, and brackets each step at 40% and 160% to the nearest $5', () => {
+    const bands = [{ from: 0, step: 20 }, { from: 100, step: 60 }];
+    expect(one(60, { regularBands: bands }).options.map(o => o.delta_cents / 100)).toEqual([10, 20, 30]);
+    expect(one(150, { regularBands: bands }).options.map(o => o.delta_cents / 100)).toEqual([25, 60, 95]);
+  });
+  it('cleans an edited list: whole dollars, in order, a band at $0, no duplicates', () => {
+    expect(normalizeRegularBands([{ from: 100, step: 40 }, { from: 25.4, step: '15' }, { from: 100, step: 99 }, { from: -5, step: 10 }, { from: 10, step: 0 }]))
+      .toEqual([{ from: 0, step: 15 }, { from: 25, step: 15 }, { from: 100, step: 40 }]);
+    expect(normalizeRegularBands([])).toBeNull();
+    expect(normalizeRegularBands('nope')).toBeNull();
   });
 });
 

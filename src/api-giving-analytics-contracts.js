@@ -12,6 +12,8 @@
 //                               needs Giving view or edit (or admin); 'anon' is refused.
 //   giving-followup-write-v1    Assigns a nudge or marks it done (giving_followups). Needs Giving
 //                               edit or admin. Nothing here sends a message.
+//   giving-nudge-bands-write-v1 Saves the weekly increase asked of regular givers, band by band (or
+//                               puts the defaults back). Needs Giving edit or admin.
 //   giving-nudge-group-write-v1 Moves a household into a different nudge group by hand, or back to
 //                               automatic (giving_nudge_group_overrides). Needs Giving edit or admin.
 //
@@ -25,7 +27,7 @@ import { verifyAccessJwt } from './access-jwt.js';
 import { applyFundCleanupWrite, buildFundCleanup } from './api-fund-cleanup-contracts.js';
 import {
   getRolePermissions, permissionsForRole, resolveGeneralFundIds, normalizeFundCategory, fundCategoryLabel, sameDayLastYear, yearElapsedShare,
-  resolveGeneralFundBudget, accountRowMatchesFundCode, fundNumericPrefix, memberHouseholdSql, GIVER_GROUPS, addFirstNamesToSharedHouseholds,
+  resolveGeneralFundBudget, accountRowMatchesFundCode, fundNumericPrefix, memberHouseholdSql, GIVER_GROUPS, addFirstNamesToSharedHouseholds, writeRegularBands,
 } from './api-utils.js';
 import { resolveChurchYearPrecedence, computeYearSummary, readCashPolicy } from './api-finance.js';
 
@@ -782,6 +784,22 @@ export async function applyNudgeGroupWrite(db, body, email) {
   return { status: 200, ok: true };
 }
 
+// Saves the weekly increases asked of regular givers, band by band, or (reset) puts the defaults back.
+export async function applyNudgeBandsWrite(db, body, email) {
+  let bands;
+  if (body?.reset) bands = await writeRegularBands(db, null);
+  else {
+    if (!Array.isArray(body?.bands) || !body.bands.length) return { status: 400, error: 'Add at least one band' };
+    bands = await writeRegularBands(db, body.bands);
+    if (!bands) return { status: 400, error: 'Those bands could not be read. Use whole dollars, with an increase of at least $1.' };
+  }
+  await db.prepare(
+    `INSERT INTO audit_log(action,entity_type,entity_id,person_name,field,old_value,new_value)
+     VALUES('giving_nudge_bands_via_finance', 'giving_settings', NULL, '', 'regular_bands', '', ?)`
+  ).bind(`${body?.reset ? 'reset' : JSON.stringify(bands)} by ${email || ''}`).run().catch(() => {});
+  return { status: 200, ok: true, bands };
+}
+
 const EMAIL_RE = /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]+$/;
 
 export async function sendGivingBoardEmail(env, db, body) {
@@ -874,6 +892,14 @@ export async function handleGivingAnalyticsContracts(req, env, path) {
     try { body = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
     const result = await applyGivingFollowupWrite(env.DB, body, auth.email);
     return result.ok ? json({ ok: true }) : json({ error: result.error }, result.status);
+  }
+  if (path === '/api/contracts/giving-nudge-bands-write-v1' && req.method === 'POST') {
+    const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'write' });
+    if (auth.response) return auth.response;
+    let body = {};
+    try { body = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+    const result = await applyNudgeBandsWrite(env.DB, body, auth.email);
+    return result.ok ? json({ ok: true, bands: result.bands }) : json({ error: result.error }, result.status);
   }
   if (path === '/api/contracts/giving-nudge-group-write-v1' && req.method === 'POST') {
     const auth = await authorizeGivingAnalyticsContract(req, env, { level: 'write' });
