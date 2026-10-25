@@ -5,7 +5,7 @@ import { handleMobileApi } from './api-mobile.js';
 import { LOGIN_HTML } from './html-templates.js';
 import { randHex, authCardPage, getRolePermissions, permissionsForRole, csvRow } from './api-utils.js';
 import { sendBirthdayEmails, sendAnniversaryEmails, sendBirthdayTexts, sendAnniversaryTexts } from './api-emails.js';
-import { applyXmasMarketDefaults, handleVolunteerTemplates, handleSignupLinkPerson, handleSignupSendEmail, handleSchedulerVolunteersApi, findDuplicateSignupGroups, mergeDuplicateSignupGroup, findPossibleDuplicateSignupGroups, mergeSignupsByIds } from './api-scheduler.js';
+import { applyXmasMarketDefaults, handleVolunteerTemplates, handleSignupLinkPerson, handleSignupSendEmail, handleEventRemind, handleSchedulerVolunteersApi, findDuplicateSignupGroups, mergeDuplicateSignupGroup, findPossibleDuplicateSignupGroups, mergeSignupsByIds } from './api-scheduler.js';
 import { wrapEnvForDbAttribution, logDbAttribution } from './db-attribution.js';
 import { verifyAccessJwt } from './access-jwt.js';
 
@@ -306,6 +306,31 @@ export async function handleAdminApi(req, env, url, method) {
   }
 }
 
+// ── Serve-event write access ─────────────────────────────────────────
+// Admin and staff edit every Serve event. A 'volunteer' account edits only the events an
+// administrator has assigned it to as coordinator (serve_event_coordinators) — the event,
+// its shifts, its sign-up statuses and emails to the people signed up. Creating and
+// deleting events, and assigning coordinators, stay admin/staff (assigning: admin only).
+async function canManageServeEvent(req, env, eventId) {
+  const info = await getAuthInfo(req, env);
+  if (!info) return false;
+  if (info.role === 'admin' || info.role === 'staff') return true;
+  if (info.role !== 'volunteer' || !info.username || !eventId) return false;
+  const row = await env.DB.prepare(
+    'SELECT 1 AS ok FROM serve_event_coordinators WHERE event_id=? AND username=?'
+  ).bind(eventId, String(info.username).toLowerCase()).first().catch(() => null);
+  return !!row;
+}
+
+/** The Serve event a sign-up belongs to — its own event_id, or the event of a shift it holds. */
+async function signupEventId(env, signupId) {
+  const s = await env.DB.prepare(
+    `SELECT COALESCE(NULLIF(s.event_id,0), (SELECT r.event_id FROM signup_slots ss JOIN serve_roles r ON ss.role_id=r.id WHERE ss.signup_id=s.id LIMIT 1)) AS event_id
+     FROM signups s WHERE s.id=?`
+  ).bind(signupId).first().catch(() => null);
+  return s && s.event_id ? Number(s.event_id) : null;
+}
+
 async function handleAdminApiRoutes(req, env, url, method) {
   const seg = url.pathname.replace('/admin/api/', '');
 
@@ -552,8 +577,7 @@ async function handleAdminApiRoutes(req, env, url, method) {
   // PUT /admin/api/signups/:id/status — { status: 'new'|'contacted'|'confirmed'|'declined' }
   const statusMatch = seg.match(/^signups\/(\d+)\/status$/);
   if (statusMatch && method === 'PUT') {
-    const sigRole = await getAuthRole(req, env);
-    if (sigRole !== 'admin' && sigRole !== 'staff') return json({ error: 'Access denied' }, 403);
+    if (!await canManageServeEvent(req, env, await signupEventId(env, parseInt(statusMatch[1])))) return json({ error: 'Access denied' }, 403);
     const VALID_STATUS = ['new', 'contacted', 'confirmed', 'declined'];
     let b; try { b = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
     if (!VALID_STATUS.includes(b.status)) return json({ error: 'Invalid status' }, 400);
@@ -627,6 +651,48 @@ async function handleAdminApiRoutes(req, env, url, method) {
     return json({ ok: true, signup_id: canonicalId, signups_removed: removed });
   }
 
+  // ── Event coordinators (admin only) ── GET lists who is assigned and which accounts
+  // could be (active 'volunteer' accounts); PUT replaces the list.
+  const coordMatch = seg.match(/^events\/(\d+)\/coordinators$/);
+  if (coordMatch) {
+    if (await getAuthRole(req, env) !== 'admin') return json({ error: 'Access denied' }, 403);
+    const evId = parseInt(coordMatch[1]);
+    const ev = await env.DB.prepare('SELECT id FROM serve_events WHERE id=?').bind(evId).first();
+    if (!ev) return json({ error: 'Not found' }, 404);
+    if (method === 'GET') {
+      const assigned = ((await env.DB.prepare('SELECT username FROM serve_event_coordinators WHERE event_id=? ORDER BY username').bind(evId).all()).results || []).map((r) => r.username);
+      const candidates = (await env.DB.prepare(
+        `SELECT username, display_name, email FROM app_users WHERE role='volunteer' AND active=1 ORDER BY display_name, username`
+      ).all()).results || [];
+      return json({ assigned, candidates: candidates.map((u) => ({ username: String(u.username).toLowerCase(), display_name: u.display_name || '', email: u.email || '' })) });
+    }
+    if (method === 'PUT') {
+      let b; try { b = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+      const want = [...new Set((Array.isArray(b.usernames) ? b.usernames : []).map((u) => String(u || '').trim().toLowerCase()).filter(Boolean))];
+      const valid = want.length ? ((await env.DB.prepare(
+        `SELECT LOWER(username) AS u FROM app_users WHERE role='volunteer' AND active=1 AND LOWER(username) IN (${want.map(() => '?').join(',')})`
+      ).bind(...want).all()).results || []).map((r) => r.u) : [];
+      if (valid.length !== want.length) return json({ error: 'Coordinators must be active accounts with the Volunteer role' }, 400);
+      await env.DB.prepare('DELETE FROM serve_event_coordinators WHERE event_id=?').bind(evId).run();
+      for (const u of valid) {
+        await env.DB.prepare('INSERT INTO serve_event_coordinators (event_id, username) VALUES (?, ?)').bind(evId, u).run();
+      }
+      return json({ ok: true, assigned: valid });
+    }
+    return json({ error: 'Method not allowed' }, 405);
+  }
+
+  // ── Email everyone signed up for an event (or one shift) ──
+  const remindMatch = seg.match(/^events\/(\d+)\/remind$/);
+  if (remindMatch && method === 'POST') {
+    const evId = parseInt(remindMatch[1]);
+    if (!await canManageServeEvent(req, env, evId)) return json({ error: 'Access denied' }, 403);
+    const info = await getAuthInfo(req, env);
+    const me = info && info.username ? await env.DB.prepare('SELECT email FROM app_users WHERE LOWER(username)=?')
+      .bind(String(info.username).toLowerCase()).first().catch(() => null) : null;
+    return handleEventRemind(req, env, evId, { username: info && info.username || '', email: me && me.email || '' });
+  }
+
   if (seg === 'events' && method === 'GET') {
     const events = await env.DB.prepare('SELECT * FROM serve_events ORDER BY sort_order,event_date,id').all();
     const eventList = events.results || [];
@@ -653,11 +719,21 @@ async function handleAdminApiRoutes(req, env, url, method) {
       }
     }
 
+    // can_edit tells the screen which events this caller may change; the routes below still
+    // check for themselves.
+    const evInfo = await getAuthInfo(req, env);
+    const evFull = !!evInfo && (evInfo.role === 'admin' || evInfo.role === 'staff');
+    const mine = new Set();
+    if (evInfo && evInfo.role === 'volunteer' && evInfo.username) {
+      const rows = (await env.DB.prepare('SELECT event_id FROM serve_event_coordinators WHERE username=?')
+        .bind(String(evInfo.username).toLowerCase()).all().catch(() => ({ results: [] }))).results || [];
+      for (const r of rows) mine.add(Number(r.event_id));
+    }
     const result = eventList.map(function(ev) {
       const roles = (rolesByEvent[ev.id] || []).map(function(r) {
         return { ...r, filled_count: fillCounts[r.id] || 0 };
       });
-      return { ...ev, roles: applyXmasMarketDefaults(ev.name, roles) };
+      return { ...ev, roles: applyXmasMarketDefaults(ev.name, roles), can_edit: evFull || mine.has(Number(ev.id)) };
     });
     return json({ events: result });
   }
@@ -687,9 +763,8 @@ async function handleAdminApiRoutes(req, env, url, method) {
   }
 
   if (seg.startsWith('events/') && !seg.includes('/roles') && method === 'PUT') {
-    const evRole = await getAuthRole(req, env);
-    if (evRole !== 'admin' && evRole !== 'staff') return json({ error: 'Access denied' }, 403);
     const id = parseInt(seg.split('/')[1]);
+    if (!await canManageServeEvent(req, env, id)) return json({ error: 'Access denied' }, 403);
     let b; try { b = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
     const useTimeSlots = (b.use_time_slots === undefined || b.use_time_slots === null) ? 1 : (b.use_time_slots ? 1 : 0);
     const slug = normalizeSlug(b.slug);
@@ -720,14 +795,14 @@ async function handleAdminApiRoutes(req, env, url, method) {
       await env.DB.prepare('DELETE FROM signup_slots WHERE role_id=?').bind(r.id).run();
     }
     await env.DB.prepare('DELETE FROM serve_roles WHERE event_id=?').bind(id).run();
+    await env.DB.prepare('DELETE FROM serve_event_coordinators WHERE event_id=?').bind(id).run().catch(() => {});
     await env.DB.prepare('DELETE FROM serve_events WHERE id=?').bind(id).run();
     return json({ ok: true });
   }
 
   if (seg.match(/^events\/\d+\/roles$/) && method === 'POST') {
-    const roleGuard = await getAuthRole(req, env);
-    if (roleGuard !== 'admin' && roleGuard !== 'staff') return json({ error: 'Access denied' }, 403);
     const evId = parseInt(seg.split('/')[1]);
+    if (!await canManageServeEvent(req, env, evId)) return json({ error: 'Access denied' }, 403);
     let b; try { b = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
     const r = await env.DB.prepare(
       'INSERT INTO serve_roles (event_id,name,description,slots,sort_order,role_date,start_time,end_time,lead) VALUES (?,?,?,?,?,?,?,?,?)'
@@ -737,9 +812,11 @@ async function handleAdminApiRoutes(req, env, url, method) {
   }
 
   if (seg.match(/^events\/\d+\/roles\/\d+$/) && method === 'PUT') {
-    const roleGuard = await getAuthRole(req, env);
-    if (roleGuard !== 'admin' && roleGuard !== 'staff') return json({ error: 'Access denied' }, 403);
     const parts = seg.split('/'); const rid = parseInt(parts[3]);
+    const evId = parseInt(parts[1]);
+    if (!await canManageServeEvent(req, env, evId)) return json({ error: 'Access denied' }, 403);
+    // The shift has to belong to the event the caller was checked against.
+    if (!await env.DB.prepare('SELECT id FROM serve_roles WHERE id=? AND event_id=?').bind(rid, evId).first()) return json({ error: 'Not found' }, 404);
     let b; try { b = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
     await env.DB.prepare(
       'UPDATE serve_roles SET name=?,description=?,slots=?,sort_order=?,role_date=?,start_time=?,end_time=?,lead=? WHERE id=?'
@@ -749,9 +826,10 @@ async function handleAdminApiRoutes(req, env, url, method) {
   }
 
   if (seg.match(/^events\/\d+\/roles\/\d+$/) && method === 'DELETE') {
-    const roleGuard = await getAuthRole(req, env);
-    if (roleGuard !== 'admin' && roleGuard !== 'staff') return json({ error: 'Access denied' }, 403);
     const parts = seg.split('/'); const rid = parseInt(parts[3]);
+    const evId = parseInt(parts[1]);
+    if (!await canManageServeEvent(req, env, evId)) return json({ error: 'Access denied' }, 403);
+    if (!await env.DB.prepare('SELECT id FROM serve_roles WHERE id=? AND event_id=?').bind(rid, evId).first()) return json({ error: 'Not found' }, 404);
     await env.DB.prepare('DELETE FROM signup_slots WHERE role_id=?').bind(rid).run();
     await env.DB.prepare('DELETE FROM serve_roles WHERE id=?').bind(rid).run();
     return json({ ok: true });
@@ -876,8 +954,7 @@ async function handleAdminApiRoutes(req, env, url, method) {
   // ── Signup: send email ────────────────────────────────────────────────
   const sendMatch = seg.match(/^signups\/(\d+)\/send-email$/);
   if (sendMatch && method === 'POST') {
-    const role = await getAuthRole(req, env);
-    if (role !== 'admin' && role !== 'staff') return json({ error: 'Access denied' }, 403);
+    if (!await canManageServeEvent(req, env, await signupEventId(env, parseInt(sendMatch[1])))) return json({ error: 'Access denied' }, 403);
     return handleSignupSendEmail(req, env, parseInt(sendMatch[1]));
   }
 

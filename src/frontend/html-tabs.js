@@ -1345,6 +1345,25 @@ export const HTML_TABS_1 = String.raw`<!-- ═══ HOME / DASHBOARD TAB ══
   </div>
 </div>
 
+<!-- Email volunteers: one message per person signed up, {name} and {shifts} filled in -->
+<div id="vol-remind-modal" class="modal-overlay" style="background:rgba(30,45,74,.35);" onclick="if(event.target===this)closeModal('vol-remind-modal')">
+  <div class="modal ev-fields" style="max-width:520px;width:95%;padding:24px;gap:14px;">
+    <h3 style="font-family:var(--font-head);font-weight:600;font-size:1.05rem;color:var(--color-navy);margin:0 0 12px;">Email volunteers</h3>
+    <div><label style="font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ev-muted);display:block;margin-bottom:5px;">Send to</label><select id="vol-remind-shift" onchange="volRemindPreview()" style="width:100%;"></select></div>
+    <div id="vol-remind-count" style="font-size:.78rem;color:var(--ev-muted);"></div>
+    <div><label style="font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ev-muted);display:block;margin-bottom:5px;">Subject</label><input type="text" id="vol-remind-subject"></div>
+    <div><label style="font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ev-muted);display:block;margin-bottom:5px;">Message</label><textarea id="vol-remind-body" style="min-height:190px;"></textarea></div>
+    <div style="font-size:.72rem;color:var(--ev-muted);">{name} becomes each person's first name and {shifts} the shifts they signed up for. Replies come back to you.</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;gap:10px;">
+      <span id="vol-remind-status" style="font-size:.78rem;color:var(--ev-muted);"></span>
+      <div style="display:flex;gap:8px;">
+        <button class="ev-btn-secondary" onclick="closeModal('vol-remind-modal')">Cancel</button>
+        <button class="ev-btn-primary" id="vol-remind-send" onclick="volSendRemind()">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 `;
 
 export const HTML_TABS_2 = String.raw`

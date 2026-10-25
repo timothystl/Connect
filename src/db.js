@@ -1882,6 +1882,14 @@ async function _doInitDb(db) {
     // linked/promoted at serve.timothystl.org/<slug> instead of a bare #event-<id>.
     'ALTER TABLE serve_events ADD COLUMN slug TEXT NOT NULL DEFAULT ""',
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_serve_events_slug ON serve_events(slug) WHERE slug != ''`,
+    // Event coordinators: an account an administrator has put in charge of one Serve event
+    // (see migrations/0063). Lowercased username, the identity the signed session carries.
+    `CREATE TABLE IF NOT EXISTS serve_event_coordinators (
+      event_id INTEGER NOT NULL,
+      username TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (event_id, username)
+    )`,
     // Tuition Aid Planner: K-8/LHS roster (money in integer cents), budget config, historical chart data
     `CREATE TABLE IF NOT EXISTS tuition_students (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

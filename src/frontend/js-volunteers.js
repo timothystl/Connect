@@ -615,14 +615,20 @@ function volRenderEventDetail() {
   var ev = volActiveEvent();
   if (!ev) { detailEl.innerHTML = '<div style="padding:20px 10px;text-align:center;color:var(--warm-gray);font-size:.85rem;">Select an event, or add a new one.</div>'; return; }
   var useTs = (ev.use_time_slots === undefined || ev.use_time_slots === null) ? 1 : ev.use_time_slots;
+  // can_edit comes from the server: admin/staff on every event, a Volunteer account only on
+  // the events it coordinates. The routes check again; this only decides what is drawn.
+  var canEdit = ev.can_edit !== false;
+  var canDelete = _userRole === 'admin' || _userRole === 'staff';
 
   var topBar = '<div class="ev-detail-topbar">'
     + '<span class="' + (ev.hidden ? 'ev-badge-hidden' : 'ev-badge-visible') + '">' + (ev.hidden ? 'Hidden' : 'Visible on site') + '</span>'
-    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
-    + '<button class="ev-btn-secondary" onclick="volToggleEventVisibility(' + ev.id + ',' + (ev.hidden?0:1) + ')">' + (ev.hidden?'Show event':'Hide event') + '</button>'
-    + '<a href="javascript:void(0)" class="ev-delete-link" onclick="volDeleteEvent(' + ev.id + ')">Delete</a>'
-    + '<button class="ev-btn-primary" onclick="volSaveEvent(' + ev.id + ')">Save changes</button>'
-    + '</div></div>';
+    + (canEdit ? '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+      + '<button class="ev-btn-secondary" onclick="volOpenRemindModal(' + ev.id + ',null)">Email volunteers</button>'
+      + '<button class="ev-btn-secondary" onclick="volToggleEventVisibility(' + ev.id + ',' + (ev.hidden?0:1) + ')">' + (ev.hidden?'Show event':'Hide event') + '</button>'
+      + (canDelete ? '<a href="javascript:void(0)" class="ev-delete-link" onclick="volDeleteEvent(' + ev.id + ')">Delete</a>' : '')
+      + '<button class="ev-btn-primary" onclick="volSaveEvent(' + ev.id + ')">Save changes</button>'
+      + '</div>' : '<span style="font-size:.78rem;color:var(--warm-gray);">View only</span>')
+    + '</div>';
 
   var slugUrl = 'serve.timothystl.org/' + (ev.slug || '');
   var fields = '<div class="ev-field-row">'
@@ -646,23 +652,23 @@ function volRenderEventDetail() {
       var label = g.date ? volFormatDayLabel(g.date) : 'No date set';
       var dateArg = "'" + (g.date||'').replace(/'/g,'') + "'";
       return '<div class="ev-day-header"><h4>Shifts &mdash; ' + esc(label) + '</h4>'
-        + '<button class="ev-btn-secondary" style="padding:6px 12px;font-size:.75rem;" onclick="volOpenShiftModal(' + ev.id + ',' + dateArg + ',null)">+ Add shift</button></div>'
+        + (canEdit ? '<button class="ev-btn-secondary" style="padding:6px 12px;font-size:.75rem;" onclick="volOpenShiftModal(' + ev.id + ',' + dateArg + ',null)">+ Add shift</button>' : '') + '</div>'
         + g.roles.map(function(r) {
             var pct = r.slots > 0 ? Math.round(((r.filled_count||0) / r.slots) * 100) : 0;
             var full = r.slots > 0 && (r.filled_count||0) >= r.slots;
             var barColor = full ? '#8C8880' : '#4A5E3A';
-            return '<div class="ev-shift-row" onclick="volOpenShiftModal(' + ev.id + ',' + dateArg + ',' + r.id + ')">'
+            return '<div class="ev-shift-row"' + (canEdit ? ' onclick="volOpenShiftModal(' + ev.id + ',' + dateArg + ',' + r.id + ')"' : ' style="cursor:default;"') + '>'
               + '<div><div class="ev-shift-name">' + esc(r.name) + '</div>'
                 + (r.start_time ? '<div class="ev-shift-time">' + esc(r.start_time) + '&ndash;' + esc(r.end_time||'') + '</div>' : '')
                 + (r.lead ? '<div class="ev-shift-time">Lead &middot; ' + esc(r.lead) + '</div>' : '')
                 + '</div>'
               + '<div class="ev-fill-bar"><div style="width:' + pct + '%;background:' + barColor + ';"></div></div>'
               + '<div class="ev-fill-count" style="color:' + barColor + ';">' + (r.filled_count||0) + ' / ' + (r.slots||0) + '</div>'
-              + '<div class="ev-edit-link">Edit</div>'
+              + (canEdit ? '<div class="ev-edit-link">Edit</div>' : '<div></div>')
               + '</div>';
           }).join('');
     }).join('') || '<p style="font-size:.85rem;color:var(--warm-gray);margin-bottom:10px;">No shifts yet.</p>';
-    body += '<div style="margin-top:10px;"><button class="ev-btn-secondary" onclick="volOpenShiftModal(' + ev.id + ',null,null)">+ Add shift on a new day</button></div>';
+    if (canEdit) body += '<div style="margin-top:10px;"><button class="ev-btn-secondary" onclick="volOpenShiftModal(' + ev.id + ',null,null)">+ Add shift on a new day</button></div>';
   } else {
     // Simple (non-shift) event: role checkboxes, still live-editable per row (unchanged pattern —
     // out of scope per the shift-modal handoff, which only covers time-slotted events).
@@ -695,7 +701,102 @@ function volRenderEventDetail() {
     volLoadEventRoster(ev.id);
   }
 
-  detailEl.innerHTML = topBar + fields + body;
+  // Admin only: who coordinates this event. Loaded separately so the list of accounts is
+  // never part of the events payload every role reads.
+  var coordBox = _userRole === 'admin'
+    ? '<div class="ev-coord-box" style="margin-top:22px;padding-top:14px;border-top:1px solid var(--linen);">'
+      + '<h4 style="font-family:var(--font-head);font-size:.92rem;color:var(--steel-anchor);margin:0 0 4px;">Event coordinators</h4>'
+      + '<p style="font-size:.78rem;color:var(--warm-gray);margin:0 0 8px;">People who can edit this event and its shifts and email the volunteers signed up for it, and nothing else in Connect. Create their login in Settings &rarr; Users with the Volunteer role, then tick them here.</p>'
+      + '<div id="vol-ev-coords-' + ev.id + '" style="font-size:.85rem;color:var(--warm-gray);">Loading&hellip;</div></div>'
+    : '';
+
+  detailEl.innerHTML = topBar + fields + body + coordBox;
+  if (coordBox) volLoadCoordinators(ev.id);
+}
+
+function volLoadCoordinators(evId) {
+  api('/admin/api/events/' + evId + '/coordinators').then(function(d) {
+    var el = document.getElementById('vol-ev-coords-' + evId);
+    if (!el) return;
+    var cands = d.candidates || [];
+    var assigned = d.assigned || [];
+    if (!cands.length) { el.innerHTML = 'No Volunteer-role logins yet.'; return; }
+    el.innerHTML = cands.map(function(u) {
+      return '<label style="display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer;color:var(--charcoal);">'
+        + '<input type="checkbox" class="vol-coord-cb" value="' + esc(u.username) + '" style="width:auto;margin:0;"' + (assigned.indexOf(u.username) > -1 ? ' checked' : '') + ' onchange="volSaveCoordinators(' + evId + ')">'
+        + esc(u.display_name || u.username) + (u.email ? ' <span style="color:var(--warm-gray);font-size:.78rem;">&middot; ' + esc(u.email) + '</span>' : '')
+        + '</label>';
+    }).join('') + '<div id="vol-ev-coords-msg-' + evId + '" style="font-size:.75rem;color:var(--warm-gray);margin-top:4px;"></div>';
+  }).catch(function() {
+    var el = document.getElementById('vol-ev-coords-' + evId);
+    if (el) el.innerHTML = '<span style="color:var(--danger);">Could not load coordinators.</span>';
+  });
+}
+
+function volSaveCoordinators(evId) {
+  var box = document.getElementById('vol-ev-coords-' + evId);
+  if (!box) return;
+  var names = Array.prototype.slice.call(box.querySelectorAll('.vol-coord-cb')).filter(function(cb){ return cb.checked; }).map(function(cb){ return cb.value; });
+  var msg = document.getElementById('vol-ev-coords-msg-' + evId);
+  api('/admin/api/events/' + evId + '/coordinators', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usernames: names }) })
+    .then(function(d) {
+      if (msg) msg.textContent = d.ok ? 'Saved.' : ('Error: ' + (d.error || 'not saved'));
+    }).catch(function(err) { if (msg) msg.textContent = 'Error: ' + err.message; });
+}
+
+// ── Email volunteers (whole event, or one shift) ──────────────────────
+var _volRemind = null; // { eventId }
+function volOpenRemindModal(evId, roleId) {
+  var ev = _volEventsCache.find(function(e){ return e.id === evId; });
+  if (!ev) return;
+  _volRemind = { eventId: evId };
+  var sel = document.getElementById('vol-remind-shift');
+  sel.innerHTML = '<option value="">Everyone signed up for ' + esc(ev.name) + '</option>'
+    + (ev.roles||[]).map(function(r) {
+        var when = (r.role_date ? volFormatDayLabel(r.role_date) : '') + (r.start_time ? ' ' + r.start_time : '');
+        return '<option value="' + r.id + '"' + (roleId === r.id ? ' selected' : '') + '>' + esc(r.name) + (when ? ' (' + esc(when.trim()) + ')' : '') + '</option>';
+      }).join('');
+  document.getElementById('vol-remind-subject').value = 'Reminder: ' + ev.name;
+  document.getElementById('vol-remind-body').value = 'Hi {name},\n\nThank you for volunteering for ' + ev.name + '! This is a reminder of when you signed up to serve:\n\n{shifts}\n\nIf something has come up and you can no longer make it, just reply to this email.\n\nThank you!';
+  document.getElementById('vol-remind-status').textContent = '';
+  document.getElementById('vol-remind-send').disabled = false;
+  openModal('vol-remind-modal');
+  volRemindPreview();
+}
+
+function volRemindPreview() {
+  if (!_volRemind) return;
+  var roleId = document.getElementById('vol-remind-shift').value;
+  var countEl = document.getElementById('vol-remind-count');
+  countEl.textContent = 'Counting recipients…';
+  api('/admin/api/events/' + _volRemind.eventId + '/remind', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dry_run: true, role_id: roleId ? parseInt(roleId, 10) : null }) })
+    .then(function(d) {
+      if (!d.ok) { countEl.textContent = d.error || 'Could not count recipients.'; return; }
+      _volRemind.count = d.count;
+      countEl.textContent = d.count ? ('This will email ' + d.count + ' ' + (d.count === 1 ? 'person' : 'people') + ': ' + d.names.slice(0, 8).join(', ') + (d.count > 8 ? ', and ' + (d.count - 8) + ' more' : '') + '.')
+        : 'Nobody with an email address is signed up for this yet.';
+      document.getElementById('vol-remind-send').disabled = !d.count;
+    }).catch(function() { countEl.textContent = 'Could not count recipients.'; });
+}
+
+function volSendRemind() {
+  if (!_volRemind) return;
+  var roleId = document.getElementById('vol-remind-shift').value;
+  var subject = (document.getElementById('vol-remind-subject').value || '').trim();
+  var body = (document.getElementById('vol-remind-body').value || '').trim();
+  if (!subject || !body) { alert('Please enter a subject and a message.'); return; }
+  if (!confirm('Send this email to ' + (_volRemind.count || 0) + ' ' + ((_volRemind.count === 1) ? 'person' : 'people') + '?')) return;
+  var btn = document.getElementById('vol-remind-send');
+  var status = document.getElementById('vol-remind-status');
+  btn.disabled = true; status.textContent = 'Sending…';
+  api('/admin/api/events/' + _volRemind.eventId + '/remind', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subject: subject, body: body, role_id: roleId ? parseInt(roleId, 10) : null }) })
+    .then(function(d) {
+      if (!d.ok) { status.textContent = d.error || 'Not sent.'; btn.disabled = false; return; }
+      status.textContent = 'Sent to ' + d.sent + (d.failed ? ' — ' + d.failed + ' could not be sent' : '') + '.';
+      setTimeout(function(){ closeModal('vol-remind-modal'); }, 1400);
+    }).catch(function(err) { status.textContent = 'Error: ' + err.message; btn.disabled = false; });
 }
 
 function volLoadEventRoster(evId) {
