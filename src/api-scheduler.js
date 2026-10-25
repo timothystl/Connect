@@ -1366,6 +1366,118 @@ export async function handleSignupSendEmail(req, env, signupId) {
   return json({ ok: true });
 }
 
+// ── SERVE EVENT: EMAIL EVERYONE SIGNED UP ─────────────────────────────────
+// POST /admin/api/events/:id/remind
+// Body: { subject, body, role_id?, dry_run?, reply_to? }
+// One email per person (grouped by address), so somebody holding three shifts gets one
+// message listing all three. {name} and {shifts} in the subject or body are filled per
+// person. Declined sign-ups are skipped. `dry_run` returns who would receive it and sends
+// nothing — the screen shows that count before the coordinator commits.
+const _REMIND_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const _REMIND_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function _remindDayLabel(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '';
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return `${_REMIND_DAYS[d.getUTCDay()]}, ${_REMIND_MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
+export function reminderShiftLine(slot) {
+  const bits = [_remindDayLabel(slot.role_date), slot.name || ''];
+  if (slot.start_time) bits.push(slot.start_time + (slot.end_time ? '–' + slot.end_time : ''));
+  return bits.filter(Boolean).join(' · ');
+}
+export function fillReminder(text, person) {
+  const first = String(person.name || '').trim().split(/\s+/)[0] || 'friend';
+  return String(text || '')
+    .replace(/\{name\}/g, first)
+    .replace(/\{shifts\}/g, person.shifts.length ? person.shifts.map((l) => '  • ' + l).join('\n') : '  • (no shift on file)');
+}
+export async function eventReminderRecipients(db, eventId, roleId) {
+  const slotSql = `SELECT s.id AS signup_id, s.name, s.email, r.name AS role_name, r.role_date, r.start_time, r.end_time, r.sort_order, r.id AS rid
+    FROM signup_slots ss JOIN signups s ON ss.signup_id=s.id JOIN serve_roles r ON ss.role_id=r.id
+    WHERE r.event_id=? ${roleId ? 'AND r.id=?' : ''} AND COALESCE(s.status,'new')!='declined'
+    ORDER BY r.role_date, r.start_time, r.sort_order, r.id`;
+  const slots = (await db.prepare(slotSql).bind(...(roleId ? [eventId, roleId] : [eventId])).all()).results || [];
+  // Untimed events keep the chosen roles on the sign-up itself rather than in signup_slots.
+  const loose = roleId ? [] : ((await db.prepare(
+    `SELECT id AS signup_id, name, email, roles FROM signups WHERE event_id=? AND COALESCE(status,'new')!='declined'
+       AND id NOT IN (SELECT signup_id FROM signup_slots)`
+  ).bind(eventId).all()).results || []);
+  const byEmail = new Map();
+  const add = (row, line) => {
+    const email = String(row.email || '').trim();
+    if (!email || !email.includes('@')) return;
+    const key = email.toLowerCase();
+    if (!byEmail.has(key)) byEmail.set(key, { email, name: row.name || '', signup_ids: new Set(), shifts: [] });
+    const p = byEmail.get(key);
+    p.signup_ids.add(row.signup_id);
+    if (line && !p.shifts.includes(line)) p.shifts.push(line);
+  };
+  for (const sl of slots) add(sl, reminderShiftLine({ name: sl.role_name, role_date: sl.role_date, start_time: sl.start_time, end_time: sl.end_time }));
+  for (const s of loose) {
+    let roles = []; try { roles = JSON.parse(s.roles || '[]'); } catch { roles = []; }
+    if (!Array.isArray(roles)) roles = [];
+    add(s, null);
+    const p = byEmail.get(String(s.email || '').trim().toLowerCase());
+    if (p) for (const r of roles) if (r && !p.shifts.includes(String(r))) p.shifts.push(String(r));
+  }
+  return [...byEmail.values()].map((p) => ({ ...p, signup_ids: [...p.signup_ids] }));
+}
+
+export async function handleEventRemind(req, env, eventId, sender) {
+  const db = env.DB;
+  const ev = await db.prepare('SELECT id, name FROM serve_events WHERE id=?').bind(eventId).first();
+  if (!ev) return json({ error: 'Event not found' }, 404);
+  let b; try { b = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+  const roleId = b.role_id ? parseInt(b.role_id, 10) : null;
+  if (roleId) {
+    const r = await db.prepare('SELECT id FROM serve_roles WHERE id=? AND event_id=?').bind(roleId, eventId).first();
+    if (!r) return json({ error: 'That shift is not part of this event' }, 400);
+  }
+  const people = await eventReminderRecipients(db, eventId, roleId);
+  if (b.dry_run) {
+    return json({ ok: true, count: people.length, names: people.map((p) => p.name || p.email) });
+  }
+  const subject = String(b.subject || '').trim();
+  const body = String(b.body || '').trim();
+  if (!subject || !body) return json({ error: 'A subject and a message are both required' }, 400);
+  if (!people.length) return json({ error: 'Nobody with an email address is signed up for this yet' }, 400);
+  if (people.length > 500) return json({ error: 'More than 500 recipients — please send by shift' }, 400);
+
+  const resendKey = env.RESEND_API_KEY || '';
+  const emailFrom = env.EMAIL_FROM || '';
+  if (!resendKey || !emailFrom) return json({ error: 'Email not configured (RESEND_API_KEY / EMAIL_FROM missing)' }, 500);
+  const replyTo = String(b.reply_to || (sender && sender.email) || officeEmail(env)).trim();
+
+  let sent = 0;
+  const failed = [];
+  for (let i = 0; i < people.length; i += 100) {
+    const chunk = people.slice(i, i + 100);
+    const res = await fetch('https://api.resend.com/emails/batch', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + resendKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(chunk.map((p) => ({
+        from: emailFrom, to: p.email, reply_to: replyTo,
+        subject: fillReminder(subject, p).replace(/\s*\n\s*/g, ' '),
+        text: fillReminder(body, p),
+      }))),
+    }).catch((e) => ({ ok: false, text: async () => String(e && e.message || e) }));
+    if (!res.ok) { failed.push(...chunk.map((p) => p.email)); continue; }
+    sent += chunk.length;
+    const ids = chunk.flatMap((p) => p.signup_ids);
+    if (ids.length) {
+      await db.prepare(
+        `UPDATE signups SET contacted_at=datetime('now'), contact_count=contact_count+1, status=CASE WHEN status='new' THEN 'contacted' ELSE status END WHERE id IN (${ids.map(() => '?').join(',')})`
+      ).bind(...ids).run().catch(() => {});
+    }
+  }
+  await db.prepare(
+    `INSERT INTO audit_log (action, object_type, object_id, object_json) VALUES ('volunteer_event_reminder_sent', 'serve_event', ?, ?)`
+  ).bind(eventId, JSON.stringify({ subject, role_id: roleId, sent, failed: failed.length, by: sender && sender.username || '' })).run().catch(() => {});
+  if (!sent) return json({ error: 'The email service did not accept the message. Nothing was sent.' }, 502);
+  return json({ ok: true, sent, failed: failed.length });
+}
+
 // ── SCHEDULER VOLUNTEERS (SC6 Phase 1) ────────────────────────────────────
 // Relationalized replacement for the scheduler_data blob's 'ws_people' key — a Scheduler
 // volunteer IS a real `people` row (person_id), not a separate client-generated identity.
