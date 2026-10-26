@@ -704,13 +704,15 @@ function volRenderEventDetail() {
   // Admin only: who coordinates this event. Loaded separately so the list of accounts is
   // never part of the events payload every role reads.
   var coordBox = _userRole === 'admin'
-    ? '<div class="ev-coord-box" style="margin-top:22px;padding-top:14px;border-top:1px solid var(--linen);">'
+    ? '<div class="ev-coord-box" style="margin:4px 0 16px;padding:12px 14px;background:var(--linen);border-radius:10px;">'
       + '<h4 style="font-family:var(--font-head);font-size:.92rem;color:var(--steel-anchor);margin:0 0 4px;">Event coordinators</h4>'
       + '<p style="font-size:.78rem;color:var(--warm-gray);margin:0 0 8px;">People who can edit this event and its shifts and email the volunteers signed up for it, and nothing else in Connect. Create their login in Settings &rarr; Users with the Volunteer role, then tick them here.</p>'
       + '<div id="vol-ev-coords-' + ev.id + '" style="font-size:.85rem;color:var(--warm-gray);">Loading&hellip;</div></div>'
     : '';
 
-  detailEl.innerHTML = topBar + fields + body + coordBox;
+  // Directly under the top bar: on an event with many shifts the bottom of the page is a
+  // long scroll away, and this is the one control an administrator comes here to find.
+  detailEl.innerHTML = topBar + coordBox + fields + body;
   if (coordBox) volLoadCoordinators(ev.id);
 }
 
