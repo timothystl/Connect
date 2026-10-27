@@ -322,6 +322,43 @@ async function canManageServeEvent(req, env, eventId) {
   return !!row;
 }
 
+// Contact reads use the same admin/staff/coordinator boundary as event management.
+// Scope in SQL before loading contacts or linked people. Legacy rows without event_id
+// may belong through slots; mixed-event rows are withheld unless every slot is assigned,
+// since their free-text roles/notes cannot safely be separated by event.
+function signupReadQuery(url, info) {
+  const where = [];
+  const binds = [];
+  const ministry = url.searchParams.get('ministry');
+  if (ministry && ministry !== 'all') { where.push('s.ministry=?'); binds.push(ministry); }
+  const eventId = url.searchParams.get('event_id');
+  if (eventId !== null) {
+    where.push(`(s.event_id=? OR ((s.event_id IS NULL OR s.event_id=0) AND EXISTS (
+      SELECT 1 FROM signup_slots fs JOIN serve_roles fr ON fr.id=fs.role_id
+      WHERE fs.signup_id=s.id AND fr.event_id=?)))`);
+    binds.push(eventId, eventId);
+  }
+  if (info.role === 'volunteer') {
+    where.push(`(s.event_id IN (SELECT event_id FROM serve_event_coordinators WHERE username=?)
+      OR ((s.event_id IS NULL OR s.event_id=0) AND EXISTS (
+        SELECT 1 FROM signup_slots ss JOIN serve_roles r ON r.id=ss.role_id
+        JOIN serve_event_coordinators c ON c.event_id=r.event_id
+        WHERE ss.signup_id=s.id AND c.username=?)))
+      AND NOT EXISTS (
+        SELECT 1 FROM signup_slots ss LEFT JOIN serve_roles r ON r.id=ss.role_id
+        WHERE ss.signup_id=s.id AND NOT EXISTS (
+          SELECT 1 FROM serve_event_coordinators c WHERE c.event_id=r.event_id AND c.username=?))`);
+    const username = String(info.username).toLowerCase();
+    binds.push(username, username, username);
+  }
+  return {
+    sql: 'SELECT s.*, e.name as event_name FROM signups s LEFT JOIN serve_events e ON s.event_id=e.id'
+      + (where.length ? ' WHERE ' + where.map(w => '(' + w + ')').join(' AND ') : '')
+      + ' ORDER BY s.created_at DESC',
+    binds,
+  };
+}
+
 /** The Serve event a sign-up belongs to — its own event_id, or the event of a shift it holds. */
 async function signupEventId(env, signupId) {
   const s = await env.DB.prepare(
@@ -333,6 +370,16 @@ async function signupEventId(env, signupId) {
 
 async function handleAdminApiRoutes(req, env, url, method) {
   const seg = url.pathname.replace('/admin/api/', '');
+
+  let contactReader;
+  if (method === 'GET' && (seg === 'signups' || seg === 'export.csv' || /^events\/\d+\/roster$/.test(seg))) {
+    contactReader = await getAuthInfo(req, env);
+    if (!contactReader) return json({ error: 'Unauthorized' }, 401);
+    if (!['admin', 'staff'].includes(contactReader.role)
+      && !(contactReader.role === 'volunteer' && contactReader.username)) {
+      return json({ error: 'Access denied' }, 403);
+    }
+  }
 
   // ── Current user info ─────────────────────────────────────────────
   if (seg === 'me' && method === 'GET') {
@@ -511,12 +558,8 @@ async function handleAdminApiRoutes(req, env, url, method) {
   }
 
   if (seg === 'signups' && method === 'GET') {
-    const ministry = url.searchParams.get('ministry') || '';
-    let q = 'SELECT s.*, e.name as event_name FROM signups s LEFT JOIN serve_events e ON s.event_id=e.id';
-    const binds = [];
-    if (ministry && ministry !== 'all') { q += ' WHERE s.ministry=?'; binds.push(ministry); }
-    q += ' ORDER BY s.created_at DESC';
-    const rows = await env.DB.prepare(q).bind(...binds).all();
+    const { sql, binds } = signupReadQuery(url, contactReader);
+    const rows = await env.DB.prepare(sql).bind(...binds).all();
     // Bulk-load slot details and linked person names to avoid N+1 queries
     const signupList = rows.results || [];
     const signupIds = signupList.map(s => s.id).filter(Boolean);
@@ -837,6 +880,7 @@ async function handleAdminApiRoutes(req, env, url, method) {
 
   if (seg.match(/^events\/\d+\/roster$/) && method === 'GET') {
     const evId = parseInt(seg.split('/')[1]);
+    if (!await canManageServeEvent(req, env, evId)) return json({ error: 'Access denied' }, 403);
     const ev = await env.DB.prepare('SELECT * FROM serve_events WHERE id=?').bind(evId).first();
     if (!ev) return json({ error: 'Not found' }, 404);
     const roles = await env.DB.prepare(
@@ -860,12 +904,8 @@ async function handleAdminApiRoutes(req, env, url, method) {
   }
 
   if (seg === 'export.csv' && method === 'GET') {
-    const ministry = url.searchParams.get('ministry') || '';
-    let q = 'SELECT s.*, e.name as event_name FROM signups s LEFT JOIN serve_events e ON s.event_id=e.id';
-    const binds = [];
-    if (ministry && ministry !== 'all') { q += ' WHERE s.ministry=?'; binds.push(ministry); }
-    q += ' ORDER BY s.created_at DESC';
-    const rows = await env.DB.prepare(q).bind(...binds).all();
+    const { sql, binds } = signupReadQuery(url, contactReader);
+    const rows = await env.DB.prepare(sql).bind(...binds).all();
     const cols = ['id','ministry','name','email','phone','roles','service','sundays','shirt_wanted','shirt_size','notes','event_name','created_at'];
     // `name` and `notes` here come straight from the PUBLIC sign-up form, so this export is
     // one of the two that most needs the formula guard csvCell carries (SEC18 / P22-C). The

@@ -4,17 +4,10 @@ import { handleAdminApi } from '../src/api-admin.js';
 import { handleChmsApi } from '../src/api-chms.js';
 import { authCookieHeader } from '../src/auth.js';
 
-// A new "volunteer" role: a narrow, read-only tester/manager account for the public
-// sign-up flow, requested so someone testing the Christmas Market registration can log
-// into Connect and see it land under Volunteers -> Signups without being handed a full
-// staff account. It sees ONLY the Volunteers screen (Signups / Ministry Roles / Events /
-// Templates), read-only — every write on that surface still requires admin/staff, and
-// everything else in the app (People, Giving, Reports, ...) is denied outright.
-//
-// Reads on events/signups/ministry-roles/templates were already open to any authenticated
-// role before this change (only writes were admin/staff-gated) — these tests pin that this
-// role rides that existing pattern correctly, and that it is denied everywhere else, both
-// through the real handleAdminApi/handleChmsApi dispatch with a real HMAC-signed cookie.
+// Volunteer accounts retain the event/ministry/template screen. Contact reads now
+// require a named account assigned as an event coordinator; the anonymous role-only
+// cookie used here must not expose signups. Coordinator permissions are covered in
+// serve-event-coordinator.test.js. Other application areas remain denied.
 
 const SECRET = 'test-signing-secret';
 
@@ -129,10 +122,10 @@ describe('volunteer role — reads its own screen', () => {
     expect(r.body.events.map(e => e.name)).toContain('Christmas Market');
   });
 
-  it('can read Signups', async () => {
+  it('cannot read Signups without a named coordinator account', async () => {
     const r = await call('volunteer', 'signups', 'GET');
-    expect(r.status).toBe(200);
-    expect(r.body.signups.map(s => s.email)).toContain('jane@example.com');
+    expect(r.status).toBe(403);
+    expect(r.body).toEqual({ error: 'Access denied' });
   });
 
   it('can read Ministry Roles', async () => {
