@@ -665,6 +665,8 @@ function volRenderEventDetail() {
               + '<div class="ev-fill-bar"><div style="width:' + pct + '%;background:' + barColor + ';"></div></div>'
               + '<div class="ev-fill-count" style="color:' + barColor + ';">' + (r.filled_count||0) + ' / ' + (r.slots||0) + '</div>'
               + (canEdit ? '<div class="ev-edit-link">Edit</div>' : '<div></div>')
+              // Who took this shift, filled in by volLoadShiftNames() once the roster arrives.
+              + '<div class="ev-shift-who" id="vol-shift-who-' + r.id + '" style="grid-column:1/-1;font-size:.76rem;color:var(--ev-muted);line-height:1.5;"></div>'
               + '</div>';
           }).join('');
     }).join('') || '<p style="font-size:.85rem;color:var(--warm-gray);margin-bottom:10px;">No shifts yet.</p>';
@@ -714,6 +716,26 @@ function volRenderEventDetail() {
   // long scroll away, and this is the one control an administrator comes here to find.
   detailEl.innerHTML = topBar + coordBox + fields + body;
   if (coordBox) volLoadCoordinators(ev.id);
+  if (useTs) volLoadShiftNames(ev.id);
+}
+
+// Names under each shift, so a coordinator can see who is coming to each job without
+// cross-referencing the Signups list. Contact details link straight to a call or email.
+function volLoadShiftNames(evId) {
+  api('/admin/api/events/' + evId + '/roster').then(function(d) {
+    (d.roster || []).forEach(function(r) {
+      var el = document.getElementById('vol-shift-who-' + r.id);
+      if (!el) return;
+      var vols = r.volunteers || [];
+      if (!vols.length) { el.textContent = 'Nobody signed up yet'; return; }
+      el.innerHTML = vols.map(function(v) {
+        var bits = [];
+        if (v.phone) bits.push('<a href="tel:' + esc(v.phone) + '" onclick="event.stopPropagation()">' + esc(v.phone) + '</a>');
+        if (v.email) bits.push('<a href="mailto:' + esc(v.email) + '" onclick="event.stopPropagation()">' + esc(v.email) + '</a>');
+        return '<div><strong style="color:var(--color-navy);font-weight:600;">' + esc(v.name) + '</strong>' + (bits.length ? ' &middot; ' + bits.join(' &middot; ') : '') + '</div>';
+      }).join('');
+    });
+  }).catch(function() {});
 }
 
 function volLoadCoordinators(evId) {
