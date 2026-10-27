@@ -6,7 +6,7 @@ import { fillReminder, reminderShiftLine } from '../src/api-scheduler.js';
 
 // Event coordinators: a Volunteer-role login an administrator puts in charge of ONE Serve
 // event. On that event it can edit the event and its shifts, change sign-up statuses and
-// email everyone signed up; on every other event it stays read-only, and it can never
+// email everyone signed up; on every other event contact reads are denied, and it can never
 // create/delete events or assign coordinators.
 
 const SECRET = 'test-signing-secret';
@@ -117,12 +117,13 @@ beforeEach(() => {
 afterEach(() => { globalThis.fetch = realFetch; });
 
 async function call(role, username, path, method, body) {
-  const cookie = (await authCookieHeader(env, role, username)).split(';')[0];
+  const cookie = role ? (await authCookieHeader(env, role, username)).split(';')[0] : '';
   const url = new URL('https://connect.timothystl.org/admin/api/' + path);
   const req = new Request(url, { method, headers: { cookie, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
   const res = await handleAdminApi(req, env, url, method);
-  let json = null; try { json = await res.json(); } catch {}
-  return { status: res.status, body: json };
+  const text = await res.text();
+  let json = null; try { json = JSON.parse(text); } catch {}
+  return { status: res.status, body: json, text };
 }
 const marla = (path, method, body) => call('volunteer', 'marla', path, method, body);
 
@@ -226,5 +227,65 @@ describe('assigning coordinators', () => {
 
   it('staff cannot assign', async () => {
     expect((await call('staff', '', 'events/1/coordinators', 'GET')).status).toBe(403);
+  });
+});
+
+
+describe('volunteer contact read authorization', () => {
+  const routes = ['signups', 'signups?ministry=events&event_id=1', 'export.csv', 'export.csv?event_id=1', 'events/1/roster'];
+  it.each(routes)('requires authentication for %s', async (path) => {
+    expect((await call(null, '', path, 'GET')).status).toBe(401);
+  });
+  it.each(['member', 'finance', 'council', 'compensation', 'unknown'])('denies the %s role', async (role) => {
+    for (const path of routes) expect((await call(role, '', path, 'GET')).status).toBe(403);
+  });
+  it('limits rosters to assigned events and rejects anonymous Volunteer sessions', async () => {
+    expect((await marla('events/1/roster', 'GET')).body.roster[0].volunteers.map(v => v.email))
+      .toEqual(['bob@example.com', 'jane@example.com']);
+    expect((await marla('events/2/roster', 'GET')).status).toBe(403);
+    expect((await call('volunteer', 'other', 'events/1/roster', 'GET')).status).toBe(403);
+    for (const path of routes) expect((await call('volunteer', '', path, 'GET')).status).toBe(403);
+  });
+  it.each(['', '?ministry=all', '?ministry=events', '?event_id=1', '?event_id=1&event_id=2'])('scopes bulk lists and exports with filter %s', async (filter) => {
+    const list = await marla('signups' + filter, 'GET');
+    expect(list.status).toBe(200);
+    expect(list.body.signups.map(s => s.id).sort()).toEqual([1, 2]);
+    const csv = await marla('export.csv' + filter, 'GET');
+    expect(csv.status).toBe(200);
+    expect(csv.text).toContain('jane@example.com');
+    expect(csv.text).not.toContain('pat@example.com');
+  });
+  it.each(['?event_id=2', '?event_id=999', '?event_id=', '?event_id=1 OR 1=1', '?ministry=other'])('cannot widen access with %s', async (filter) => {
+    expect((await marla('signups' + filter, 'GET')).body.signups).toEqual([]);
+    expect((await marla('export.csv' + filter, 'GET')).text.trim().split('\n')).toHaveLength(1);
+  });
+  it('returns no contacts for an unassigned or revoked coordinator', async () => {
+    for (const username of ['other', 'marla']) {
+      if (username === 'marla') sqlite.exec('DELETE FROM serve_event_coordinators');
+      expect((await call('volunteer', username, 'signups', 'GET')).body.signups).toEqual([]);
+      expect((await call('volunteer', username, 'export.csv', 'GET')).text).not.toContain('@example.com');
+    }
+  });
+  it('handles legacy slot ownership without leaking unassigned or mixed-event notes', async () => {
+    sqlite.exec(`INSERT INTO signups (id,event_id,name,email,notes) VALUES
+      (4,NULL,'Legacy','legacy@example.com','assigned'),
+      (5,0,'Other legacy','otherlegacy@example.com','private'),
+      (6,NULL,'No event','none@example.com','private'),
+      (7,NULL,'Mixed','mixed@example.com','private'),
+      (8,2,'Conflicting','conflict@example.com','private');
+      INSERT INTO signup_slots (signup_id,role_id) VALUES (4,1),(5,3),(7,1),(7,3),(8,1);`);
+    for (const filter of ['', '?event_id=1']) {
+      expect((await marla('signups' + filter, 'GET')).body.signups.map(s => s.id).sort()).toEqual([1,2,4]);
+      const csv = await marla('export.csv' + filter, 'GET');
+      expect(csv.text).toContain('legacy@example.com');
+      expect(csv.text).not.toContain('private');
+    }
+  });
+  it.each(['admin', 'staff'])('preserves global %s access and honors event/ministry filters', async role => {
+    expect((await call(role, '', 'signups', 'GET')).body.signups).toHaveLength(3);
+    expect((await call(role, '', 'export.csv', 'GET')).text).toContain('pat@example.com');
+    expect((await call(role, '', 'events/2/roster', 'GET')).status).toBe(200);
+    expect((await call(role, '', 'signups?event_id=2&ministry=events', 'GET')).body.signups.map(s => s.id)).toEqual([3]);
+    expect((await call(role, '', 'export.csv?event_id=2', 'GET')).text).not.toContain('jane@example.com');
   });
 });
