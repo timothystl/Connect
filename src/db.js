@@ -1890,6 +1890,23 @@ async function _doInitDb(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (event_id, username)
     )`,
+    // Past volunteers for a Serve event, imported to invite them back (see migrations/0064 and
+    // src/api-past-volunteers.js). Never sign-ups: these rows fill no shift.
+    `CREATE TABLE IF NOT EXISTS serve_past_volunteers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id INTEGER NOT NULL,
+      dedupe_key TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
+      email TEXT NOT NULL DEFAULT '',
+      phone TEXT NOT NULL DEFAULT '',
+      source_label TEXT NOT NULL DEFAULT '',
+      person_id INTEGER,
+      match_method TEXT NOT NULL DEFAULT '',
+      invited_at TEXT NOT NULL DEFAULT '',
+      invite_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (event_id, dedupe_key)
+    )`,
     // Tuition Aid Planner: K-8/LHS roster (money in integer cents), budget config, historical chart data
     `CREATE TABLE IF NOT EXISTS tuition_students (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

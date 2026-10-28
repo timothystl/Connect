@@ -7,6 +7,7 @@ import { randHex, authCardPage, getRolePermissions, permissionsForRole, csvRow }
 import { sendBirthdayEmails, sendAnniversaryEmails, sendBirthdayTexts, sendAnniversaryTexts } from './api-emails.js';
 import { applyXmasMarketDefaults, handleVolunteerTemplates, handleSignupLinkPerson, handleSignupSendEmail, handleEventRemind, handleSchedulerVolunteersApi, findDuplicateSignupGroups, mergeDuplicateSignupGroup, findPossibleDuplicateSignupGroups, mergeSignupsByIds } from './api-scheduler.js';
 import { wrapEnvForDbAttribution, logDbAttribution } from './db-attribution.js';
+import { handlePastVolunteers } from './api-past-volunteers.js';
 import { verifyAccessJwt } from './access-jwt.js';
 
 function safeParseArr(json) { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } }
@@ -723,6 +724,17 @@ async function handleAdminApiRoutes(req, env, url, method) {
       return json({ ok: true, assigned: valid });
     }
     return json({ error: 'Method not allowed' }, 405);
+  }
+
+  // ── Past volunteers: import last year's list, invite them to sign up again ──
+  const pastMatch = seg.match(/^events\/(\d+)\/past-volunteers((?:\/[a-z0-9]+)?)$/);
+  if (pastMatch) {
+    const evId = parseInt(pastMatch[1]);
+    if (!await canManageServeEvent(req, env, evId)) return json({ error: 'Access denied' }, 403);
+    const info = await getAuthInfo(req, env);
+    const me = info && info.username ? await env.DB.prepare('SELECT email FROM app_users WHERE LOWER(username)=?')
+      .bind(String(info.username).toLowerCase()).first().catch(() => null) : null;
+    return handlePastVolunteers(req, env, evId, pastMatch[2] || '', method, { username: info && info.username || '', email: me && me.email || '' });
   }
 
   // ── Email everyone signed up for an event (or one shift) ──

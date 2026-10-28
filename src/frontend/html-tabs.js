@@ -1345,6 +1345,41 @@ export const HTML_TABS_1 = String.raw`<!-- ═══ HOME / DASHBOARD TAB ══
   </div>
 </div>
 
+<!-- Past volunteers: import last year's list (matched to People and tagged), invite them back -->
+<div id="vol-past-modal" class="modal-overlay" style="background:rgba(30,45,74,.35);" onclick="if(event.target===this)closeModal('vol-past-modal')">
+  <div class="modal ev-fields" style="max-width:640px;width:95%;padding:24px;gap:12px;max-height:92vh;overflow-y:auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+      <h3 id="vol-past-title" style="font-family:var(--font-head);font-weight:600;font-size:1.05rem;color:var(--color-navy);margin:0;">Past volunteers</h3>
+      <button class="ev-btn-secondary" onclick="closeModal('vol-past-modal')">Close</button>
+    </div>
+    <div id="vol-past-summary" style="font-size:.8rem;color:var(--ev-muted);"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="ev-btn-primary" onclick="volPastShowInvite()">Invite to sign up</button></div>
+    <div id="vol-past-invite" style="display:none;background:var(--ev-cream);border-radius:10px;padding:14px;">
+      <div><label style="font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ev-muted);display:block;margin-bottom:5px;">Subject</label><input type="text" id="vol-past-inv-subject"></div>
+      <div style="margin-top:10px;"><label style="font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ev-muted);display:block;margin-bottom:5px;">Message</label><textarea id="vol-past-inv-body" style="min-height:170px;"></textarea></div>
+      <div style="font-size:.72rem;color:var(--ev-muted);margin-top:4px;">{name} becomes each person's first name and {link} the sign-up page. Replies come back to you.</div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:.8rem;margin-top:8px;cursor:pointer;"><input type="checkbox" id="vol-past-inv-again" style="width:auto;margin:0;" onchange="volPastInvitePreview()">Also re-send to people already invited</label>
+      <div id="vol-past-inv-count" style="font-size:.78rem;color:var(--ev-muted);margin-top:8px;overflow-wrap:anywhere;"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
+        <button class="ev-btn-secondary" onclick="document.getElementById('vol-past-invite').style.display='none'">Cancel</button>
+        <button class="ev-btn-primary" id="vol-past-inv-send" onclick="volPastSendInvite()">Send invitations</button>
+      </div>
+    </div>
+    <details style="border:1px solid var(--ev-border);border-radius:10px;padding:10px 14px;" open>
+      <summary style="cursor:pointer;font-weight:600;font-size:.85rem;color:var(--color-navy);">Import a list</summary>
+      <p style="font-size:.78rem;color:var(--ev-muted);margin:8px 0;">Use a spreadsheet with a heading row: <strong>Name</strong> (or <strong>First Name</strong> and <strong>Last Name</strong>), <strong>Email</strong>, and <strong>Phone</strong>. Choose a CSV file, or copy the rows from Excel or Google Sheets (heading row included) and paste them below. Anyone whose email or phone matches a person in Connect is linked and tagged in People. Importing again is safe: people already on the list are not added twice.</p>
+      <div style="display:grid;grid-template-columns:1fr 120px;gap:10px;align-items:end;">
+        <div><label style="font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ev-muted);display:block;margin-bottom:5px;">CSV file</label><input type="file" id="vol-past-file" accept=".csv,.tsv,.txt,.xls,.xlsx" onchange="volPastFileChosen(this)"></div>
+        <div><label style="font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ev-muted);display:block;margin-bottom:5px;">Year / label</label><input type="text" id="vol-past-label" maxlength="60"></div>
+      </div>
+      <div style="margin-top:10px;"><label style="font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ev-muted);display:block;margin-bottom:5px;">Or paste the rows</label><textarea id="vol-past-text" style="min-height:90px;font-family:monospace;font-size:.78rem;" placeholder="Name&#9;Email&#9;Phone"></textarea></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button class="ev-btn-secondary" onclick="volPastImport()">Import</button></div>
+      <div id="vol-past-import-msg" style="font-size:.78rem;color:var(--color-navy);margin-top:6px;"></div>
+    </details>
+    <div id="vol-past-list" style="font-size:.85rem;"></div>
+  </div>
+</div>
+
 <!-- Email volunteers: one message per person signed up, {name} and {shifts} filled in -->
 <div id="vol-remind-modal" class="modal-overlay" style="background:rgba(30,45,74,.35);" onclick="if(event.target===this)closeModal('vol-remind-modal')">
   <div class="modal ev-fields" style="max-width:520px;width:95%;padding:24px;gap:14px;">

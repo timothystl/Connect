@@ -624,6 +624,8 @@ function volRenderEventDetail() {
     + '<span class="' + (ev.hidden ? 'ev-badge-hidden' : 'ev-badge-visible') + '">' + (ev.hidden ? 'Hidden' : 'Visible on site') + '</span>'
     + (canEdit ? '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
       + '<button class="ev-btn-secondary" onclick="volOpenRemindModal(' + ev.id + ',null)">Email volunteers</button>'
+      + '<button class="ev-btn-secondary" onclick="volOpenPastModal(' + ev.id + ')">Past volunteers</button>'
+      + '<a href="/coordinator-guide" target="_blank" rel="noopener" style="font-size:.78rem;font-weight:600;color:var(--sky-steel);text-decoration:none;">Coordinator guide</a>'
       + '<button class="ev-btn-secondary" onclick="volToggleEventVisibility(' + ev.id + ',' + (ev.hidden?0:1) + ')">' + (ev.hidden?'Show event':'Hide event') + '</button>'
       + (canDelete ? '<a href="javascript:void(0)" class="ev-delete-link" onclick="volDeleteEvent(' + ev.id + ')">Delete</a>' : '')
       + '<button class="ev-btn-primary" onclick="volSaveEvent(' + ev.id + ')">Save changes</button>'
@@ -766,6 +768,140 @@ function volSaveCoordinators(evId) {
     .then(function(d) {
       if (msg) msg.textContent = d.ok ? 'Saved.' : ('Error: ' + (d.error || 'not saved'));
     }).catch(function(err) { if (msg) msg.textContent = 'Error: ' + err.message; });
+}
+
+// ── Past volunteers: import last year's list, invite them back ────────
+var _volPast = null; // { eventId, rows, link, tag }
+function volOpenPastModal(evId) {
+  var ev = _volEventsCache.find(function(e){ return e.id === evId; });
+  if (!ev) return;
+  _volPast = { eventId: evId, rows: [] };
+  document.getElementById('vol-past-title').textContent = 'Past volunteers · ' + ev.name;
+  document.getElementById('vol-past-text').value = '';
+  document.getElementById('vol-past-file').value = '';
+  document.getElementById('vol-past-label').value = String(new Date().getFullYear() - 1);
+  document.getElementById('vol-past-import-msg').textContent = '';
+  document.getElementById('vol-past-invite').style.display = 'none';
+  openModal('vol-past-modal');
+  volLoadPast();
+}
+
+function volLoadPast() {
+  if (!_volPast) return;
+  var listEl = document.getElementById('vol-past-list');
+  listEl.innerHTML = 'Loading…';
+  api('/admin/api/events/' + _volPast.eventId + '/past-volunteers').then(function(d) {
+    if (!d.ok) { listEl.textContent = d.error || 'Could not load the list.'; return; }
+    _volPast.rows = d.rows || []; _volPast.link = d.link; _volPast.tag = d.tag;
+    var rows = _volPast.rows;
+    var inConnect = rows.filter(function(r){ return r.in_connect; }).length;
+    var signed = rows.filter(function(r){ return r.signed_up; }).length;
+    var invited = rows.filter(function(r){ return r.invited_at; }).length;
+    document.getElementById('vol-past-summary').textContent = rows.length
+      ? rows.length + ' on the list · ' + inConnect + ' already in Connect (tagged “' + d.tag + '”) · ' + signed + ' signed up this year · ' + invited + ' invited'
+      : 'Nobody on the list yet. Import last year’s volunteers below.';
+    if (!rows.length) { listEl.innerHTML = ''; return; }
+    var pill = function(txt, bg, fg) { return '<span style="font-size:.68rem;font-weight:600;border-radius:99px;padding:1px 8px;background:' + bg + ';color:' + fg + ';white-space:nowrap;">' + txt + '</span>'; };
+    listEl.innerHTML = rows.map(function(r) {
+      var tags = [];
+      if (r.in_connect) tags.push(pill('In Connect', 'rgba(46,126,166,.12)', 'var(--sky-steel)'));
+      if (r.signed_up) tags.push(pill('Signed up', 'rgba(39,174,96,.12)', 'var(--success)'));
+      else if (r.invited_at) tags.push(pill('Invited ' + esc(String(r.invited_at).slice(5, 10).replace('-', '/')), 'rgba(201,151,58,.15)', '#8a6420'));
+      if (!r.email) tags.push(pill('No email', 'rgba(0,0,0,.06)', 'var(--warm-gray)'));
+      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-bottom:1px solid var(--linen);">'
+        + '<div style="min-width:0;"><div style="font-weight:600;font-size:.85rem;color:var(--charcoal);">' + esc(r.name || r.email) + ' <span style="font-weight:400;font-size:.72rem;color:var(--warm-gray);">' + esc(r.source_label || '') + '</span></div>'
+        + '<div style="font-size:.75rem;color:var(--warm-gray);overflow-wrap:anywhere;">' + [r.email, r.phone].filter(Boolean).map(esc).join(' · ') + '</div></div>'
+        + '<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;justify-content:flex-end;">' + tags.join('')
+        + '<a href="javascript:void(0)" title="Remove from this list" style="color:var(--warm-gray);text-decoration:none;font-size:1rem;padding:0 4px;" onclick="volRemovePast(' + r.id + ')">&times;</a></div>'
+        + '</div>';
+    }).join('');
+  }).catch(function() { listEl.textContent = 'Could not load the list.'; });
+}
+
+function volPastFileChosen(input) {
+  var f = input.files && input.files[0];
+  if (!f) return;
+  if (/\.xlsx?$/i.test(f.name)) {
+    document.getElementById('vol-past-import-msg').textContent = 'That is an Excel file. In Excel or Google Sheets choose File → Save as / Download → CSV, then pick that file — or copy the rows (with the heading row) and paste them in the box.';
+    input.value = '';
+    return;
+  }
+  var reader = new FileReader();
+  reader.onload = function() { document.getElementById('vol-past-text').value = String(reader.result || ''); volPastImport(); };
+  reader.readAsText(f);
+}
+
+function volPastImport() {
+  if (!_volPast) return;
+  var text = document.getElementById('vol-past-text').value || '';
+  var msg = document.getElementById('vol-past-import-msg');
+  if (!text.trim()) { msg.textContent = 'Choose a file or paste the list first.'; return; }
+  msg.textContent = 'Importing…';
+  api('/admin/api/events/' + _volPast.eventId + '/past-volunteers/import', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: text, label: document.getElementById('vol-past-label').value || '' }) })
+    .then(function(d) {
+      if (!d.ok) { msg.textContent = d.error || 'Import failed.'; return; }
+      msg.textContent = 'Read ' + d.read + ' rows: ' + d.added + ' added, ' + d.updated + ' already on the list. '
+        + d.in_connect + ' matched people in Connect and were tagged “' + d.tag + '”; ' + d.not_in_connect + ' are not in Connect yet.'
+        + (d.skipped ? ' ' + d.skipped + ' rows had no email or phone and were skipped.' : '');
+      document.getElementById('vol-past-text').value = '';
+      document.getElementById('vol-past-file').value = '';
+      volLoadPast();
+    }).catch(function(err) { msg.textContent = 'Error: ' + err.message; });
+}
+
+function volRemovePast(id) {
+  if (!_volPast || !confirm('Remove this person from the past-volunteer list? (Their record in Connect is not changed.)')) return;
+  api('/admin/api/events/' + _volPast.eventId + '/past-volunteers/' + id, { method: 'DELETE' }).then(volLoadPast).catch(function(){});
+}
+
+function volPastShowInvite() {
+  if (!_volPast) return;
+  var ev = _volEventsCache.find(function(e){ return e.id === _volPast.eventId; }) || { name: 'our event' };
+  var box = document.getElementById('vol-past-invite');
+  box.style.display = '';
+  document.getElementById('vol-past-inv-subject').value = 'Volunteer with us again at the ' + ev.name;
+  document.getElementById('vol-past-inv-body').value = 'Hi {name},\n\nThank you for volunteering at last year’s ' + ev.name + ' — it would not happen without people like you.\n\nVolunteer sign-ups for this year are open. You can see every job and time and pick the ones that work for you here:\n\n{link}\n\nIf you have questions, just reply to this email.\n\nWith gratitude,';
+  document.getElementById('vol-past-inv-again').checked = false;
+  volPastInvitePreview();
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function volPastInvitePreview() {
+  if (!_volPast) return;
+  var out = document.getElementById('vol-past-inv-count');
+  var btn = document.getElementById('vol-past-inv-send');
+  out.textContent = 'Counting…';
+  api('/admin/api/events/' + _volPast.eventId + '/past-volunteers/invite', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dry_run: true, include_invited: document.getElementById('vol-past-inv-again').checked }) })
+    .then(function(d) {
+      if (!d.ok) { out.textContent = d.error || 'Could not count.'; btn.disabled = true; return; }
+      _volPast.inviteCount = d.count;
+      out.textContent = (d.count ? 'This will email ' + d.count + ' ' + (d.count === 1 ? 'person' : 'people') + '.' : 'Nobody left to invite.')
+        + (d.already_signed_up ? ' ' + d.already_signed_up + ' already signed up and will be skipped.' : '')
+        + (d.already_invited && !document.getElementById('vol-past-inv-again').checked ? ' ' + d.already_invited + ' already invited and will be skipped.' : '')
+        + ' The sign-up link is ' + d.link;
+      btn.disabled = !d.count;
+    }).catch(function() { out.textContent = 'Could not count.'; });
+}
+
+function volPastSendInvite() {
+  if (!_volPast) return;
+  var subject = (document.getElementById('vol-past-inv-subject').value || '').trim();
+  var body = (document.getElementById('vol-past-inv-body').value || '').trim();
+  if (!subject || !body) { alert('Please enter a subject and a message.'); return; }
+  if (!confirm('Send this invitation to ' + (_volPast.inviteCount || 0) + ' ' + (_volPast.inviteCount === 1 ? 'person' : 'people') + '?')) return;
+  var btn = document.getElementById('vol-past-inv-send');
+  var out = document.getElementById('vol-past-inv-count');
+  btn.disabled = true; out.textContent = 'Sending…';
+  api('/admin/api/events/' + _volPast.eventId + '/past-volunteers/invite', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subject: subject, body: body, include_invited: document.getElementById('vol-past-inv-again').checked }) })
+    .then(function(d) {
+      if (!d.ok) { out.textContent = d.error || 'Not sent.'; btn.disabled = false; return; }
+      out.textContent = 'Sent to ' + d.sent + (d.failed ? ' — ' + d.failed + ' could not be sent' : '') + '.';
+      document.getElementById('vol-past-invite').style.display = 'none';
+      volLoadPast();
+    }).catch(function(err) { out.textContent = 'Error: ' + err.message; btn.disabled = false; });
 }
 
 // ── Email volunteers (whole event, or one shift) ──────────────────────
