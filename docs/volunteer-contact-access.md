@@ -23,3 +23,13 @@ Rosters expose only contact fields for people on the requested event's shifts.
 Public registration, signed self-service links, member contracts, and other routes
 are unchanged. These restrictions do not constitute an audit of every contact-bearing
 endpoint in Connect. Tests use synthetic records and signed local test sessions.
+
+## Past volunteers
+
+`/admin/api/events/:id/past-volunteers` (list, `import`, `invite`, delete) uses the same
+event-management check as shift editing: admin/staff on every event, a Volunteer account only on
+events assigned to it. An import links a row to People only on an unambiguous email or phone match
+with an active person, and adds that person to the `<event name> volunteer` tag; it never creates
+People records and never matches on name alone. The list response says whether a row is in Connect
+but returns no People fields. The how-to for coordinators is public at `/coordinator-guide`
+(`src/coordinator-guide.js`).

@@ -32,6 +32,7 @@ import { chmsHtmlForRole, CHMS_MANIFEST_JSON, SW_JS, BACKLOG_HTML, CHMS_APP_MEMB
 import { MOBILE_ADMIN_HTML } from './src/mobile-admin-html.js';
 import { DEPLOY_VERSION } from './src/frontend/js-core.js';
 import { PRIVACY_HTML, TERMS_HTML } from './src/legal-pages.js';
+import { COORDINATOR_GUIDE_HTML } from './src/coordinator-guide.js';
 import { sendBirthdayEmails, sendAnniversaryEmails, sendBirthdayTexts, sendAnniversaryTexts, centralDayOfWeek } from './src/api-emails.js';
 import { sendWebPush } from './src/push-sender.js';
 import { notifyAdminPush } from './src/api-scheduler.js';
@@ -463,6 +464,8 @@ async function _fetchRouted(req, env, url, path, method) {
     // integration setup (e.g. QuickBooks Online's app registration form requires these URLs).
     if (path === '/privacy' && method === 'GET') return html(PRIVACY_HTML);
     if (path === '/terms' && method === 'GET') return html(TERMS_HTML);
+    // Public how-to for event coordinators (Volunteer-role logins); holds no church data.
+    if (path === '/coordinator-guide' && method === 'GET') return html(COORDINATOR_GUIDE_HTML);
     // ── Stax Giving MOCKUP (see src/stax-giving-mockup.js) — a prototype, sandbox-only,
     // parallel path alongside the real give.timothystl.org (Website repo) → Tithe.ly flow, which
     // none of this touches. The public donation form and the Apple Pay domain-verification
