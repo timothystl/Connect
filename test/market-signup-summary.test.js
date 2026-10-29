@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import {
-  handleChristmasMarketSummary, handleChristmasMarketToggle, handleChristmasMarketRoster, buildMarketSummary, marketShiftLabel,
+  handleChristmasMarketSummary, handleChristmasMarketToggle, handleChristmasMarketRoster, handleChristmasMarketPeople, buildMarketSummary, marketShiftLabel,
 } from '../src/api-scheduler.js';
 
 // Minimal D1-shaped wrapper around node:sqlite, same pattern as
@@ -38,7 +38,16 @@ function makeTestDb() {
     name TEXT NOT NULL,
     email TEXT NOT NULL DEFAULT '',
     phone TEXT NOT NULL DEFAULT '',
-    roles TEXT NOT NULL DEFAULT '[]'
+    roles TEXT NOT NULL DEFAULT '[]',
+    person_id INTEGER DEFAULT NULL
+  )`);
+  sqlite.exec(`CREATE TABLE people (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    first_name TEXT NOT NULL DEFAULT '', preferred_name TEXT NOT NULL DEFAULT '', last_name TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '',
+    member_type TEXT NOT NULL DEFAULT 'member', active INTEGER NOT NULL DEFAULT 1,
+    deceased INTEGER NOT NULL DEFAULT 0, public_directory INTEGER NOT NULL DEFAULT 1,
+    dir_hide_email INTEGER NOT NULL DEFAULT 0, dir_hide_phone INTEGER NOT NULL DEFAULT 0
   )`);
   sqlite.exec(`CREATE TABLE signup_slots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -449,6 +458,62 @@ describe('POST /api/signups/christmasmarket/roster', () => {
     const res = await call({ action: 'remove', role_id: 1, signup_id: other });
     expect(res.status).toBe(404);
     expect(slotsOf(other)).toEqual([1]);
+  });
+});
+
+describe('GET /api/signups/christmasmarket/people', () => {
+  let db, env;
+  beforeEach(() => {
+    db = makeTestDb();
+    env = { DB: db, CHMS_INTAKE_API_KEY: KEY };
+    const ins = db._raw.prepare('INSERT INTO people (first_name,preferred_name,last_name,email,phone,member_type,active,deceased,public_directory,dir_hide_email,dir_hide_phone) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+    ins.run('Franklin', 'Frank', 'Schmidt', 'fs@example.com', '314-555-0101', 'member', 1, 0, 1, 0, 0);
+    ins.run('Frank', '', 'Adler', 'fa@example.com', '314-555-0102', 'visitor', 1, 0, 1, 1, 1);
+    ins.run('Frances', '', 'Zahn', 'fz@example.com', '', 'member', 1, 0, 1, 0, 0);
+    ins.run('Frank', '', 'Gone', 'g@example.com', '', 'member', 0, 0, 1, 0, 0);
+    ins.run('Frank', '', 'Late', 'l@example.com', '', 'member', 1, 1, 1, 0, 0);
+    ins.run('Frank', '', 'Private', 'p@example.com', '', 'member', 1, 0, 0, 0, 0);
+    ins.run('Frankfort', '', 'Bakery', 'b@example.com', '', 'organization', 1, 0, 1, 0, 0);
+  });
+  const get = (q, key = KEY) => {
+    const req = reqWith(key);
+    req.url = 'https://serve.timothystl.org/api/signups/christmasmarket/people?q=' + encodeURIComponent(q);
+    return handleChristmasMarketPeople(req, env);
+  };
+
+  it('refuses without the shared secret', async () => {
+    expect((await get('frank', 'nope')).status).toBe(401);
+  });
+
+  it('finds every directory Frank by first, preferred or last name, sorted by last name', async () => {
+    const d = await (await get('fran')).json();
+    expect(d.people.map(p => p.name)).toEqual(['Frank Adler', 'Frank Schmidt', 'Frances Zahn']);
+  });
+
+  it('leaves out inactive, deceased, opted-out and organization rows', async () => {
+    const names = (await (await get('frank')).json()).people.map(p => p.name);
+    for (const n of ['Frank Gone', 'Frank Late', 'Frank Private', 'Frankfort Bakery']) expect(names).not.toContain(n);
+  });
+
+  it('narrows on every word, and blanks contact details the person has hidden', async () => {
+    const d = await (await get('frank sch')).json();
+    expect(d.people).toEqual([{ id: 1, name: 'Frank Schmidt', email: 'fs@example.com', phone: '314-555-0101' }]);
+    const adler = (await (await get('adler')).json()).people[0];
+    expect(adler).toMatchObject({ name: 'Frank Adler', email: '', phone: '' });
+  });
+
+  it('answers nothing for one letter, and treats % as a letter, not a wildcard', async () => {
+    expect((await (await get('f')).json()).people).toEqual([]);
+    expect((await (await get('%%')).json()).people).toEqual([]);
+  });
+
+  it('a person picked from the directory is linked on the sign-up', async () => {
+    seedMarket(db);
+    const res = await handleChristmasMarketRoster(postReqWith(KEY, { action: 'add', role_id: 1, name: 'Frank Schmidt', email: 'fs@example.com', person_id: 1 }), env);
+    const d = await res.json();
+    expect(db._raw.prepare('SELECT person_id FROM signups WHERE id=?').get(d.signup_id).person_id).toBe(1);
+    const bogus = await (await handleChristmasMarketRoster(postReqWith(KEY, { action: 'add', role_id: 1, name: 'Nobody', person_id: 999 }), env)).json();
+    expect(db._raw.prepare('SELECT person_id FROM signups WHERE id=?').get(bogus.signup_id).person_id).toBeNull();
   });
 });
 

@@ -378,6 +378,14 @@ export async function handleChristmasMarketRoster(req, env) {
   const email = String(data.email || '').trim().toLowerCase().slice(0, 200);
   const phone = String(data.phone || '').trim().slice(0, 50);
   if (!name) return noStoreJson({ error: 'A name is required.' }, 400);
+  // Picked from the directory (handleChristmasMarketPeople below) — links the
+  // sign-up to the person the same way Connect's own "link person" does. An id
+  // that is not a real, active person is simply not linked; the add still goes.
+  let personId = null;
+  if (Number.isInteger(Number(data.person_id)) && Number(data.person_id) > 0) {
+    const person = await env.DB.prepare('SELECT id FROM people WHERE id=? AND active=1').bind(Number(data.person_id)).first();
+    if (person) personId = person.id;
+  }
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return noStoreJson({ error: 'That email address does not look right.' }, 400);
   }
@@ -398,12 +406,12 @@ export async function handleChristmasMarketRoster(req, env) {
     if (already) return noStoreJson({ ok: true, added: false, already: true, signup_id: signupId });
     const roles = readRoles(existing);
     if (!roles.includes(String(roleId))) roles.push(String(roleId));
-    await env.DB.prepare('UPDATE signups SET roles=?, phone=? WHERE id=?')
-      .bind(JSON.stringify(roles), existing.phone || phone, signupId).run();
+    await env.DB.prepare('UPDATE signups SET roles=?, phone=?, person_id=COALESCE(person_id, ?) WHERE id=?')
+      .bind(JSON.stringify(roles), existing.phone || phone, personId, signupId).run();
   } else {
     const r = await env.DB.prepare(
-      'INSERT INTO signups (event_id,role_id,ministry,name,email,phone,roles) VALUES (?,?,?,?,?,?,?)'
-    ).bind(ev.id, 0, 'events', name, email, phone, JSON.stringify([String(roleId)])).run();
+      'INSERT INTO signups (event_id,role_id,ministry,name,email,phone,roles,person_id) VALUES (?,?,?,?,?,?,?,?)'
+    ).bind(ev.id, 0, 'events', name, email, phone, JSON.stringify([String(roleId)]), personId).run();
     signupId = r.meta?.last_row_id;
   }
   await env.DB.prepare('INSERT INTO signup_slots (signup_id,role_id) VALUES (?,?)').bind(signupId, roleId).run();
@@ -413,6 +421,59 @@ export async function handleChristmasMarketRoster(req, env) {
   const filled = await env.DB.prepare('SELECT COUNT(*) AS n FROM signup_slots WHERE role_id=?').bind(roleId).first();
   const over = Number(role.slots) > 0 && (filled?.n || 0) > Number(role.slots);
   return noStoreJson({ ok: true, added: true, already: false, signup_id: signupId, over });
+}
+
+// ── CHRISTMAS MARKET: FIND A PERSON IN THE DIRECTORY (cross-Worker, read) ──
+// GET /api/signups/christmasmarket/people?q=frank
+//
+// The "type Frank, pick the right Frank" lookup behind the coordinator's
+// Add someone box on admin.timothystl.org. Same shared secret as the routes
+// above. At most ten matches; every word typed must match a first, preferred
+// or last name, so "frank sch" narrows to the Schmidts.
+//
+// ⚠ THE COORDINATOR IS A VOLUNTEER, NOT STAFF, so this answers the way the
+// member directory does, not the way the office's people screen does: only
+// active people who have not opted out of the directory, no organizations,
+// and a person's email or phone is left blank when they have hidden it from
+// the directory. She can still type anybody in by hand.
+export function marketPersonName(p) {
+  const first = String(p.preferred_name || '').trim() || String(p.first_name || '').trim();
+  return [first, String(p.last_name || '').trim()].filter(Boolean).join(' ');
+}
+
+export async function handleChristmasMarketPeople(req, env) {
+  const expectedKey = env.CHMS_INTAKE_API_KEY || '';
+  if (!expectedKey) return noStoreJson({ error: 'Intake not configured' }, 503);
+  if (!(await timingSafeEqual(req.headers.get('X-Intake-Key') || '', expectedKey))) {
+    return noStoreJson({ error: 'Unauthorized' }, 401);
+  }
+  const url = new URL(req.url);
+  const words = String(url.searchParams.get('q') || '').trim().toLowerCase()
+    .split(/\s+/).filter(Boolean).slice(0, 4).map((w) => w.replace(/[%_]/g, '').slice(0, 40)).filter(Boolean);
+  if (!words.length || words.join('').length < 2) return noStoreJson({ people: [] });
+
+  const binds = [];
+  const clauses = words.map((w) => {
+    binds.push(w + '%', w + '%', w + '%');
+    return "(LOWER(COALESCE(p.first_name,'')) LIKE ? OR LOWER(COALESCE(p.preferred_name,'')) LIKE ? OR LOWER(COALESCE(p.last_name,'')) LIKE ?)";
+  });
+  const rows = await env.DB.prepare(
+    `SELECT p.id, p.first_name, p.preferred_name, p.last_name, p.email, p.phone,
+            COALESCE(p.dir_hide_email,0) AS hide_email, COALESCE(p.dir_hide_phone,0) AS hide_phone
+       FROM people p
+      WHERE p.active=1 AND COALESCE(p.deceased,0)=0 AND COALESCE(p.public_directory,1)=1
+        AND LOWER(COALESCE(p.member_type,'')) != 'organization'
+        AND ${clauses.join(' AND ')}
+      ORDER BY LOWER(p.last_name), LOWER(COALESCE(NULLIF(p.preferred_name,''), p.first_name)), p.id
+      LIMIT 10`
+  ).bind(...binds).all();
+  const people = (rows.results || []).map((p) => ({
+    id: p.id,
+    name: marketPersonName(p),
+    email: p.hide_email ? '' : String(p.email || '').trim(),
+    phone: p.hide_phone ? '' : String(p.phone || '').trim(),
+  })).filter((p) => p.name);
+  return noStoreJson({ people });
 }
 
 // ── RATE LIMITING ─────────────────────────────────────────────────────
