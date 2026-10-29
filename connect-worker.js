@@ -15,7 +15,7 @@ import {
   handleVolunteerPending, handleVolunteerGeneralPending, handleVolunteerEventPending,
   handleSchedEmailSend, handleSchedEmailLog, handleSchedEmailLogStatus, handleSchedRsvpStore, handleSchedRsvpSync, handleSchedRsvpStatus, handleEsvPassage,
   handleSchedRsvpPortal, handleSchedRsvp, handleSchedBreezeProxy,
-  handleChristmasMarketSummary, handleChristmasMarketToggle, handleChristmasMarketRoster,
+  handleChristmasMarketSummary, handleChristmasMarketToggle, handleChristmasMarketRoster, handleChristmasMarketPeople,
 } from './src/api-scheduler.js';
 import { handleAdminLogin, handleAccessLogin, handleAdminApi, handleForgotPassword, handleResetPassword, handleApiMinistryRoles } from './src/api-admin.js';
 import { wrapEnvForDbAttribution, logDbAttribution } from './src/db-attribution.js';
@@ -280,6 +280,7 @@ function isSchedCorsPath(path) {
     if (path === '/api/signups/christmasmarket/summary') return false;
     if (path === '/api/signups/christmasmarket/toggle') return false;
     if (path === '/api/signups/christmasmarket/roster') return false;
+    if (path === '/api/signups/christmasmarket/people') return false;
     if (path.startsWith('/api/intake/')) return false;
     // Stax Giving MOCKUP (src/stax-giving-mockup.js) — same shape as /api/intake/ above: matched
     // above the breeze-proxy catch-all, same-origin only, never emits SCHED_CORS.
@@ -626,6 +627,15 @@ async function _fetchRouted(req, env, url, path, method) {
         return await handleChristmasMarketRoster(req, env);
       } catch (e) {
         console.error('Market roster error:', e?.message, e?.stack);
+        return json({ error: 'Internal server error' }, 500, { 'Cache-Control': 'no-store' });
+      }
+    }
+    // The directory lookup behind the coordinator's Add someone box.
+    if (path === '/api/signups/christmasmarket/people' && method === 'GET') {
+      try {
+        return await handleChristmasMarketPeople(req, env);
+      } catch (e) {
+        console.error('Market people error:', e?.message, e?.stack);
         return json({ error: 'Internal server error' }, 500, { 'Cache-Control': 'no-store' });
       }
     }
