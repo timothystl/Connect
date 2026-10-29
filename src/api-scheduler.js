@@ -158,6 +158,9 @@ export function buildMarketSummary(roles, peopleByRole) {
     const name = role.name || 'Volunteers';
     if (!byName.has(name)) byName.set(name, { name, shifts: [] });
     byName.get(name).shifts.push({
+      // The serve_roles id, so the caller can name THIS shift when it adds or
+      // removes somebody through handleChristmasMarketRoster below.
+      id: role.id,
       label: marketShiftLabel(role),
       // ⚠ `date` GOES ON THE SHIFT, NOT ON THE GROUP. A group here is a job NAME,
       // and the market's jobs repeat across both days — Kitchen runs Friday and
@@ -223,7 +226,7 @@ export async function handleChristmasMarketSummary(req, env) {
 
   // One join for every signed-up person, rather than a query per shift.
   const slotRows = await env.DB.prepare(
-    `SELECT ss.role_id, s.name, s.email
+    `SELECT ss.role_id, s.id, s.name, s.email
        FROM signup_slots ss
        JOIN serve_roles sr ON sr.id = ss.role_id
        JOIN signups      s  ON s.id  = ss.signup_id
@@ -233,7 +236,8 @@ export async function handleChristmasMarketSummary(req, env) {
   const peopleByRole = new Map();
   for (const r of (slotRows.results || [])) {
     if (!peopleByRole.has(r.role_id)) peopleByRole.set(r.role_id, []);
-    peopleByRole.get(r.role_id).push({ name: r.name || '', email: r.email || '' });
+    // `id` is the signups row, so the caller can remove this person from this shift.
+    peopleByRole.get(r.role_id).push({ id: r.id, name: r.name || '', email: r.email || '' });
   }
 
   // One row per person per event (the signup POST refuses a second one for the
@@ -296,6 +300,119 @@ export async function handleChristmasMarketToggle(req, env) {
   const hidden = data.open ? 0 : 1;
   await env.DB.prepare('UPDATE serve_events SET hidden = ? WHERE id = ?').bind(hidden, ev.id).run();
   return noStoreJson({ open: !hidden });
+}
+
+// ── CHRISTMAS MARKET ROSTER EDITS (cross-Worker, write) ───────────────
+// POST /api/signups/christmasmarket/roster
+//   { "action": "add",    "role_id": 12, "name": "Ann Ruh", "email": "", "phone": "" }
+//   { "action": "remove", "role_id": 12, "signup_id": 34 }
+//
+// Lets the market coordinator (admin.timothystl.org → Christmas Market →
+// Volunteers) put somebody on a shift, or take them off one, directly — the
+// person who called the office, or the one who cannot come after all. Same
+// shared-secret auth and server-to-server shape as the summary and toggle
+// routes above; the website admin checks the coordinator's own permission
+// before it ever calls this.
+//
+// ⚠ DELIBERATELY NOT handleSignup(). That is the public form: it rate-limits by
+// IP, refuses a full shift, refuses a closed event, and emails the volunteer and
+// the office. A coordinator adding a name is none of those — she may be filling
+// a shift past its count on purpose, the roster may already be closed to the
+// public, and she will tell the person herself. What IS shared is the record
+// shape: one signups row per person per event (matched by email, or by name
+// when no email was given), shifts in signup_slots, and the chosen role ids
+// mirrored as strings in `signups.roles` — exactly what the public market form
+// writes, so Connect's own Scheduler screen sees the same thing either way.
+export async function handleChristmasMarketRoster(req, env) {
+  const expectedKey = env.CHMS_INTAKE_API_KEY || '';
+  if (!expectedKey) return noStoreJson({ error: 'Intake not configured' }, 503);
+  if (!(await timingSafeEqual(req.headers.get('X-Intake-Key') || '', expectedKey))) {
+    return noStoreJson({ error: 'Unauthorized' }, 401);
+  }
+
+  let data;
+  try { data = await req.json(); } catch { return noStoreJson({ error: 'Invalid JSON' }, 400); }
+  const action = data && data.action;
+  if (action !== 'add' && action !== 'remove') {
+    return noStoreJson({ error: '"action" must be "add" or "remove"' }, 400);
+  }
+  const roleId = Number(data.role_id);
+  if (!Number.isInteger(roleId) || roleId <= 0) return noStoreJson({ error: 'A shift is required.' }, 400);
+
+  const ev = await env.DB.prepare(
+    "SELECT id FROM serve_events WHERE slug=? OR name=? ORDER BY (slug=?) DESC, id LIMIT 1"
+  ).bind(XMAS_MARKET_SLUG, XMAS_MARKET_NAME, XMAS_MARKET_SLUG).first();
+  if (!ev) return noStoreJson({ error: 'No Christmas Market event exists yet in Serve.' }, 404);
+  // ⚠ The shift must belong to THE market — this key must never become a way to
+  // write onto some other event's roster.
+  const role = await env.DB.prepare('SELECT id, slots FROM serve_roles WHERE id=? AND event_id=?')
+    .bind(roleId, ev.id).first();
+  if (!role) return noStoreJson({ error: 'That shift is no longer on the market roster.' }, 404);
+
+  const readRoles = (row) => {
+    try { const v = JSON.parse(row.roles || '[]'); return Array.isArray(v) ? v.map(String) : []; } catch { return []; }
+  };
+
+  if (action === 'remove') {
+    const signupId = Number(data.signup_id);
+    if (!Number.isInteger(signupId) || signupId <= 0) return noStoreJson({ error: 'A volunteer is required.' }, 400);
+    const signup = await env.DB.prepare('SELECT id, roles FROM signups WHERE id=? AND event_id=?')
+      .bind(signupId, ev.id).first();
+    if (!signup) return noStoreJson({ error: 'That volunteer is no longer on the market roster.' }, 404);
+    await env.DB.prepare('DELETE FROM signup_slots WHERE signup_id=? AND role_id=?').bind(signupId, roleId).run();
+    const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM signup_slots WHERE signup_id=?').bind(signupId).first();
+    // Nobody is "signed up for the market" with no shifts — leaving the row
+    // would keep counting them in `signedUp`. Same two deletes Connect's own
+    // DELETE /admin/api/signups/:id makes.
+    if (!(left?.n > 0)) {
+      await env.DB.prepare('DELETE FROM signups WHERE id=?').bind(signupId).run();
+      return noStoreJson({ ok: true, removed: true, signup_deleted: true });
+    }
+    const roles = readRoles(signup).filter((r) => r !== String(roleId));
+    await env.DB.prepare('UPDATE signups SET roles=? WHERE id=?').bind(JSON.stringify(roles), signupId).run();
+    return noStoreJson({ ok: true, removed: true, signup_deleted: false });
+  }
+
+  // ── add ──
+  const name = String(data.name || '').trim().slice(0, 200);
+  const email = String(data.email || '').trim().toLowerCase().slice(0, 200);
+  const phone = String(data.phone || '').trim().slice(0, 50);
+  if (!name) return noStoreJson({ error: 'A name is required.' }, 400);
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return noStoreJson({ error: 'That email address does not look right.' }, 400);
+  }
+
+  // Same person-per-event rule as handleSignup: the same email is the same
+  // person. With no email, the same name on this event's no-email rows is.
+  const existing = email
+    ? await env.DB.prepare('SELECT id, roles, phone FROM signups WHERE email=? AND event_id=? ORDER BY id DESC LIMIT 1')
+        .bind(email, ev.id).first()
+    : await env.DB.prepare("SELECT id, roles, phone FROM signups WHERE email='' AND lower(name)=lower(?) AND event_id=? ORDER BY id DESC LIMIT 1")
+        .bind(name, ev.id).first();
+
+  let signupId;
+  if (existing) {
+    signupId = existing.id;
+    const already = await env.DB.prepare('SELECT id FROM signup_slots WHERE signup_id=? AND role_id=?')
+      .bind(signupId, roleId).first();
+    if (already) return noStoreJson({ ok: true, added: false, already: true, signup_id: signupId });
+    const roles = readRoles(existing);
+    if (!roles.includes(String(roleId))) roles.push(String(roleId));
+    await env.DB.prepare('UPDATE signups SET roles=?, phone=? WHERE id=?')
+      .bind(JSON.stringify(roles), existing.phone || phone, signupId).run();
+  } else {
+    const r = await env.DB.prepare(
+      'INSERT INTO signups (event_id,role_id,ministry,name,email,phone,roles) VALUES (?,?,?,?,?,?,?)'
+    ).bind(ev.id, 0, 'events', name, email, phone, JSON.stringify([String(roleId)])).run();
+    signupId = r.meta?.last_row_id;
+  }
+  await env.DB.prepare('INSERT INTO signup_slots (signup_id,role_id) VALUES (?,?)').bind(signupId, roleId).run();
+
+  // Reported, not refused: the coordinator may mean to put a fifth person on a
+  // four-person shift, and the caller says so rather than blocking her.
+  const filled = await env.DB.prepare('SELECT COUNT(*) AS n FROM signup_slots WHERE role_id=?').bind(roleId).first();
+  const over = Number(role.slots) > 0 && (filled?.n || 0) > Number(role.slots);
+  return noStoreJson({ ok: true, added: true, already: false, signup_id: signupId, over });
 }
 
 // ── RATE LIMITING ─────────────────────────────────────────────────────
