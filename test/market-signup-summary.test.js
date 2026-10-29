@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import {
-  handleChristmasMarketSummary, handleChristmasMarketToggle, buildMarketSummary, marketShiftLabel,
+  handleChristmasMarketSummary, handleChristmasMarketToggle, handleChristmasMarketRoster, buildMarketSummary, marketShiftLabel,
 } from '../src/api-scheduler.js';
 
 // Minimal D1-shaped wrapper around node:sqlite, same pattern as
@@ -37,7 +37,8 @@ function makeTestDb() {
     ministry TEXT NOT NULL DEFAULT '',
     name TEXT NOT NULL,
     email TEXT NOT NULL DEFAULT '',
-    phone TEXT NOT NULL DEFAULT ''
+    phone TEXT NOT NULL DEFAULT '',
+    roles TEXT NOT NULL DEFAULT '[]'
   )`);
   sqlite.exec(`CREATE TABLE signup_slots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,10 +105,12 @@ function seedMarket(db, { hidden = 0, slug = 'christmasmarket' } = {}) {
 
 function addVolunteer(db, evId, name, email, roleIds) {
   const s = db._raw;
-  const r = s.prepare('INSERT INTO signups (event_id,name,email) VALUES (?,?,?)').run(evId, name, email);
+  const r = s.prepare('INSERT INTO signups (event_id,name,email,roles) VALUES (?,?,?,?)')
+    .run(evId, name, email, JSON.stringify(roleIds.map(String)));
   for (const rid of roleIds) {
     s.prepare('INSERT INTO signup_slots (signup_id,role_id) VALUES (?,?)').run(Number(r.lastInsertRowid), rid);
   }
+  return Number(r.lastInsertRowid);
 }
 
 describe('GET /api/signups/christmasmarket/summary', () => {
@@ -337,6 +340,115 @@ describe('POST /api/signups/christmasmarket/toggle', () => {
     await handleChristmasMarketToggle(postReqWith(KEY, { open: false }), env);
     const summary = await (await handleChristmasMarketSummary(reqWith(KEY), env)).json();
     expect(summary.open).toBe(false);
+  });
+});
+
+describe('POST /api/signups/christmasmarket/roster', () => {
+  let db, env;
+  beforeEach(() => {
+    db = makeTestDb();
+    env = { DB: db, CHMS_INTAKE_API_KEY: KEY };
+  });
+  const call = (body, key = KEY, e = env) => handleChristmasMarketRoster(postReqWith(key, body), e);
+  const slotsOf = (sid) => db._raw.prepare('SELECT role_id FROM signup_slots WHERE signup_id=? ORDER BY role_id').all(sid).map(r => r.role_id);
+  const signup = (sid) => db._raw.prepare('SELECT * FROM signups WHERE id=?').get(sid);
+
+  it('refuses a missing or wrong shared secret, and an unset key', async () => {
+    seedMarket(db);
+    const body = { action: 'add', role_id: 1, name: 'Ann Ruh' };
+    expect((await handleChristmasMarketRoster(postReqWith(undefined, body), env)).status).toBe(401);
+    expect((await call(body, 'nope')).status).toBe(401);
+    expect((await call(body, KEY, { DB: db })).status).toBe(503);
+    expect(db._raw.prepare('SELECT COUNT(*) AS n FROM signups').get().n).toBe(0);
+  });
+
+  it('refuses an unknown action, a missing shift, and a blank name', async () => {
+    seedMarket(db);
+    expect((await call({ action: 'wipe', role_id: 1 })).status).toBe(400);
+    expect((await call({ action: 'add', name: 'Ann Ruh' })).status).toBe(400);
+    expect((await call({ action: 'add', role_id: 1, name: '  ' })).status).toBe(400);
+    expect((await call({ action: 'add', role_id: 1, name: 'Ann', email: 'not-an-email' })).status).toBe(400);
+  });
+
+  it('will not write onto a shift that belongs to another event', async () => {
+    seedMarket(db);
+    db._raw.prepare("INSERT INTO serve_events (name) VALUES ('Fall Festival')").run();
+    db._raw.prepare("INSERT INTO serve_roles (event_id,name) VALUES (2,'Games')").run();
+    const res = await call({ action: 'add', role_id: 4, name: 'Ann Ruh' });
+    expect(res.status).toBe(404);
+    expect(db._raw.prepare('SELECT COUNT(*) AS n FROM signups').get().n).toBe(0);
+  });
+
+  it('adds a new person to a shift in the same shape the public form writes', async () => {
+    seedMarket(db);
+    const d = await (await call({ action: 'add', role_id: 2, name: ' Ann Ruh ', email: 'ANN@example.com', phone: '314-555-0100' })).json();
+    expect(d).toMatchObject({ ok: true, added: true, over: false });
+    const row = signup(d.signup_id);
+    expect(row).toMatchObject({ event_id: 1, name: 'Ann Ruh', email: 'ann@example.com', phone: '314-555-0100', ministry: 'events' });
+    expect(JSON.parse(row.roles)).toEqual(['2']);
+    expect(slotsOf(d.signup_id)).toEqual([2]);
+    const sum = await (await handleChristmasMarketSummary(reqWith(KEY), env)).json();
+    const parking = sum.roles.find(r => r.name === 'Parking');
+    expect(parking.shifts[0]).toMatchObject({ id: 2, filled: 1 });
+    expect(parking.shifts[0].people).toEqual([{ id: d.signup_id, name: 'Ann Ruh', email: 'ann@example.com' }]);
+  });
+
+  it('adds a second shift onto the same person rather than a second sign-up', async () => {
+    const evId = seedMarket(db);
+    const sid = addVolunteer(db, evId, 'Ray Stoltz', 'ray@example.com', [1]);
+    const d = await (await call({ action: 'add', role_id: 3, name: 'Ray S.', email: 'ray@example.com' })).json();
+    expect(d.signup_id).toBe(sid);
+    expect(slotsOf(sid)).toEqual([1, 3]);
+    expect(JSON.parse(signup(sid).roles)).toEqual(['1', '3']);
+    // and again is a no-op, not a duplicate slot
+    const again = await (await call({ action: 'add', role_id: 3, name: 'Ray', email: 'ray@example.com' })).json();
+    expect(again).toMatchObject({ ok: true, added: false, already: true });
+    expect(slotsOf(sid)).toEqual([1, 3]);
+  });
+
+  it('matches a no-email person by name, and fills past capacity while saying so', async () => {
+    seedMarket(db);
+    await call({ action: 'add', role_id: 2, name: 'Pat One' });
+    await call({ action: 'add', role_id: 2, name: 'Pat Two' });
+    const d = await (await call({ action: 'add', role_id: 2, name: 'Lou Three' })).json();
+    expect(d).toMatchObject({ added: true, over: true });
+    const again = await (await call({ action: 'add', role_id: 3, name: 'pat one' })).json();
+    expect(slotsOf(again.signup_id)).toEqual([2, 3]);
+    expect(db._raw.prepare('SELECT COUNT(*) AS n FROM signups').get().n).toBe(3);
+  });
+
+  it('adds even while public sign-ups are closed', async () => {
+    seedMarket(db, { hidden: 1 });
+    const d = await (await call({ action: 'add', role_id: 1, name: 'Ann Ruh' })).json();
+    expect(d.added).toBe(true);
+  });
+
+  it('removes one shift and keeps the person on their others', async () => {
+    const evId = seedMarket(db);
+    const sid = addVolunteer(db, evId, 'Ray Stoltz', 'ray@example.com', [1, 2]);
+    const d = await (await call({ action: 'remove', role_id: 1, signup_id: sid })).json();
+    expect(d).toEqual({ ok: true, removed: true, signup_deleted: false });
+    expect(slotsOf(sid)).toEqual([2]);
+    expect(JSON.parse(signup(sid).roles)).toEqual(['2']);
+  });
+
+  it('removes the sign-up itself when its last shift goes, so the count stays true', async () => {
+    const evId = seedMarket(db);
+    const sid = addVolunteer(db, evId, 'Ray Stoltz', 'ray@example.com', [2]);
+    const d = await (await call({ action: 'remove', role_id: 2, signup_id: sid })).json();
+    expect(d.signup_deleted).toBe(true);
+    expect(signup(sid)).toBeUndefined();
+    const sum = await (await handleChristmasMarketSummary(reqWith(KEY), env)).json();
+    expect(sum.signedUp).toBe(0);
+  });
+
+  it('will not remove a sign-up that belongs to another event', async () => {
+    seedMarket(db);
+    db._raw.prepare("INSERT INTO serve_events (name) VALUES ('Fall Festival')").run();
+    const other = addVolunteer(db, 2, 'Other Person', 'o@example.com', [1]);
+    const res = await call({ action: 'remove', role_id: 1, signup_id: other });
+    expect(res.status).toBe(404);
+    expect(slotsOf(other)).toEqual([1]);
   });
 });
 
