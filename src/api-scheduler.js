@@ -1,6 +1,5 @@
 // ── Scheduler & Volunteer API handlers ────────────────────────────────────────
 import { json, SCHED_CORS, getAuthRole, getAuthInfo, timingSafeEqual } from './auth.js';
-import { XMAS_MARKET_ROLES } from './db.js';
 
 // Centralized office reply-to so it can be overridden via env.
 function officeEmail(env) { return (env && env.REPLY_TO_EMAIL) || 'office@timothystl.org'; }
@@ -40,19 +39,15 @@ function formatRsvpStatus(s) {
 }
 
 
-// ── XMAS MARKET TIME FALLBACK ─────────────────────────────────────────
-// For roles where D1 has empty start_time, overlay XMAS_MARKET_ROLES data
-// using sort_order as the index. Allows the schedule to show even if the
-// migration hasn't propagated yet in D1's eventual-consistency model.
+// ── XMAS MARKET TIME FALLBACK (retired) ───────────────────────────────
+// This used to give any Christmas Market shift with no start time the default
+// time of XMAS_MARKET_ROLES[sort_order] — a stopgap from 2026 while the seeded
+// times were still landing in D1. Every market shift has had real times since,
+// and once a coordinator can arrange shifts (sort_order is now their order, not
+// the seed index) it would hand a shift they deliberately left untimed some
+// other job's hours. Kept as a pass-through so its callers need not change.
 export function applyXmasMarketDefaults(evName, roles) {
-  if (evName !== 'Christmas Market') return roles;
-  return roles.map(function(role) {
-    if (role.start_time) return role;
-    const xr = (role.sort_order >= 0 && role.sort_order < XMAS_MARKET_ROLES.length)
-      ? XMAS_MARKET_ROLES[role.sort_order] : null;
-    if (!xr) return role;
-    return Object.assign({}, role, { role_date: role.role_date || xr.role_date, start_time: xr.start_time, end_time: xr.end_time });
-  });
+  return roles;
 }
 
 // ── PUBLIC API: GET /api/events ───────────────────────────────────────
@@ -312,17 +307,8 @@ export async function handleChristmasMarketToggle(req, env) {
 // person who called the office, or the one who cannot come after all. Same
 // shared-secret auth and server-to-server shape as the summary and toggle
 // routes above; the website admin checks the coordinator's own permission
-// before it ever calls this.
-//
-// ⚠ DELIBERATELY NOT handleSignup(). That is the public form: it rate-limits by
-// IP, refuses a full shift, refuses a closed event, and emails the volunteer and
-// the office. A coordinator adding a name is none of those — she may be filling
-// a shift past its count on purpose, the roster may already be closed to the
-// public, and she will tell the person herself. What IS shared is the record
-// shape: one signups row per person per event (matched by email, or by name
-// when no email was given), shifts in signup_slots, and the chosen role ids
-// mirrored as strings in `signups.roles` — exactly what the public market form
-// writes, so Connect's own Scheduler screen sees the same thing either way.
+// before it ever calls this. The work is addPersonToShift() /
+// removePersonFromShift() below, shared with Connect's own event screen.
 export async function handleChristmasMarketRoster(req, env) {
   const expectedKey = env.CHMS_INTAKE_API_KEY || '';
   if (!expectedKey) return noStoreJson({ error: 'Intake not configured' }, 503);
@@ -343,42 +329,48 @@ export async function handleChristmasMarketRoster(req, env) {
     "SELECT id FROM serve_events WHERE slug=? OR name=? ORDER BY (slug=?) DESC, id LIMIT 1"
   ).bind(XMAS_MARKET_SLUG, XMAS_MARKET_NAME, XMAS_MARKET_SLUG).first();
   if (!ev) return noStoreJson({ error: 'No Christmas Market event exists yet in Serve.' }, 404);
-  // ⚠ The shift must belong to THE market — this key must never become a way to
-  // write onto some other event's roster.
-  const role = await env.DB.prepare('SELECT id, slots FROM serve_roles WHERE id=? AND event_id=?')
-    .bind(roleId, ev.id).first();
-  if (!role) return noStoreJson({ error: 'That shift is no longer on the market roster.' }, 404);
 
-  const readRoles = (row) => {
-    try { const v = JSON.parse(row.roles || '[]'); return Array.isArray(v) ? v.map(String) : []; } catch { return []; }
-  };
+  const r = action === 'remove'
+    ? await removePersonFromShift(env, ev.id, roleId, data.signup_id)
+    : await addPersonToShift(env, ev.id, roleId, data);
+  const { status = 200, ...body } = r;
+  return noStoreJson(body, status);
+}
 
-  if (action === 'remove') {
-    const signupId = Number(data.signup_id);
-    if (!Number.isInteger(signupId) || signupId <= 0) return noStoreJson({ error: 'A volunteer is required.' }, 400);
-    const signup = await env.DB.prepare('SELECT id, roles FROM signups WHERE id=? AND event_id=?')
-      .bind(signupId, ev.id).first();
-    if (!signup) return noStoreJson({ error: 'That volunteer is no longer on the market roster.' }, 404);
-    await env.DB.prepare('DELETE FROM signup_slots WHERE signup_id=? AND role_id=?').bind(signupId, roleId).run();
-    const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM signup_slots WHERE signup_id=?').bind(signupId).first();
-    // Nobody is "signed up for the market" with no shifts — leaving the row
-    // would keep counting them in `signedUp`. Same two deletes Connect's own
-    // DELETE /admin/api/signups/:id makes.
-    if (!(left?.n > 0)) {
-      await env.DB.prepare('DELETE FROM signups WHERE id=?').bind(signupId).run();
-      return noStoreJson({ ok: true, removed: true, signup_deleted: true });
-    }
-    const roles = readRoles(signup).filter((r) => r !== String(roleId));
-    await env.DB.prepare('UPDATE signups SET roles=? WHERE id=?').bind(JSON.stringify(roles), signupId).run();
-    return noStoreJson({ ok: true, removed: true, signup_deleted: false });
-  }
+// ── PUTTING ONE PERSON ON ONE SHIFT, OR TAKING THEM OFF ───────────────
+// Shared by the market's cross-Worker route above and by Connect's own event
+// screen (POST/DELETE /admin/api/events/:id/roles/:rid/people), so a coordinator
+// gets the same result whichever door they use. Returns a plain object; `status`
+// is set only on a refusal.
+//
+// ⚠ DELIBERATELY NOT handleSignup(). That is the public form: it rate-limits by
+// IP, refuses a full shift, refuses a closed event, and emails the volunteer and
+// the office. A coordinator adding a name is none of those — they may be filling
+// a shift past its count on purpose, sign-ups may already be closed to the
+// public, and they will tell the person themselves. What IS shared is the record
+// shape: one signups row per person per event (matched by email, or by name when
+// no email was given), shifts in signup_slots, and the chosen role ids mirrored
+// as strings in `signups.roles` — exactly what the public event form writes.
+const readSignupRoles = (row) => {
+  try { const v = JSON.parse(row.roles || '[]'); return Array.isArray(v) ? v.map(String) : []; } catch { return []; }
+};
 
-  // ── add ──
+async function shiftOfEvent(env, evId, roleId) {
+  // ⚠ The shift must belong to the event the caller was checked against.
+  return env.DB.prepare('SELECT id, slots FROM serve_roles WHERE id=? AND event_id=?').bind(roleId, evId).first();
+}
+
+export async function addPersonToShift(env, evId, roleId, data) {
+  const role = await shiftOfEvent(env, evId, roleId);
+  if (!role) return { status: 404, error: 'That shift is no longer on this event.' };
   const name = String(data.name || '').trim().slice(0, 200);
   const email = String(data.email || '').trim().toLowerCase().slice(0, 200);
   const phone = String(data.phone || '').trim().slice(0, 50);
-  if (!name) return noStoreJson({ error: 'A name is required.' }, 400);
-  // Picked from the directory (handleChristmasMarketPeople below) — links the
+  if (!name) return { status: 400, error: 'A name is required.' };
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { status: 400, error: 'That email address does not look right.' };
+  }
+  // Picked from the directory (searchDirectoryForVolunteers below) — links the
   // sign-up to the person the same way Connect's own "link person" does. An id
   // that is not a real, active person is simply not linked; the add still goes.
   let personId = null;
@@ -386,41 +378,59 @@ export async function handleChristmasMarketRoster(req, env) {
     const person = await env.DB.prepare('SELECT id FROM people WHERE id=? AND active=1').bind(Number(data.person_id)).first();
     if (person) personId = person.id;
   }
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return noStoreJson({ error: 'That email address does not look right.' }, 400);
-  }
 
   // Same person-per-event rule as handleSignup: the same email is the same
   // person. With no email, the same name on this event's no-email rows is.
   const existing = email
     ? await env.DB.prepare('SELECT id, roles, phone FROM signups WHERE email=? AND event_id=? ORDER BY id DESC LIMIT 1')
-        .bind(email, ev.id).first()
+        .bind(email, evId).first()
     : await env.DB.prepare("SELECT id, roles, phone FROM signups WHERE email='' AND lower(name)=lower(?) AND event_id=? ORDER BY id DESC LIMIT 1")
-        .bind(name, ev.id).first();
+        .bind(name, evId).first();
 
   let signupId;
   if (existing) {
     signupId = existing.id;
     const already = await env.DB.prepare('SELECT id FROM signup_slots WHERE signup_id=? AND role_id=?')
       .bind(signupId, roleId).first();
-    if (already) return noStoreJson({ ok: true, added: false, already: true, signup_id: signupId });
-    const roles = readRoles(existing);
+    if (already) return { ok: true, added: false, already: true, signup_id: signupId };
+    const roles = readSignupRoles(existing);
     if (!roles.includes(String(roleId))) roles.push(String(roleId));
     await env.DB.prepare('UPDATE signups SET roles=?, phone=?, person_id=COALESCE(person_id, ?) WHERE id=?')
       .bind(JSON.stringify(roles), existing.phone || phone, personId, signupId).run();
   } else {
     const r = await env.DB.prepare(
       'INSERT INTO signups (event_id,role_id,ministry,name,email,phone,roles,person_id) VALUES (?,?,?,?,?,?,?,?)'
-    ).bind(ev.id, 0, 'events', name, email, phone, JSON.stringify([String(roleId)]), personId).run();
+    ).bind(evId, 0, 'events', name, email, phone, JSON.stringify([String(roleId)]), personId).run();
     signupId = r.meta?.last_row_id;
   }
   await env.DB.prepare('INSERT INTO signup_slots (signup_id,role_id) VALUES (?,?)').bind(signupId, roleId).run();
 
   // Reported, not refused: the coordinator may mean to put a fifth person on a
-  // four-person shift, and the caller says so rather than blocking her.
+  // four-person shift, and the caller says so rather than blocking them.
   const filled = await env.DB.prepare('SELECT COUNT(*) AS n FROM signup_slots WHERE role_id=?').bind(roleId).first();
   const over = Number(role.slots) > 0 && (filled?.n || 0) > Number(role.slots);
-  return noStoreJson({ ok: true, added: true, already: false, signup_id: signupId, over });
+  return { ok: true, added: true, already: false, signup_id: signupId, over };
+}
+
+export async function removePersonFromShift(env, evId, roleId, signupIdRaw) {
+  const signupId = Number(signupIdRaw);
+  if (!Number.isInteger(signupId) || signupId <= 0) return { status: 400, error: 'A volunteer is required.' };
+  if (!await shiftOfEvent(env, evId, roleId)) return { status: 404, error: 'That shift is no longer on this event.' };
+  const signup = await env.DB.prepare('SELECT id, roles FROM signups WHERE id=? AND event_id=?')
+    .bind(signupId, evId).first();
+  if (!signup) return { status: 404, error: 'That volunteer is no longer on this event.' };
+  await env.DB.prepare('DELETE FROM signup_slots WHERE signup_id=? AND role_id=?').bind(signupId, roleId).run();
+  const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM signup_slots WHERE signup_id=?').bind(signupId).first();
+  // Nobody is "signed up for the event" with no shifts — leaving the row would
+  // keep counting them. Same two deletes Connect's own DELETE
+  // /admin/api/signups/:id makes.
+  if (!(left?.n > 0)) {
+    await env.DB.prepare('DELETE FROM signups WHERE id=?').bind(signupId).run();
+    return { ok: true, removed: true, signup_deleted: true };
+  }
+  const roles = readSignupRoles(signup).filter((r) => r !== String(roleId));
+  await env.DB.prepare('UPDATE signups SET roles=? WHERE id=?').bind(JSON.stringify(roles), signupId).run();
+  return { ok: true, removed: true, signup_deleted: false };
 }
 
 // ── CHRISTMAS MARKET: FIND A PERSON IN THE DIRECTORY (cross-Worker, read) ──
@@ -448,9 +458,14 @@ export async function handleChristmasMarketPeople(req, env) {
     return noStoreJson({ error: 'Unauthorized' }, 401);
   }
   const url = new URL(req.url);
-  const words = String(url.searchParams.get('q') || '').trim().toLowerCase()
+  return noStoreJson({ people: await searchDirectoryForVolunteers(env, url.searchParams.get('q')) });
+}
+
+// Shared with Connect's own event screen (GET /admin/api/events/:id/people).
+export async function searchDirectoryForVolunteers(env, qRaw) {
+  const words = String(qRaw || '').trim().toLowerCase()
     .split(/\s+/).filter(Boolean).slice(0, 4).map((w) => w.replace(/[%_]/g, '').slice(0, 40)).filter(Boolean);
-  if (!words.length || words.join('').length < 2) return noStoreJson({ people: [] });
+  if (!words.length || words.join('').length < 2) return [];
 
   const binds = [];
   const clauses = words.map((w) => {
@@ -467,13 +482,12 @@ export async function handleChristmasMarketPeople(req, env) {
       ORDER BY LOWER(p.last_name), LOWER(COALESCE(NULLIF(p.preferred_name,''), p.first_name)), p.id
       LIMIT 10`
   ).bind(...binds).all();
-  const people = (rows.results || []).map((p) => ({
+  return (rows.results || []).map((p) => ({
     id: p.id,
     name: marketPersonName(p),
     email: p.hide_email ? '' : String(p.email || '').trim(),
     phone: p.hide_phone ? '' : String(p.phone || '').trim(),
   })).filter((p) => p.name);
-  return noStoreJson({ people });
 }
 
 // ── RATE LIMITING ─────────────────────────────────────────────────────

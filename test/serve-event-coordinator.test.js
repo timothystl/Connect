@@ -57,6 +57,14 @@ function makeDb() {
     contacted_at TEXT NOT NULL DEFAULT '', contact_count INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'new', sms_reminder_opt_in INTEGER NOT NULL DEFAULT 0
   )`);
+  sqlite.exec(`CREATE TABLE people (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    first_name TEXT NOT NULL DEFAULT '', preferred_name TEXT NOT NULL DEFAULT '', last_name TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '',
+    member_type TEXT NOT NULL DEFAULT 'member', active INTEGER NOT NULL DEFAULT 1,
+    deceased INTEGER NOT NULL DEFAULT 0, public_directory INTEGER NOT NULL DEFAULT 1,
+    dir_hide_email INTEGER NOT NULL DEFAULT 0, dir_hide_phone INTEGER NOT NULL DEFAULT 0
+  )`);
   sqlite.exec(`CREATE TABLE serve_event_coordinators (event_id INTEGER NOT NULL, username TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (event_id, username))`);
   sqlite.exec(`CREATE TABLE audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, action TEXT, object_type TEXT, object_id TEXT, object_json TEXT)`);
   sqlite.exec(`CREATE TABLE signup_slots (id INTEGER PRIMARY KEY AUTOINCREMENT, signup_id INTEGER NOT NULL, role_id INTEGER NOT NULL)`);
@@ -287,5 +295,68 @@ describe('volunteer contact read authorization', () => {
     expect((await call(role, '', 'events/2/roster', 'GET')).status).toBe(200);
     expect((await call(role, '', 'signups?event_id=2&ministry=events', 'GET')).body.signups.map(s => s.id)).toEqual([3]);
     expect((await call(role, '', 'export.csv?event_id=2', 'GET')).text).not.toContain('jane@example.com');
+  });
+});
+
+
+describe('the coordinator arranges shifts and who is on them', () => {
+  const order = () => sqlite.prepare('SELECT name FROM serve_roles WHERE event_id=1 ORDER BY role_date, sort_order, id').all().map((r) => r.name);
+
+  it('editing a shift keeps it where it was', async () => {
+    expect((await marla('events/1/roles-order', 'PUT', { role_ids: [2, 1] })).status).toBe(200);
+    expect(order()).toEqual(['Move Glasses', 'Set up tents']);
+    // The shift editor sends no sort_order; this used to reset it to 0 and jump the shift.
+    const r = await marla('events/1/roles/2', 'PUT', { name: 'Move Glasses', slots: 3, role_date: '2026-12-04', start_time: '11:00 AM', end_time: '12:00 PM' });
+    expect(r.status).toBe(200);
+    expect(order()).toEqual(['Move Glasses', 'Set up tents']);
+    const r2 = await marla('events/1/roles/1', 'PUT', { name: 'Set up tents', slots: 18, role_date: '2026-12-04' });
+    expect(r2.status).toBe(200);
+    expect(order()).toEqual(['Move Glasses', 'Set up tents']);
+  });
+
+  it('a new shift goes to the end, not the top', async () => {
+    await marla('events/1/roles-order', 'PUT', { role_ids: [1, 2] });
+    await marla('events/1/roles', 'POST', { name: 'Kitchen', slots: 3, role_date: '2026-12-04' });
+    expect(order()).toEqual(['Set up tents', 'Move Glasses', 'Kitchen']);
+  });
+
+  it('refuses an order that names another event’s shift, and changes nothing', async () => {
+    await marla('events/1/roles-order', 'PUT', { role_ids: [1, 2] });
+    const r = await marla('events/1/roles-order', 'PUT', { role_ids: [2, 3] });
+    expect(r.status).toBe(400);
+    expect(order()).toEqual(['Set up tents', 'Move Glasses']);
+    expect((await call('volunteer', 'other', 'events/1/roles-order', 'PUT', { role_ids: [2, 1] })).status).toBe(403);
+  });
+
+  it('puts a person on a shift and takes them off', async () => {
+    const add = await marla('events/1/roles/2/people', 'POST', { name: 'Frank Schmidt', email: 'fs@example.com' });
+    expect(add.status).toBe(200);
+    expect(add.body).toMatchObject({ ok: true, added: true });
+    const roster = await marla('events/1/roster', 'GET');
+    const glasses = roster.body.roster.find((r) => r.name === 'Move Glasses');
+    const frank = glasses.volunteers.find((v) => v.name === 'Frank Schmidt');
+    expect(frank).toMatchObject({ id: add.body.signup_id, email: 'fs@example.com' });
+    const off = await marla('events/1/roles/2/people/' + add.body.signup_id, 'DELETE');
+    expect(off.body).toMatchObject({ ok: true, removed: true, signup_deleted: true });
+    // Jane keeps her other shift when taken off one.
+    const jane = await marla('events/1/roles/2/people/1', 'DELETE');
+    expect(jane.body.signup_deleted).toBe(false);
+    expect(sqlite.prepare('SELECT role_id FROM signup_slots WHERE signup_id=1').all().map((r) => r.role_id)).toEqual([1]);
+  });
+
+  it('cannot touch another event’s shifts or people', async () => {
+    expect((await marla('events/2/roles/3/people', 'POST', { name: 'X' })).status).toBe(403);
+    expect((await marla('events/1/roles/3/people', 'POST', { name: 'X' })).status).toBe(404);
+    expect((await marla('events/1/roles/1/people/3', 'DELETE')).status).toBe(404);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM signup_slots WHERE signup_id=3').get().n).toBe(1);
+  });
+
+  it('searches the directory the way the member directory would', async () => {
+    sqlite.exec(`INSERT INTO people (first_name, last_name, email, phone, public_directory, dir_hide_phone) VALUES
+      ('Frank', 'Schmidt', 'fs@example.com', '314-555-0101', 1, 1), ('Frank', 'Hidden', 'h@example.com', '', 0, 0)`);
+    const r = await marla('events/1/people?q=fra', 'GET');
+    expect(r.status).toBe(200);
+    expect(r.body.people).toEqual([{ id: 1, name: 'Frank Schmidt', email: 'fs@example.com', phone: '' }]);
+    expect((await marla('events/2/people?q=fra', 'GET')).status).toBe(403);
   });
 });

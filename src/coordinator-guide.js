@@ -46,6 +46,8 @@ export const COORDINATOR_GUIDE_HTML = `<!DOCTYPE html><html lang="en"><head>${HE
 <li><a href="#shifts">Setting up shifts</a></li>
 <li><a href="#link">Sharing the sign-up link</a></li>
 <li><a href="#who">Seeing who's coming</a></li>
+<li><a href="#assign">Adding or removing people yourself</a></li>
+<li><a href="#report">Printing or downloading the roster</a></li>
 <li><a href="#past">Importing last year's volunteers</a></li>
 <li><a href="#invite">Inviting them back</a></li>
 <li><a href="#remind">Sending reminders</a></li>
@@ -84,6 +86,9 @@ export const COORDINATOR_GUIDE_HTML = `<!DOCTYPE html><html lang="en"><head>${HE
 <p>Tap the shift (or its <strong>Edit</strong> link). Change anything and tap <span class="btn">Save shift</span>, or tap <strong>Delete shift</strong>. You can safely raise or lower the number of spots at any time.</p>
 <div class="tip">Deleting a shift also removes everyone's sign-up for that shift. If people are already signed up, consider emailing them first (see <a href="#remind">Sending reminders</a>).</div>
 
+<h3>Put shifts in order</h3>
+<p>Tap <span class="btn">Sort by time</span> beside a day to line its shifts up by start time. To move one shift, use the <span class="btn">&#9650;</span> and <span class="btn">&#9660;</span> arrows on its left. Editing a shift never moves it.</p>
+
 <h2 id="link">4. Sharing the sign-up link</h2>
 <p>The <strong>Short link</strong> box shows your event's public sign-up page, for example <code>serve.timothystl.org/christmasmarket</code>. Tap <span class="btn">Copy link</span> and paste it into emails, the bulletin, or social media. Volunteers pick their shifts there — they don't need a login.</p>
 
@@ -97,6 +102,18 @@ export const COORDINATOR_GUIDE_HTML = `<!DOCTYPE html><html lang="en"><head>${HE
 <tr><td>Contacted</td><td>You've emailed or called them. (Sending an email from Connect sets this for you.)</td></tr>
 <tr><td>Confirmed</td><td>They've told you they're definitely coming.</td></tr>
 <tr><td>Declined</td><td>They can't come after all. Declined people are left out of reminder emails.</td></tr></table>
+
+<h2 id="assign">Adding or removing people yourself</h2>
+<p>For the person who called you, or the one who can't come after all:</p>
+<ol>
+<li>Tap the shift to open it. <strong>People on this shift</strong> is near the bottom.</li>
+<li>To add someone, start typing their name. Pick them from the church directory and their email and phone fill in. If they aren't in the directory, choose <strong>Add "<em>name</em>"</strong> and type an email or phone if you have one.</li>
+<li>To take someone off, tap the <span class="btn">&times;</span> beside their name.</li>
+</ol>
+<p>These save right away, even when a shift is full or sign-ups are closed. Nobody is emailed, so let them know yourself.</p>
+
+<h2 id="report">Printing or downloading the roster</h2>
+<p>At the top of your event, tap <span class="btn">Print roster</span> for a printable list of every shift, in your order, with who is on it and the open spots. Tap <span class="btn">Download roster</span> for the same list as a spreadsheet file you can open in Excel or Google Sheets.</p>
 
 <h2 id="past">6. Importing last year's volunteers</h2>
 <p>Bring in last year's list so you can invite everyone back in one step.</p>

@@ -624,6 +624,8 @@ function volRenderEventDetail() {
     + '<span class="' + (ev.hidden ? 'ev-badge-hidden' : 'ev-badge-visible') + '">' + (ev.hidden ? 'Hidden' : 'Visible on site') + '</span>'
     + (canEdit ? '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
       + '<button class="ev-btn-secondary" onclick="volOpenRemindModal(' + ev.id + ',null)">Email volunteers</button>'
+      + '<button class="ev-btn-secondary" onclick="volPrintRoster(' + ev.id + ')" title="A printable list of every shift and who is on it">Print roster</button>'
+      + '<button class="ev-btn-secondary" onclick="volDownloadRoster(' + ev.id + ')" title="Every shift and who is on it, as a spreadsheet file">Download roster</button>'
       + '<button class="ev-btn-secondary" onclick="volOpenPastModal(' + ev.id + ')">Past volunteers</button>'
       + '<a href="/coordinator-guide" target="_blank" rel="noopener" style="font-size:.78rem;font-weight:600;color:var(--sky-steel);text-decoration:none;">Coordinator guide</a>'
       + '<button class="ev-btn-secondary" onclick="volToggleEventVisibility(' + ev.id + ',' + (ev.hidden?0:1) + ')">' + (ev.hidden?'Show event':'Hide event') + '</button>'
@@ -652,18 +654,28 @@ function volRenderEventDetail() {
     var groups = volEventDayGroups(ev);
     body = groups.map(function(g) {
       var label = g.date ? volFormatDayLabel(g.date) : 'No date set';
+      var lastIdx = g.roles.length - 1;
       var dateArg = "'" + (g.date||'').replace(/'/g,'') + "'";
       return '<div class="ev-day-header"><h4>Shifts &mdash; ' + esc(label) + '</h4>'
-        + (canEdit ? '<button class="ev-btn-secondary" style="padding:6px 12px;font-size:.75rem;" onclick="volOpenShiftModal(' + ev.id + ',' + dateArg + ',null)">+ Add shift</button>' : '') + '</div>'
-        + g.roles.map(function(r) {
+        + (canEdit ? '<div style="display:flex;gap:6px;">'
+          + (g.roles.length > 1 ? '<button class="ev-btn-secondary" style="padding:6px 12px;font-size:.75rem;" title="Put this day\'s shifts in order of start time" onclick="volSortDayByTime(' + ev.id + ',' + dateArg + ')">Sort by time</button>' : '')
+          + '<button class="ev-btn-secondary" style="padding:6px 12px;font-size:.75rem;" onclick="volOpenShiftModal(' + ev.id + ',' + dateArg + ',null)">+ Add shift</button></div>' : '') + '</div>'
+        + g.roles.map(function(r, idx) {
+            // Up/down arrows: the only thing that moves a shift. Editing one never does.
+            var moveBtns = canEdit && g.roles.length > 1
+              ? '<div class="ev-move" style="display:flex;flex-direction:column;gap:2px;">'
+                + '<button type="button" title="Move up" aria-label="Move ' + esc(r.name) + ' up"' + (idx === 0 ? ' disabled' : '') + ' onclick="event.stopPropagation();volMoveShift(' + ev.id + ',' + r.id + ',-1)">&#9650;</button>'
+                + '<button type="button" title="Move down" aria-label="Move ' + esc(r.name) + ' down"' + (idx === lastIdx ? ' disabled' : '') + ' onclick="event.stopPropagation();volMoveShift(' + ev.id + ',' + r.id + ',1)">&#9660;</button>'
+                + '</div>'
+              : '';
             var pct = r.slots > 0 ? Math.round(((r.filled_count||0) / r.slots) * 100) : 0;
             var full = r.slots > 0 && (r.filled_count||0) >= r.slots;
             var barColor = full ? '#8C8880' : '#4A5E3A';
             return '<div class="ev-shift-row"' + (canEdit ? ' onclick="volOpenShiftModal(' + ev.id + ',' + dateArg + ',' + r.id + ')"' : ' style="cursor:default;"') + '>'
-              + '<div><div class="ev-shift-name">' + esc(r.name) + '</div>'
+              + '<div style="display:flex;gap:8px;align-items:flex-start;">' + moveBtns + '<div><div class="ev-shift-name">' + esc(r.name) + '</div>'
                 + (r.start_time ? '<div class="ev-shift-time">' + esc(r.start_time) + '&ndash;' + esc(r.end_time||'') + '</div>' : '')
                 + (r.lead ? '<div class="ev-shift-time">Lead &middot; ' + esc(r.lead) + '</div>' : '')
-                + '</div>'
+                + '</div></div>'
               + '<div class="ev-fill-bar"><div style="width:' + pct + '%;background:' + barColor + ';"></div></div>'
               + '<div class="ev-fill-count" style="color:' + barColor + ';">' + (r.filled_count||0) + ' / ' + (r.slots||0) + '</div>'
               + (canEdit ? '<div class="ev-edit-link">Edit</div>' : '<div></div>')
@@ -723,9 +735,11 @@ function volRenderEventDetail() {
 
 // Names under each shift, so a coordinator can see who is coming to each job without
 // cross-referencing the Signups list. Contact details link straight to a call or email.
+var _volRosterByRole = {};
 function volLoadShiftNames(evId) {
-  api('/admin/api/events/' + evId + '/roster').then(function(d) {
+  return api('/admin/api/events/' + evId + '/roster').then(function(d) {
     (d.roster || []).forEach(function(r) {
+      _volRosterByRole[r.id] = r.volunteers || [];
       var el = document.getElementById('vol-shift-who-' + r.id);
       if (!el) return;
       var vols = r.volunteers || [];
@@ -1010,7 +1024,242 @@ function volOpenShiftModal(evId, dayDate, roleId) {
     ? ((role.filled_count||0) + ' of ' + (role.slots||0) + ' filled · safe to change spot count any time')
     : 'New shift · starts with 0 filled';
   document.getElementById('vol-shift-delete').style.display = role ? '' : 'none';
+  document.getElementById('vol-shift-people-wrap').style.display = role ? '' : 'none';
+  volShiftAddReset();
+  if (role) volRenderShiftPeople();
   openModal('vol-shift-modal');
+}
+
+// ── People on a shift (inside the shift modal) ──────────────────────
+// Adds and removals save immediately through /admin/api/events/:id/roles/:rid/people,
+// then the roster reloads so the counts and the names under each shift stay true.
+var _volShiftSearchSeq = 0;
+var _volShiftSearchTimer = null;
+var _volShiftMatches = [];
+var _volShiftPick = -1;
+
+function volRenderShiftPeople() {
+  var s = _volEditingShift;
+  var el = document.getElementById('vol-shift-people');
+  if (!s || !s.roleId || !el) return;
+  var vols = _volRosterByRole[s.roleId] || [];
+  if (!vols.length) { el.innerHTML = '<div style="color:var(--ev-muted);">Nobody on this shift yet.</div>'; return; }
+  el.innerHTML = vols.map(function(v) {
+    var bits = [v.phone, v.email].filter(Boolean).map(esc).join(' &middot; ');
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid var(--ev-border);">'
+      + '<span><strong style="font-weight:600;color:var(--color-navy);">' + esc(v.name) + '</strong>' + (bits ? ' <span style="color:var(--ev-muted);font-size:.76rem;">' + bits + '</span>' : '') + '</span>'
+      + (v.id ? '<button type="button" class="ev-btn-secondary" style="padding:2px 9px;font-size:.78rem;" title="Take off this shift" aria-label="Take ' + esc(v.name) + ' off this shift" onclick="volRemoveFromShift(' + v.id + ')">&times;</button>' : '')
+      + '</div>';
+  }).join('');
+}
+
+function volShiftAddReset() {
+  _volShiftMatches = []; _volShiftPick = -1;
+  ['vol-shift-add-name', 'vol-shift-add-email', 'vol-shift-add-phone'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
+  var r = document.getElementById('vol-shift-add-results'); if (r) r.innerHTML = '';
+  var x = document.getElementById('vol-shift-add-extra'); if (x) x.style.display = 'none';
+}
+
+function volShiftPersonSearch() {
+  var q = (document.getElementById('vol-shift-add-name').value || '').trim();
+  var extra = document.getElementById('vol-shift-add-extra');
+  if (extra) extra.style.display = q ? 'grid' : 'none';
+  clearTimeout(_volShiftSearchTimer);
+  if (q.length < 2) { _volShiftMatches = []; volRenderShiftMatches(q); return; }
+  _volShiftSearchTimer = setTimeout(function() {
+    var s = _volEditingShift; if (!s) return;
+    var mine = ++_volShiftSearchSeq;
+    api('/admin/api/events/' + s.eventId + '/people?q=' + encodeURIComponent(q)).then(function(d) {
+      if (mine !== _volShiftSearchSeq) return;
+      _volShiftMatches = d.people || []; _volShiftPick = -1;
+      volRenderShiftMatches(q);
+    }).catch(function() { if (mine === _volShiftSearchSeq) { _volShiftMatches = []; volRenderShiftMatches(q); } });
+  }, 220);
+}
+
+function volRenderShiftMatches(q) {
+  var el = document.getElementById('vol-shift-add-results');
+  if (!el) return;
+  if (!q) { el.innerHTML = ''; return; }
+  var rows = _volShiftMatches.map(function(p, i) {
+    var bits = [p.email, p.phone].filter(Boolean).map(esc).join(' &middot; ');
+    return '<div class="ev-pick' + (i === _volShiftPick ? ' is-on' : '') + '" onmousedown="event.preventDefault();volAddToShift(' + i + ')">'
+      + '<strong>' + esc(p.name) + '</strong>' + (bits ? '<span>' + bits + '</span>' : '') + '</div>';
+  });
+  // Always offer the name exactly as typed, for someone who is not in the directory.
+  rows.push('<div class="ev-pick ev-pick-typed' + (_volShiftPick === _volShiftMatches.length ? ' is-on' : '') + '" onmousedown="event.preventDefault();volAddToShift(-1)">'
+    + '<strong>Add &ldquo;' + esc(q) + '&rdquo;</strong><span>not in the directory &mdash; add email or phone below if you have them</span></div>');
+  el.innerHTML = '<div class="ev-pick-list">' + rows.join('') + '</div>';
+}
+
+function volShiftPersonKey(e) {
+  var n = _volShiftMatches.length + 1;
+  var q = (document.getElementById('vol-shift-add-name').value || '').trim();
+  if (!q) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); _volShiftPick = (_volShiftPick + 1) % n; volRenderShiftMatches(q); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); _volShiftPick = (_volShiftPick - 1 + n) % n; volRenderShiftMatches(q); }
+  else if (e.key === 'Enter') {
+    e.preventDefault();
+    volAddToShift(_volShiftPick >= 0 && _volShiftPick < _volShiftMatches.length ? _volShiftPick : -1);
+  }
+}
+
+function volAddToShift(i) {
+  var s = _volEditingShift; if (!s || !s.roleId) return;
+  var body;
+  if (i >= 0 && _volShiftMatches[i]) {
+    var p = _volShiftMatches[i];
+    body = { name: p.name, email: p.email || '', phone: p.phone || '', person_id: p.id };
+  } else {
+    body = {
+      name: (document.getElementById('vol-shift-add-name').value || '').trim(),
+      email: (document.getElementById('vol-shift-add-email').value || '').trim(),
+      phone: (document.getElementById('vol-shift-add-phone').value || '').trim(),
+    };
+  }
+  if (!body.name) return;
+  api('/admin/api/events/' + s.eventId + '/roles/' + s.roleId + '/people', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function(d) {
+      if (!d.ok) { alert(d.error || 'Could not add them.'); return; }
+      if (d.already) alert(body.name + ' is already on this shift.');
+      else if (d.over) alert(body.name + ' is added. This shift now has more people than spots.');
+      volShiftAddReset();
+      volRefreshAfterPeopleChange(s.eventId);
+    }).catch(function(err) { alert((err && err.message) || 'Network error.'); });
+}
+
+function volRemoveFromShift(signupId) {
+  var s = _volEditingShift; if (!s || !s.roleId) return;
+  var v = (_volRosterByRole[s.roleId] || []).find(function(x) { return x.id === signupId; });
+  if (!confirm('Take ' + (v ? v.name : 'this person') + ' off this shift? They are not emailed.')) return;
+  api('/admin/api/events/' + s.eventId + '/roles/' + s.roleId + '/people/' + signupId, { method: 'DELETE' })
+    .then(function(d) {
+      if (!d.ok) { alert(d.error || 'Could not remove them.'); return; }
+      volRefreshAfterPeopleChange(s.eventId);
+    }).catch(function(err) { alert((err && err.message) || 'Network error.'); });
+}
+
+function volRefreshAfterPeopleChange(evId) {
+  // Reload the whole event (counts, names under each row), then redraw the modal's list.
+  api('/admin/api/events').then(function(data) {
+    _volEventsCache = data.events || [];
+    volRenderEventsList();
+    volRenderEventDetail();
+    return volLoadShiftNames(evId);
+  }).then(function() { volRenderShiftPeople(); }).catch(function() {});
+}
+
+// ── Arranging shifts ────────────────────────────────────────────────
+// Minutes past midnight for a stored '9:00 AM'; untimed sorts last.
+function volClockMins(t) {
+  var m = String(t || '').trim().match(/^(\d{1,2})(?::(\d{2}))?\s*([AaPp])\.?[Mm]?\.?$/);
+  if (!m) return 100000;
+  var h = parseInt(m[1], 10) % 12; if (/[Pp]/.test(m[3])) h += 12;
+  return h * 60 + (m[2] ? parseInt(m[2], 10) : 0);
+}
+
+function volSaveShiftOrder(evId, groups) {
+  var ids = [];
+  groups.forEach(function(g) { g.roles.forEach(function(r) { ids.push(r.id); }); });
+  return api('/admin/api/events/' + evId + '/roles-order', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role_ids: ids }) })
+    .then(function(d) { if (!d.ok) { alert(d.error || 'Could not save the order.'); return; } volLoadEvents(evId); })
+    .catch(function(err) { alert((err && err.message) || 'Network error.'); });
+}
+
+// One day's shifts in start-time order (then end time, then name); other days untouched.
+function volSortDayByTime(evId, dayDate) {
+  var ev = _volEventsCache.find(function(e) { return e.id === evId; });
+  if (!ev) return;
+  var groups = volEventDayGroups(ev);
+  groups.forEach(function(g) {
+    if ((g.date || '') !== (dayDate || '')) return;
+    g.roles.sort(function(a, b) {
+      return (volClockMins(a.start_time) - volClockMins(b.start_time))
+        || (volClockMins(a.end_time) - volClockMins(b.end_time))
+        || String(a.name).localeCompare(String(b.name));
+    });
+  });
+  volSaveShiftOrder(evId, groups);
+}
+
+// Swaps a shift with its neighbour on the same day, then saves the whole event's order.
+function volMoveShift(evId, roleId, dir) {
+  var ev = _volEventsCache.find(function(e) { return e.id === evId; });
+  if (!ev) return;
+  var groups = volEventDayGroups(ev);
+  groups.forEach(function(g) {
+    var i = g.roles.findIndex(function(r) { return r.id === roleId; });
+    var j = i + dir;
+    if (i < 0 || j < 0 || j >= g.roles.length) return;
+    var t = g.roles[i]; g.roles[i] = g.roles[j]; g.roles[j] = t;
+  });
+  volSaveShiftOrder(evId, groups);
+}
+
+// ── Roster report: print it, or download it as a spreadsheet ────────
+// Built from the same /roster the screen reads, in the order the shifts are arranged.
+function volRosterRows(d) {
+  var rows = [];
+  (d.roster || []).forEach(function(r) {
+    var when = (r.start_time ? r.start_time + (r.end_time ? ' - ' + r.end_time : '') : '');
+    var day = r.role_date ? volFormatDayLabel(r.role_date) : '';
+    var vols = r.volunteers || [];
+    if (!vols.length && !(r.slots > 0)) rows.push([day, when, r.name, r.lead || '', '0 of 0', '', '', '', '']);
+    vols.forEach(function(v) {
+      rows.push([day, when, r.name, r.lead || '', vols.length + ' of ' + (r.slots || 0), v.name, v.phone || '', v.email || '', VOL_STATUS_LABELS[v.status] || v.status || '']);
+    });
+    for (var k = vols.length; k < (r.slots || 0); k++) rows.push([day, when, r.name, r.lead || '', vols.length + ' of ' + (r.slots || 0), '(open spot)', '', '', '']);
+  });
+  return rows;
+}
+
+function volDownloadRoster(evId) {
+  api('/admin/api/events/' + evId + '/roster').then(function(d) {
+    var head = ['Day', 'Time', 'Shift', 'Lead', 'Filled', 'Volunteer', 'Phone', 'Email', 'Status'];
+    // csvRow (js-core) is the app's one CSV escaper, formula guard included.
+    var csv = [head].concat(volRosterRows(d)).map(csvRow).join('\r\n');
+    var blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = String((d.event && d.event.name) || 'event').replace(/[^A-Za-z0-9]+/g, '-') + '-roster.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function() { URL.revokeObjectURL(a.href); }, 2000);
+  }).catch(function(err) { alert((err && err.message) || 'Could not load the roster.'); });
+}
+
+function volPrintRoster(evId) {
+  // Opened before the fetch so a pop-up blocker treats it as the click it is.
+  var w = window.open('', '_blank');
+  if (!w) { alert('Please allow pop-ups for Connect to print the roster.'); return; }
+  w.document.write('<p style="font-family:sans-serif">Loading roster&hellip;</p>');
+  api('/admin/api/events/' + evId + '/roster').then(function(d) {
+    var ev = d.event || {};
+    var out = [], lastDay = null;
+    (d.roster || []).forEach(function(r) {
+      var day = r.role_date ? volFormatDayLabel(r.role_date) : 'No date set';
+      if (day !== lastDay) { out.push('<h2>' + esc(day) + '</h2>'); lastDay = day; }
+      var vols = r.volunteers || [];
+      var when = r.start_time ? esc(r.start_time) + (r.end_time ? '&ndash;' + esc(r.end_time) : '') : '';
+      out.push('<div class="shift"><div class="sh"><b>' + esc(r.name) + '</b><span>' + when + (r.lead ? ' &middot; Lead: ' + esc(r.lead) : '') + ' &middot; ' + vols.length + ' of ' + (r.slots || 0) + '</span></div>'
+        + '<table>' + vols.map(function(v) {
+            return '<tr><td>' + esc(v.name) + '</td><td>' + esc(v.phone || '') + '</td><td>' + esc(v.email || '') + '</td></tr>';
+          }).join('')
+        + (function() { var x = ''; for (var k = vols.length; k < (r.slots || 0); k++) x += '<tr class="open"><td>Open</td><td></td><td></td></tr>'; return x; })()
+        + '</table></div>');
+    });
+    w.document.open();
+    w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(ev.name || 'Roster') + ' — roster</title><style>'
+      + 'body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:24px;}h1{font-size:20px;margin:0 0 4px;}p.sub{color:#555;font-size:12px;margin:0 0 12px;}'
+      + 'h2{font-size:15px;margin:18px 0 6px;border-bottom:2px solid #1E2D4A;padding-bottom:3px;}'
+      + '.shift{break-inside:avoid;margin:0 0 10px;}.sh{display:flex;justify-content:space-between;gap:12px;font-size:13px;background:#F1EEE8;padding:5px 8px;}'
+      + '.sh span{color:#444;font-size:12px;}table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;}td{border-bottom:1px solid #ddd;padding:4px 8px;overflow-wrap:anywhere;}'
+      + 'td:nth-child(1){width:38%;}td:nth-child(2){width:22%;}'
+      + 'tr.open td{color:#999;font-style:italic;}button{margin:0 0 12px;}@media print{button{display:none;}body{margin:0;}}'
+      + '</style></head><body><button onclick="window.print()">Print</button><h1>' + esc(ev.name || 'Roster') + '</h1>'
+      + '<p class="sub">Printed ' + esc(new Date().toLocaleDateString()) + '. Volunteers&rsquo; contact details are for this event only.</p>'
+      + (out.join('') || '<p>No shifts yet.</p>') + '</body></html>');
+    w.document.close();
+  }).catch(function(err) { w.close(); alert((err && err.message) || 'Could not load the roster.'); });
 }
 
 function volSaveShift() {
