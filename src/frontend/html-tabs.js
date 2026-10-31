@@ -1335,6 +1335,21 @@ export const HTML_TABS_1 = String.raw`<!-- ═══ HOME / DASHBOARD TAB ══
       <div><label style="font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ev-muted);display:block;margin-bottom:5px;">Job lead</label><input type="text" id="vol-shift-lead" placeholder="Who runs this job (optional)"></div>
     </div>
     <div id="vol-shift-filled-hint" style="font-size:.72rem;color:var(--ev-muted);margin:-6px 0 2px;"></div>
+    <!-- Who is on this shift: add from the church directory, or by name; × takes someone off.
+         Changes here save at once (they are not part of Save shift). Hidden for a new shift. -->
+    <div id="vol-shift-people-wrap" style="border-top:1px solid var(--ev-border);padding-top:12px;">
+      <label style="font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ev-muted);display:block;margin-bottom:6px;">People on this shift</label>
+      <div id="vol-shift-people" style="font-size:.84rem;"></div>
+      <div style="margin-top:8px;">
+        <input type="text" id="vol-shift-add-name" placeholder="Add someone — start typing a name" autocomplete="off" oninput="volShiftPersonSearch()" onkeydown="volShiftPersonKey(event)">
+        <div id="vol-shift-add-results" style="margin-top:4px;"></div>
+        <div id="vol-shift-add-extra" style="display:none;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;">
+          <input type="email" id="vol-shift-add-email" placeholder="Email (optional)" autocomplete="off">
+          <input type="tel" id="vol-shift-add-phone" placeholder="Phone (optional)" autocomplete="off">
+        </div>
+      </div>
+      <div style="font-size:.7rem;color:var(--ev-muted);margin-top:6px;">Works even when the shift is full or sign-ups are closed. Nobody is emailed — let them know yourself.</div>
+    </div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
       <a href="javascript:void(0)" id="vol-shift-delete" style="color:var(--error);font-size:.78rem;font-weight:600;text-decoration:none;cursor:pointer;" onclick="volDeleteShift()">Delete shift</a>
       <div style="display:flex;gap:8px;">

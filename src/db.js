@@ -413,44 +413,14 @@ export const XMAS_MARKET_ROLES = [
   { name: 'Tent Teardown',                   description: 'Collapse tents in teams of 6 and put in shipping container.',                                                slots: 12, role_date: '2026-12-05', start_time: '6:30 PM',  end_time: '7:30 PM'  },
 ];
 
-// ── MIGRATE CHRISTMAS MARKET ROLES (idempotent) ───────────────────────
-// Runs on every cold start. If the Christmas Market event has fewer than
-// 20 roles it means it was seeded with the old simple role list — replace
-// it with the full time-slotted schedule.  Uses the same XMAS_ROLES list
-// from seedEvents so sort_order indices always align.
-async function migrateChristmasMarketRoles(db) {
-  const ev = await db.prepare("SELECT id FROM serve_events WHERE name='Christmas Market'").first();
-  if (!ev) return;
-  const count = await db.prepare('SELECT COUNT(*) as n FROM serve_roles WHERE event_id=?').bind(ev.id).first();
-  if (count && count.n >= 20) {
-    // Roles exist — check if start_time needs populating
-    const needsFix = await db.prepare('SELECT COUNT(*) as n FROM serve_roles WHERE event_id=? AND (start_time="" OR start_time IS NULL)').bind(ev.id).first();
-    if (needsFix && needsFix.n > 0) {
-      // UPDATE in place so existing signups are preserved.
-      // Fetch actual roles ordered by sort_order,id and update positionally.
-      // Only fill in roles that still have empty times to preserve user edits.
-      const dbRoles = await db.prepare('SELECT id FROM serve_roles WHERE event_id=? ORDER BY sort_order,id').bind(ev.id).all();
-      const rows = dbRoles.results || [];
-      for (let i = 0; i < rows.length && i < XMAS_MARKET_ROLES.length; i++) {
-        const r = XMAS_MARKET_ROLES[i];
-        await db.prepare('UPDATE serve_roles SET role_date=?, start_time=?, end_time=?, sort_order=? WHERE id=? AND (start_time="" OR start_time IS NULL)')
-          .bind(r.role_date||'', r.start_time||'', r.end_time||'', i, rows[i].id).run();
-      }
-    }
-    return;
-  }
-
-  // Wipe old roles (no signups yet, so signup_slots is also empty for this event)
-  await db.prepare('DELETE FROM signup_slots WHERE role_id IN (SELECT id FROM serve_roles WHERE event_id=?)').bind(ev.id).run();
-  await db.prepare('DELETE FROM serve_roles WHERE event_id=?').bind(ev.id).run();
-
-  for (let i = 0; i < XMAS_MARKET_ROLES.length; i++) {
-    const r = XMAS_MARKET_ROLES[i];
-    await db.prepare(
-      'INSERT INTO serve_roles (event_id,name,description,slots,sort_order,role_date,start_time,end_time) VALUES (?,?,?,?,?,?,?,?)'
-    ).bind(ev.id, r.name, r.description, r.slots||0, i, r.role_date||'', r.start_time||'', r.end_time||'').run();
-  }
-}
+// ── MIGRATE CHRISTMAS MARKET ROLES (retired) ──────────────────────────
+// This ran on every schema change and, whenever the Christmas Market had fewer
+// than 20 shifts, DELETED every shift and every sign-up on them and re-seeded
+// the 2026 defaults — it was written for a one-time move off an old short role
+// list, long since done. With a coordinator now running the market's shifts it
+// would have wiped their work the first time they trimmed the list below 20.
+// It also rewrote sort_order positionally. Removed, deliberately: fresh
+// databases still get the schedule from seedEvents() below.
 
 // ── SEED DEFAULT EVENTS ───────────────────────────────────────────────
 async function seedEvents(db) {
@@ -2490,7 +2460,6 @@ async function _doInitDb(db) {
   await db.prepare("UPDATE people SET confirmed=1 WHERE confirmed=0 AND confirmation_date != ''").run().catch(() => {});
 
   await seedEvents(db);
-  await migrateChristmasMarketRoles(db);
   await seedChmsDefaults(db);
   await backfillFundCategories(db);
   await backfillPassThroughFunds(db);

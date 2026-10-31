@@ -2100,6 +2100,15 @@ body.perm-giving-anon .require-giving-named{display:none!important;}
 .ev-day-header h4{font-family:var(--font-head);font-weight:600;font-size:.92rem;color:var(--color-navy);margin:0;}
 .ev-shift-row{display:grid;grid-template-columns:1.6fr 1fr 60px 50px;gap:10px;align-items:center;background:var(--ev-cream);border-radius:9px;padding:10px 12px;margin-bottom:6px;cursor:pointer;}
 .ev-shift-row:hover{background:var(--ev-border);}
+.ev-move button{border:1px solid var(--ev-border);background:#fff;color:var(--color-navy);border-radius:5px;width:24px;height:20px;font-size:9px;line-height:1;cursor:pointer;padding:0;}
+.ev-move button:disabled{opacity:.3;cursor:default;}
+.ev-move button:not(:disabled):hover{background:var(--ev-cream);}
+.ev-pick-list{border:1px solid var(--ev-border);border-radius:8px;background:#fff;max-height:240px;overflow:auto;}
+.ev-pick{padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--ev-border);font-size:.82rem;}
+.ev-pick:last-child{border-bottom:0;}
+.ev-pick strong{display:block;font-weight:600;color:var(--color-navy);}
+.ev-pick span{display:block;font-size:.72rem;color:var(--ev-muted);}
+.ev-pick:hover,.ev-pick.is-on{background:var(--ev-cream);}
 .ev-shift-row .ev-shift-name{font-size:.82rem;font-weight:600;color:var(--color-navy);}
 .ev-shift-row .ev-shift-time{font-size:.7rem;color:var(--ev-muted);}
 .ev-fill-bar{height:6px;background:rgba(30,45,74,.1);border-radius:99px;overflow:hidden;}

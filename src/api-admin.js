@@ -5,7 +5,7 @@ import { handleMobileApi } from './api-mobile.js';
 import { LOGIN_HTML } from './html-templates.js';
 import { randHex, authCardPage, getRolePermissions, permissionsForRole, csvRow } from './api-utils.js';
 import { sendBirthdayEmails, sendAnniversaryEmails, sendBirthdayTexts, sendAnniversaryTexts } from './api-emails.js';
-import { applyXmasMarketDefaults, handleVolunteerTemplates, handleSignupLinkPerson, handleSignupSendEmail, handleEventRemind, handleSchedulerVolunteersApi, findDuplicateSignupGroups, mergeDuplicateSignupGroup, findPossibleDuplicateSignupGroups, mergeSignupsByIds } from './api-scheduler.js';
+import { applyXmasMarketDefaults, handleVolunteerTemplates, handleSignupLinkPerson, handleSignupSendEmail, handleEventRemind, handleSchedulerVolunteersApi, findDuplicateSignupGroups, mergeDuplicateSignupGroup, findPossibleDuplicateSignupGroups, mergeSignupsByIds, addPersonToShift, removePersonFromShift, searchDirectoryForVolunteers } from './api-scheduler.js';
 import { wrapEnvForDbAttribution, logDbAttribution } from './db-attribution.js';
 import { handlePastVolunteers } from './api-past-volunteers.js';
 import { verifyAccessJwt } from './access-jwt.js';
@@ -859,9 +859,16 @@ async function handleAdminApiRoutes(req, env, url, method) {
     const evId = parseInt(seg.split('/')[1]);
     if (!await canManageServeEvent(req, env, evId)) return json({ error: 'Access denied' }, 403);
     let b; try { b = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+    // A new shift goes to the END of its event unless the caller says otherwise —
+    // at sort_order 0 it would land above everything the coordinator had arranged.
+    let sortOrder = Number.isInteger(b.sort_order) ? b.sort_order : null;
+    if (sortOrder === null) {
+      const mx = await env.DB.prepare('SELECT MAX(sort_order) AS m FROM serve_roles WHERE event_id=?').bind(evId).first();
+      sortOrder = (mx && mx.m !== null && mx.m !== undefined) ? Number(mx.m) + 1 : 0;
+    }
     const r = await env.DB.prepare(
       'INSERT INTO serve_roles (event_id,name,description,slots,sort_order,role_date,start_time,end_time,lead) VALUES (?,?,?,?,?,?,?,?,?)'
-    ).bind(evId, b.name||'New Role', b.description||'', b.slots||0, b.sort_order||0,
+    ).bind(evId, b.name||'New Role', b.description||'', b.slots||0, sortOrder,
            b.role_date||'', b.start_time||'', b.end_time||'', (b.lead||'').trim()).run();
     return json({ ok: true, id: r.meta?.last_row_id });
   }
@@ -873,11 +880,61 @@ async function handleAdminApiRoutes(req, env, url, method) {
     // The shift has to belong to the event the caller was checked against.
     if (!await env.DB.prepare('SELECT id FROM serve_roles WHERE id=? AND event_id=?').bind(rid, evId).first()) return json({ error: 'Not found' }, 404);
     let b; try { b = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+    // ⚠ A SAVE THAT DOES NOT MENTION sort_order KEEPS THE SHIFT WHERE IT IS. The shift
+    // editor never sends one, and this used to write `b.sort_order||0` — so every edit
+    // threw the shift back to the top of its day, undoing whatever order the
+    // coordinator had arranged. Position changes only through roles-order below.
     await env.DB.prepare(
-      'UPDATE serve_roles SET name=?,description=?,slots=?,sort_order=?,role_date=?,start_time=?,end_time=?,lead=? WHERE id=?'
-    ).bind(b.name, b.description||'', b.slots||0, b.sort_order||0,
+      'UPDATE serve_roles SET name=?,description=?,slots=?,sort_order=COALESCE(?,sort_order),role_date=?,start_time=?,end_time=?,lead=? WHERE id=?'
+    ).bind(b.name, b.description||'', b.slots||0, Number.isInteger(b.sort_order) ? b.sort_order : null,
            b.role_date||'', b.start_time||'', b.end_time||'', (b.lead||'').trim(), rid).run();
     return json({ ok: true });
+  }
+
+  // ── Arrange the shifts: { role_ids: [...] } in the order they should appear ──
+  // Writes sort_order = position for each listed shift. Every id must belong to this
+  // event; one that does not refuses the whole request rather than half-applying it.
+  if (seg.match(/^events\/\d+\/roles-order$/) && method === 'PUT') {
+    const evId = parseInt(seg.split('/')[1]);
+    if (!await canManageServeEvent(req, env, evId)) return json({ error: 'Access denied' }, 403);
+    let b; try { b = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+    const ids = Array.isArray(b.role_ids) ? b.role_ids.map(Number) : [];
+    if (!ids.length || ids.some((x) => !Number.isInteger(x) || x <= 0) || new Set(ids).size !== ids.length) {
+      return json({ error: 'role_ids must be a list of shift ids' }, 400);
+    }
+    const mine = new Set(((await env.DB.prepare('SELECT id FROM serve_roles WHERE event_id=?').bind(evId).all()).results || []).map((r) => r.id));
+    if (ids.some((x) => !mine.has(x))) return json({ error: 'A shift in that list is not on this event' }, 400);
+    await env.DB.batch(ids.map((id, i) => env.DB.prepare('UPDATE serve_roles SET sort_order=? WHERE id=?').bind(i, id)));
+    return json({ ok: true });
+  }
+
+  // ── Put a person on a shift, or take them off — the coordinator's own door ──
+  // Same work as the website's market route (addPersonToShift/removePersonFromShift in
+  // api-scheduler.js), gated on the event's own coordinators rather than a shared key.
+  const shiftPeople = seg.match(/^events\/(\d+)\/roles\/(\d+)\/people(?:\/(\d+))?$/);
+  if (shiftPeople && (method === 'POST' || method === 'DELETE')) {
+    const evId = parseInt(shiftPeople[1]); const rid = parseInt(shiftPeople[2]);
+    if (!await canManageServeEvent(req, env, evId)) return json({ error: 'Access denied' }, 403);
+    let r;
+    if (method === 'POST' && !shiftPeople[3]) {
+      let b; try { b = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+      r = await addPersonToShift(env, evId, rid, b || {});
+    } else if (method === 'DELETE' && shiftPeople[3]) {
+      r = await removePersonFromShift(env, evId, rid, parseInt(shiftPeople[3]));
+    } else {
+      return json({ error: 'Not found' }, 404);
+    }
+    const { status = 200, ...body } = r;
+    return json(body, status);
+  }
+
+  // ── Find someone in the church directory to put on a shift ──
+  // Answers like the member directory (searchDirectoryForVolunteers): a coordinator is a
+  // volunteer, so opted-out people and hidden contact details stay out.
+  const evPeople = seg.match(/^events\/(\d+)\/people$/);
+  if (evPeople && method === 'GET') {
+    if (!await canManageServeEvent(req, env, parseInt(evPeople[1]))) return json({ error: 'Access denied' }, 403);
+    return json({ people: await searchDirectoryForVolunteers(env, url.searchParams.get('q')) });
   }
 
   if (seg.match(/^events\/\d+\/roles\/\d+$/) && method === 'DELETE') {
@@ -901,14 +958,14 @@ async function handleAdminApiRoutes(req, env, url, method) {
     const roster = [];
     for (const role of (roles.results || [])) {
       const vols = await env.DB.prepare(
-        'SELECT s.name, s.email, s.phone FROM signup_slots ss JOIN signups s ON ss.signup_id=s.id WHERE ss.role_id=? ORDER BY s.name'
+        'SELECT s.id, s.name, s.email, s.phone, s.status FROM signup_slots ss JOIN signups s ON ss.signup_id=s.id WHERE ss.role_id=? ORDER BY s.name'
       ).bind(role.id).all();
       roster.push({
         id: role.id, name: role.name, description: role.description || '',
         role_date: role.role_date || '', start_time: role.start_time || '',
-        end_time: role.end_time || '', slots: role.slots || 0,
+        end_time: role.end_time || '', slots: role.slots || 0, lead: role.lead || '',
         volunteers: (vols.results || []).map(function(v) {
-          return { name: v.name, email: v.email, phone: v.phone || '' };
+          return { id: v.id, name: v.name, email: v.email, phone: v.phone || '', status: v.status || 'new' };
         }),
       });
     }
