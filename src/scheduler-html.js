@@ -1330,6 +1330,7 @@ body.embedded #app-content { display:block!important; }
   <div class="panel-body">
     <p id="readings-panel-subtitle" style="font-size:.85rem;color:var(--warm-gray);margin:0 0 6px;"></p>
     <p id="readings-panel-source" style="font-size:.8rem;color:var(--warm-gray);margin:0 0 16px;"></p>
+    <div id="readings-panel-alts" style="display:none;margin:0 0 16px;"></div>
 
     <div class="field">
       <label>Old Testament <span style="font-weight:400;color:var(--warm-gray);font-size:.78rem;">&mdash; Lector &amp; Liturgist</span></label>
@@ -1927,8 +1928,40 @@ function openReadingsPanel(dateISO) {
   document.getElementById('readings-epistle').value = r.epistle || '';
   document.getElementById('readings-gospel').value  = r.gospel  || '';
   document.getElementById('readings-psalm').value   = r.psalm   || '';
+  renderReadingsAlternates(dateISO);
   showAlert('readings-alert', '', '');
   openPanel('readings-panel');
+}
+
+// The LCMS calendar sometimes gives a choice for a date ("or" St. Luke, the
+// Sunday a festival displaced, the other Christmas and Easter services). Each
+// choice fills the boxes; nothing changes until Save, which stores it like any
+// other hand-set reading, so the emails pick it up.
+function renderReadingsAlternates(dateISO) {
+  var box = document.getElementById('readings-panel-alts');
+  if (!box) return;
+  var e = lectCalendar[dateISO];
+  var alts = (e && e.alternates) || [];
+  if (!alts.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  var choices = [{ name: e.sundayName, ot: e.ot, epistle: e.epistle, gospel: e.gospel, psalm: e.psalm }].concat(alts);
+  box.innerHTML = '<div style="font-size:.78rem;font-weight:700;color:var(--warm-gray);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">The LCMS calendar offers a choice</div>'
+    + choices.map(function(a, i) {
+        return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 0;border-top:1px solid var(--border);">'
+          + '<span style="flex:1;min-width:160px;font-size:.84rem;color:var(--steel-anchor);">' + esc(fmtSundayName(a.name)) + (i === 0 ? ' <span style="color:var(--warm-gray);font-size:.74rem;">(default)</span>' : '') + '</span>'
+          + '<button type="button" class="btn btn-outline readings-alt-use" data-alt="' + i + '" style="padding:2px 10px;font-size:.76rem;">Use these readings</button>'
+          + '</div>';
+      }).join('');
+  box.style.display = '';
+  box.querySelectorAll('.readings-alt-use').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var a = choices[+btn.getAttribute('data-alt')] || {};
+      document.getElementById('readings-ot').value      = a.ot      || '';
+      document.getElementById('readings-epistle').value = a.epistle || '';
+      document.getElementById('readings-gospel').value  = a.gospel  || '';
+      document.getElementById('readings-psalm').value   = a.psalm   || '';
+      showAlert('readings-alert', 'Filled in the readings for ' + esc(fmtSundayName(a.name)) + '. Save to use them for this date.', 'success');
+    });
+  });
 }
 
 document.getElementById('btn-save-readings').addEventListener('click', function() {
@@ -3540,6 +3573,12 @@ function renderFocusWeekDetail() {
 // the legacy #schedule-table, and that table has been display:none since the
 // Focus Week redesign — so readings could not be set at all from the UI. Any
 // new entry point has to live here, in the pane that is actually on screen.
+// "· or St. Luke" — says a choice exists without opening the panel.
+function lectAltHint(dateISO, custom) {
+  var e = lectCalendar[dateISO];
+  if (custom || !e || !e.alternates || !e.alternates.length) return '';
+  return ' &middot; or ' + e.alternates.map(function(a) { return esc(fmtSundayName(a.name)); }).join(' / ');
+}
 function focusWeekReadingsHtml(dateISO) {
   var rd = getReadingsForDate(dateISO);
   var custom = !!getReadingsOverrides()[dateISO];
@@ -3569,7 +3608,7 @@ function focusWeekReadingsHtml(dateISO) {
   return '<div class="fw-readings">'
     + '<div class="fw-readings-hd">'
       + '<span class="fw-readings-title">Readings</span>'
-      + '<span class="fw-readings-src">' + (custom ? 'set by hand' : 'from the LCMS lectionary') + '</span>'
+      + '<span class="fw-readings-src">' + (custom ? 'set by hand' : 'from the LCMS lectionary') + lectAltHint(dateISO, custom) + '</span>'
       + '<span class="fw-readings-ver">' + esc(BIBLE_VERSION_LABEL) + '</span>'
       + editBtn
     + '</div>'

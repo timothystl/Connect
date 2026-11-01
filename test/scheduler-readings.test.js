@@ -758,3 +758,41 @@ describe('readings PDF attachment', () => {
     expect(SERVED_JS.match(/readingsMode === 'pdf'/g)).toHaveLength(2);
   });
 });
+
+// ── LCMS "or" choices ────────────────────────────────────────────────────────
+// The LCMS calendar sometimes lists two sets of readings for a date (a festival
+// and the Sunday it displaces). The default goes out by email; the panel offers
+// the other, and the strip says one exists.
+describe('LCMS alternate readings', () => {
+  function withAlt() {
+    const r = ready();
+    r.ctx.lectCalendar['2026-08-16'].alternates = [
+      { name: 'St. Mary, Mother of Our Lord', ot: 'Isaiah 61:7-11', epistle: 'Galatians 4:4-7', gospel: 'Luke 1:(39-45) 46-55', psalm: 'Psalm 45:10-17' },
+    ];
+    return r;
+  }
+
+  it('lists the default and the alternate in the readings panel', () => {
+    const { ctx, el } = withAlt();
+    ctx.openReadingsPanel('2026-08-16');
+    const box = el('readings-panel-alts');
+    expect(box.style.display).toBe('');
+    expect(box.innerHTML).toContain('St. Mary, Mother of Our Lord');
+    expect(box.innerHTML).toContain('(default)');
+    expect(box.innerHTML).toContain('Use these readings');
+    // Opening the panel alone changes nothing: the default is still in the boxes.
+    expect(el('readings-ot').value).toBe('Isaiah 2:1-5');
+  });
+
+  it('hides the choice block when the date has no alternate', () => {
+    const { ctx, el } = ready();
+    ctx.openReadingsPanel('2026-08-16');
+    expect(el('readings-panel-alts').style.display).toBe('none');
+  });
+
+  it('mentions the alternate on the week strip unless the date was set by hand', () => {
+    const { ctx } = withAlt();
+    expect(ctx.focusWeekReadingsHtml('2026-08-16')).toContain('or St. Mary, Mother of Our Lord');
+    expect(ctx.lectAltHint('2026-08-16', true)).toBe('');
+  });
+});
