@@ -87,6 +87,20 @@ const FESTIVALS = [
   ['reformation', /reformation/, 'Reformation Day', '10-31'],
   ['all-saints', /all saints/, 'All Saints\' Day', '11-01'],
   ['thanksgiving', /thanksgiving day( \(usa\))?$/, 'Day of National Thanksgiving'],
+  // Lesser festivals no LCMS yearly calendar on file lists; readings in LSB_FESTIVALS below.
+  ['st-andrew', /st\.? andrew/, 'St. Andrew, Apostle', '11-30'],
+  ['st-thomas', /st\.? thomas/, 'St. Thomas, Apostle', '12-21'],
+  ['st-titus', /st\.? titus/, 'St. Titus, Pastor and Confessor', '01-26'],
+  ['st-matthias', /matthias/, 'St. Matthias, Apostle', '02-24'],
+  ['st-joseph', /st\.? joseph/, 'St. Joseph, Guardian of Jesus', '03-19'],
+  ['annunciation', /annunciation/, 'The Annunciation of Our Lord', '03-25'],
+  ['sts-philip-james', /philip and st\.? james/, 'St. Philip and St. James, Apostles', '05-01'],
+  ['visitation', /visitation/, 'The Visitation', '05-31'],
+  ['st-barnabas', /barnabas/, 'St. Barnabas, Apostle', '06-11'],
+  ['nativity-john-baptist', /nativity of st\.? john/, 'The Nativity of St. John the Baptist', '06-24'],
+  ['st-mary-magdalene', /magdalene/, 'St. Mary Magdalene', '07-22'],
+  ['st-james-jerusalem', /james of jerusalem/, 'St. James of Jerusalem, Brother of Jesus and Martyr', '10-23'],
+  ['sts-simon-jude', /simon and st\.? jude/, 'St. Simon and St. Jude, Apostles', '10-28'],
 ];
 const FEST_BY_KEY = Object.fromEntries(FESTIVALS.map(f => [f[0], { key: f[0], re: f[1], name: f[2], mmdd: f[3] }]));
 
@@ -140,6 +154,33 @@ for (const r of [...rows].sort((a, b) => a.source.localeCompare(b.source))) {
   const rd = readingsOf(r);
   if (!rd.ot || !rd.epistle || !rd.gospel) continue;      // truncated cell in a source file
   library[id] = { ...rd, source: r.source };
+}
+
+// LSB propers for the lesser festivals that no LCMS yearly calendar on file lists
+// (they have not fallen on a Sunday in those years). Readings from Lutheran Service
+// Book's Propers for Feasts and Festivals, checked against the Wartburg Project's
+// LSB "Feasts, Festivals, and Occasions" listing
+// (wartburgproject.org/resources/lectionaries/lsb/occasions), which agrees with the
+// LCMS calendars on every festival both contain. Only used where no LCMS calendar
+// has the festival.
+const LSB_SOURCE = 'Lutheran Service Book propers (feasts and festivals)';
+const LSB_FESTIVALS = {
+  'st-andrew':             ['Ezekiel 3:16-21', 'Psalm 139:1-12', 'Romans 10:8b-18', 'John 1:35-42a'],
+  'st-thomas':             ['Judges 6:36-40', 'Psalm 136:1-4, 23-26', 'Ephesians 4:7, 11-16', 'John 20:24-29'],
+  'st-titus':              ['Acts 20:28-35', 'Psalm 71:1-8', 'Titus 1:1-9', 'Luke 10:1-9'],
+  'st-matthias':           ['Isaiah 66:1-2', 'Psalm 134', 'Acts 1:15-26', 'Matthew 11:25-30'],
+  'st-joseph':             ['2 Samuel 7:4-16', 'Psalm 127', 'Romans 4:13-18', 'Matthew 2:13-15, 19-23'],
+  'annunciation':          ['Isaiah 7:10-14', 'Psalm 45:7-17', 'Hebrews 10:4-10', 'Luke 1:26-38'],
+  'sts-philip-james':      ['Isaiah 30:18-21', 'Psalm 36:5-10', 'Ephesians 2:19-22', 'John 14:1-14'],
+  'visitation':            ['Isaiah 11:1-5', 'Psalm 138', 'Romans 12:9-16', 'Luke 1:39-45 (46-56)'],
+  'st-barnabas':           ['Isaiah 42:5-12', 'Psalm 112', 'Acts 11:19-30; 13:1-3', 'Mark 6:7-13'],
+  'nativity-john-baptist': ['Isaiah 40:1-5', 'Psalm 85:(1-6) 7-13', 'Acts 13:13-26', 'Luke 1:57-80'],
+  'st-mary-magdalene':     ['Proverbs 31:10-31', 'Psalm 73:23-28', 'Acts 13:26-31', 'John 20:1-2, 10-18'],
+  'st-james-jerusalem':    ['Acts 15:12-22a', 'Psalm 133', 'James 1:1-12', 'Matthew 13:54-58'],
+  'sts-simon-jude':        ['Jeremiah 26:1-16', 'Psalm 43', '1 Peter 1:3-9', 'John 15:(12-16) 17-21'],
+};
+for (const [key, [ot, psalm, epistle, gospel]] of Object.entries(LSB_FESTIVALS)) {
+  if (!library[key]) library[key] = { ot, psalm, epistle, gospel, source: LSB_SOURCE };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
