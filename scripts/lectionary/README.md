@@ -37,7 +37,11 @@ python3 scripts/lectionary/parse-lcms-docx.py /tmp/rows-new.json <new>.docx
 Merge the new rows into `lcms-official-rows.json` (or re-run the parser on every
 calendar file at once), run the build, check the `--report` output, and run `npm test`.
 
-Not yet covered, because no LCMS calendar on file lists their readings: St. Andrew,
-St. Thomas, St. Titus, St. Matthias, St. Joseph, the Annunciation, St. Philip and
-St. James, the Visitation, St. Barnabas, the Nativity of St. John the Baptist,
-St. Mary Magdalene, St. James of Jerusalem, and St. Simon and St. Jude.
+Thirteen lesser festivals have not appeared on any LCMS yearly calendar on file
+(St. Andrew, St. Thomas, St. Titus, St. Matthias, St. Joseph, the Annunciation,
+St. Philip and St. James, the Visitation, St. Barnabas, the Nativity of St. John the
+Baptist, St. Mary Magdalene, St. James of Jerusalem, St. Simon and St. Jude). Their
+Lutheran Service Book propers are in `LSB_FESTIVALS` in the build script, checked
+against the Wartburg Project's LSB listing
+(<https://wartburgproject.org/resources/lectionaries/lsb/occasions>). If an LCMS
+calendar later lists one of them, its readings take precedence.

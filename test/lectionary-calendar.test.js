@@ -83,3 +83,28 @@ describe('LCMS calendar: festivals and sources', () => {
     expect(Object.values(cal).some((e) => /Canada/.test(e.sundayName))).toBe(false);
   });
 });
+
+describe('LCMS calendar: LSB lesser festivals', () => {
+  const cal = JSON.parse(LCMS_CALENDAR_JSON).calendar;
+
+  it('adds the lesser festivals on their weekday dates with LSB readings', () => {
+    expect(cal['2026-11-30'].sundayName).toBe('St. Andrew, Apostle');
+    expect(cal['2026-11-30'].gospel).toBe('John 1:35-42a');
+    expect(cal['2026-12-21'].sundayName).toBe('St. Thomas, Apostle');
+    expect(cal['2027-05-31'].sundayName).toBe('The Visitation');
+    expect(cal['2027-06-24'].gospel).toBe('Luke 1:57-80');
+    expect(cal['2027-10-28'].epistle).toBe('1 Peter 1:3-9');
+  });
+
+  it('keeps every fixed-date festival in the calendar each year it does not collide with a principal day', () => {
+    const names = Object.values(cal).flatMap((e) => [e.sundayName, ...(e.alternates || []).map((a) => a.name)]);
+    for (const n of ['St. Titus', 'St. Matthias', 'St. Joseph', 'Annunciation', 'St. Philip and St. James',
+      'St. Barnabas', 'Magdalene', 'St. James of Jerusalem', 'St. Simon and St. Jude']) {
+      expect(names.some((x) => x.includes(n)), n).toBe(true);
+    }
+  });
+
+  it('leaves Holy Week alone when the Annunciation falls in it (2027: Maundy Thursday)', () => {
+    expect(cal['2027-03-25'].sundayName).toBe('Holy (Maundy) Thursday');
+  });
+});

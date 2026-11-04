@@ -230,6 +230,17 @@ export const LCMS_CALENDAR_JSON = `{
         }
       ]
     },
+    "2026-01-26": {
+      "sundayName": "St. Titus, Pastor and Confessor",
+      "season": "Epiphany",
+      "churchYear": "CY2026",
+      "series": "A",
+      "psalm": "Psalm 71:1-8",
+      "ot": "Acts 20:28-35",
+      "epistle": "Titus 1:1-9",
+      "gospel": "Luke 10:1-9",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2026-02-01": {
       "sundayName": "Fourth Sunday after the Epiphany",
       "season": "Epiphany",
@@ -296,6 +307,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 4:1-11",
       "source": "LCMS calendar: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2026-02-24": {
+      "sundayName": "St. Matthias, Apostle",
+      "season": "Lent",
+      "churchYear": "CY2026",
+      "series": "A",
+      "psalm": "Psalm 134",
+      "ot": "Isaiah 66:1-2",
+      "epistle": "Acts 1:15-26",
+      "gospel": "Matthew 11:25-30",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2026-03-01": {
       "sundayName": "Second Sunday in Lent",
       "season": "Lent",
@@ -329,6 +351,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 9:1-41",
       "source": "LCMS calendar: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2026-03-19": {
+      "sundayName": "St. Joseph, Guardian of Jesus",
+      "season": "Lent",
+      "churchYear": "CY2026",
+      "series": "A",
+      "psalm": "Psalm 127",
+      "ot": "2 Samuel 7:4-16",
+      "epistle": "Romans 4:13-18",
+      "gospel": "Matthew 2:13-15, 19-23",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2026-03-22": {
       "sundayName": "Fifth Sunday in Lent",
       "season": "Lent",
@@ -339,6 +372,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Romans 8:1-11",
       "gospel": "John 11:1-45 (46-53)",
       "source": "LCMS calendar: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+    },
+    "2026-03-25": {
+      "sundayName": "The Annunciation of Our Lord",
+      "season": "Lent",
+      "churchYear": "CY2026",
+      "series": "A",
+      "psalm": "Psalm 45:7-17",
+      "ot": "Isaiah 7:10-14",
+      "epistle": "Hebrews 10:4-10",
+      "gospel": "Luke 1:26-38",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2026-03-29": {
       "sundayName": "Palm Sunday (Sunday of the Passion)",
@@ -437,6 +481,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 10:1-10",
       "source": "LCMS calendar: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2026-05-01": {
+      "sundayName": "St. Philip and St. James, Apostles",
+      "season": "Easter",
+      "churchYear": "CY2026",
+      "series": "A",
+      "psalm": "Psalm 36:5-10",
+      "ot": "Isaiah 30:18-21",
+      "epistle": "Ephesians 2:19-22",
+      "gospel": "John 14:1-14",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2026-05-03": {
       "sundayName": "Fifth Sunday of Easter",
       "season": "Easter",
@@ -514,6 +569,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 9:9-13",
       "source": "LCMS calendar: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2026-06-11": {
+      "sundayName": "St. Barnabas, Apostle",
+      "season": "Pentecost",
+      "churchYear": "CY2026",
+      "series": "A",
+      "psalm": "Psalm 112",
+      "ot": "Isaiah 42:5-12",
+      "epistle": "Acts 11:19-30; 13:1-3",
+      "gospel": "Mark 6:7-13",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2026-06-14": {
       "sundayName": "3rd Sunday after Pentecost (prop6)",
       "season": "Pentecost",
@@ -535,6 +601,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Romans 6:12-23",
       "gospel": "Matthew 10:5a, 21-33",
       "source": "LCMS calendar: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+    },
+    "2026-06-24": {
+      "sundayName": "The Nativity of St. John the Baptist",
+      "season": "Pentecost",
+      "churchYear": "CY2026",
+      "series": "A",
+      "psalm": "Psalm 85:(1-6) 7-13",
+      "ot": "Isaiah 40:1-5",
+      "epistle": "Acts 13:13-26",
+      "gospel": "Luke 1:57-80",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2026-06-28": {
       "sundayName": "5th Sunday after Pentecost (prop8)",
@@ -590,6 +667,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Romans 8:18-27",
       "gospel": "Matthew 13:24-30, 36-43",
       "source": "LCMS calendar: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+    },
+    "2026-07-22": {
+      "sundayName": "St. Mary Magdalene",
+      "season": "Pentecost",
+      "churchYear": "CY2026",
+      "series": "A",
+      "psalm": "Psalm 73:23-28",
+      "ot": "Proverbs 31:10-31",
+      "epistle": "Acts 13:26-31",
+      "gospel": "John 20:1-2, 10-18",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2026-07-25": {
       "sundayName": "St. James the Elder, Apostle",
@@ -820,6 +908,17 @@ export const LCMS_CALENDAR_JSON = `{
         }
       ]
     },
+    "2026-10-23": {
+      "sundayName": "St. James of Jerusalem, Brother of Jesus and Martyr",
+      "season": "Pentecost",
+      "churchYear": "CY2026",
+      "series": "A",
+      "psalm": "Psalm 133",
+      "ot": "Acts 15:12-22a",
+      "epistle": "James 1:1-12",
+      "gospel": "Matthew 13:54-58",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2026-10-25": {
       "sundayName": "Reformation Day (observed)",
       "season": "Pentecost",
@@ -839,6 +938,17 @@ export const LCMS_CALENDAR_JSON = `{
           "gospel": "Matthew 22:34-46"
         }
       ]
+    },
+    "2026-10-28": {
+      "sundayName": "St. Simon and St. Jude, Apostles",
+      "season": "Pentecost",
+      "churchYear": "CY2026",
+      "series": "A",
+      "psalm": "Psalm 43",
+      "ot": "Jeremiah 26:1-16",
+      "epistle": "1 Peter 1:3-9",
+      "gospel": "John 15:(12-16) 17-21",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2026-10-31": {
       "sundayName": "Reformation Day",
@@ -917,6 +1027,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Mark 11:1-10",
       "source": "LCMS calendar: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2026-11-30": {
+      "sundayName": "St. Andrew, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2027",
+      "series": "B",
+      "psalm": "Psalm 139:1-12",
+      "ot": "Ezekiel 3:16-21",
+      "epistle": "Romans 10:8b-18",
+      "gospel": "John 1:35-42a",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2026-12-06": {
       "sundayName": "Second Sunday in Advent",
       "season": "Advent",
@@ -949,6 +1070,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Romans 16:25-27",
       "gospel": "Luke 1:26-38",
       "source": "LCMS calendar: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2026-12-21": {
+      "sundayName": "St. Thomas, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2027",
+      "series": "B",
+      "psalm": "Psalm 136:1-4, 23-26",
+      "ot": "Judges 6:36-40",
+      "epistle": "Ephesians 4:7, 11-16",
+      "gospel": "John 20:24-29",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2026-12-24": {
       "sundayName": "The Nativity of Our Lord (Christmas Eve)",
@@ -1127,6 +1259,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 19:27-30",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2027-01-26": {
+      "sundayName": "St. Titus, Pastor and Confessor",
+      "season": "Epiphany",
+      "churchYear": "CY2027",
+      "series": "B",
+      "psalm": "Psalm 71:1-8",
+      "ot": "Acts 20:28-35",
+      "epistle": "Titus 1:1-9",
+      "gospel": "Luke 10:1-9",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2027-01-31": {
       "sundayName": "Fourth Sunday after the Epiphany",
       "season": "Epiphany",
@@ -1193,6 +1336,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Mark 8:27-38",
       "source": "LCMS calendar: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2027-02-24": {
+      "sundayName": "St. Matthias, Apostle",
+      "season": "Lent",
+      "churchYear": "CY2027",
+      "series": "B",
+      "psalm": "Psalm 134",
+      "ot": "Isaiah 66:1-2",
+      "epistle": "Acts 1:15-26",
+      "gospel": "Matthew 11:25-30",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2027-02-28": {
       "sundayName": "Third Sunday in Lent",
       "season": "Lent",
@@ -1225,6 +1379,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Hebrews 5:1-10",
       "gospel": "Mark 10:(32-34) 35-45",
       "source": "LCMS calendar: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2027-03-19": {
+      "sundayName": "St. Joseph, Guardian of Jesus",
+      "season": "Lent",
+      "churchYear": "CY2027",
+      "series": "B",
+      "psalm": "Psalm 127",
+      "ot": "2 Samuel 7:4-16",
+      "epistle": "Romans 4:13-18",
+      "gospel": "Matthew 2:13-15, 19-23",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2027-03-21": {
       "sundayName": "Palm Sunday (Sunday of the Passion)",
@@ -1332,6 +1497,17 @@ export const LCMS_CALENDAR_JSON = `{
         }
       ]
     },
+    "2027-05-01": {
+      "sundayName": "St. Philip and St. James, Apostles",
+      "season": "Easter",
+      "churchYear": "CY2027",
+      "series": "B",
+      "psalm": "Psalm 36:5-10",
+      "ot": "Isaiah 30:18-21",
+      "epistle": "Ephesians 2:19-22",
+      "gospel": "John 14:1-14",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2027-05-02": {
       "sundayName": "Sixth Sunday of Easter",
       "season": "Easter",
@@ -1398,6 +1574,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Mark 2:23-28 (3:1-6)",
       "source": "LCMS calendar: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2027-05-31": {
+      "sundayName": "The Visitation",
+      "season": "Pentecost",
+      "churchYear": "CY2027",
+      "series": "B",
+      "psalm": "Psalm 138",
+      "ot": "Isaiah 11:1-5",
+      "epistle": "Romans 12:9-16",
+      "gospel": "Luke 1:39-45 (46-56)",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2027-06-06": {
       "sundayName": "3rd Sunday after Pentecost (prop5)",
       "season": "Pentecost",
@@ -1408,6 +1595,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "2 Corinthians 4:13-5:1",
       "gospel": "Mark 3:20-35",
       "source": "LCMS calendar: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2027-06-11": {
+      "sundayName": "St. Barnabas, Apostle",
+      "season": "Pentecost",
+      "churchYear": "CY2027",
+      "series": "B",
+      "psalm": "Psalm 112",
+      "ot": "Isaiah 42:5-12",
+      "epistle": "Acts 11:19-30; 13:1-3",
+      "gospel": "Mark 6:7-13",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2027-06-13": {
       "sundayName": "4th Sunday after Pentecost (prop6)",
@@ -1430,6 +1628,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "2 Corinthians 6:1-13",
       "gospel": "Mark 4:35-41",
       "source": "LCMS calendar: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2027-06-24": {
+      "sundayName": "The Nativity of St. John the Baptist",
+      "season": "Pentecost",
+      "churchYear": "CY2027",
+      "series": "B",
+      "psalm": "Psalm 85:(1-6) 7-13",
+      "ot": "Isaiah 40:1-5",
+      "epistle": "Acts 13:13-26",
+      "gospel": "Luke 1:57-80",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2027-06-27": {
       "sundayName": "6th Sunday after Pentecost (prop8)",
@@ -1485,6 +1694,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Ephesians 2:11-22",
       "gospel": "Mark 6:30-44",
       "source": "LCMS calendar: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2027-07-22": {
+      "sundayName": "St. Mary Magdalene",
+      "season": "Pentecost",
+      "churchYear": "CY2027",
+      "series": "B",
+      "psalm": "Psalm 73:23-28",
+      "ot": "Proverbs 31:10-31",
+      "epistle": "Acts 13:26-31",
+      "gospel": "John 20:1-2, 10-18",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2027-07-25": {
       "sundayName": "St. James the Elder, Apostle",
@@ -1711,6 +1931,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 10:1-9",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2027-10-23": {
+      "sundayName": "St. James of Jerusalem, Brother of Jesus and Martyr",
+      "season": "Pentecost",
+      "churchYear": "CY2027",
+      "series": "B",
+      "psalm": "Psalm 133",
+      "ot": "Acts 15:12-22a",
+      "epistle": "James 1:1-12",
+      "gospel": "Matthew 13:54-58",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2027-10-24": {
       "sundayName": "23rd Sunday after Pentecost (prop25)",
       "season": "Pentecost",
@@ -1721,6 +1952,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Hebrews 7:23-28",
       "gospel": "Mark 10:46-52",
       "source": "LCMS calendar: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2027-10-28": {
+      "sundayName": "St. Simon and St. Jude, Apostles",
+      "season": "Pentecost",
+      "churchYear": "CY2027",
+      "series": "B",
+      "psalm": "Psalm 43",
+      "ot": "Jeremiah 26:1-16",
+      "epistle": "1 Peter 1:3-9",
+      "gospel": "John 15:(12-16) 17-21",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2027-10-31": {
       "sundayName": "Reformation Day",
@@ -1808,6 +2050,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 19:28-40",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2027-11-30": {
+      "sundayName": "St. Andrew, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2028",
+      "series": "C",
+      "psalm": "Psalm 139:1-12",
+      "ot": "Ezekiel 3:16-21",
+      "epistle": "Romans 10:8b-18",
+      "gospel": "John 1:35-42a",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2027-12-05": {
       "sundayName": "Second Sunday in Advent",
       "season": "Advent",
@@ -1840,6 +2093,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Hebrews 10:5-10",
       "gospel": "Luke 1:39-45 (46-56)",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+    },
+    "2027-12-21": {
+      "sundayName": "St. Thomas, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2028",
+      "series": "C",
+      "psalm": "Psalm 136:1-4, 23-26",
+      "ot": "Judges 6:36-40",
+      "epistle": "Ephesians 4:7, 11-16",
+      "gospel": "John 20:24-29",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2027-12-24": {
       "sundayName": "The Nativity of Our Lord (Christmas Eve)",
@@ -2022,6 +2286,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 19:27-30",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2028-01-26": {
+      "sundayName": "St. Titus, Pastor and Confessor",
+      "season": "Epiphany",
+      "churchYear": "CY2028",
+      "series": "C",
+      "psalm": "Psalm 71:1-8",
+      "ot": "Acts 20:28-35",
+      "epistle": "Titus 1:1-9",
+      "gospel": "Luke 10:1-9",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2028-01-30": {
       "sundayName": "Fourth Sunday after the Epiphany",
       "season": "Epiphany",
@@ -2077,6 +2352,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 6:27-38",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2028-02-24": {
+      "sundayName": "St. Matthias, Apostle",
+      "season": "Epiphany",
+      "churchYear": "CY2028",
+      "series": "C",
+      "psalm": "Psalm 134",
+      "ot": "Isaiah 66:1-2",
+      "epistle": "Acts 1:15-26",
+      "gospel": "Matthew 11:25-30",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2028-02-27": {
       "sundayName": "The Transfiguration of Our Lord",
       "season": "Epiphany",
@@ -2130,7 +2416,27 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Ezekiel 33:7-20",
       "epistle": "1 Corinthians 10:1-13",
       "gospel": "Luke 13:1-9",
-      "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+      "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx",
+      "alternates": [
+        {
+          "name": "St. Joseph, Guardian of Jesus",
+          "psalm": "Psalm 127",
+          "ot": "2 Samuel 7:4-16",
+          "epistle": "Romans 4:13-18",
+          "gospel": "Matthew 2:13-15, 19-23"
+        }
+      ]
+    },
+    "2028-03-25": {
+      "sundayName": "The Annunciation of Our Lord",
+      "season": "Lent",
+      "churchYear": "CY2028",
+      "series": "C",
+      "psalm": "Psalm 45:7-17",
+      "ot": "Isaiah 7:10-14",
+      "epistle": "Hebrews 10:4-10",
+      "gospel": "Luke 1:26-38",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2028-03-26": {
       "sundayName": "Fourth Sunday in Lent",
@@ -2240,6 +2546,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 21:1-14 (15-19)",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2028-05-01": {
+      "sundayName": "St. Philip and St. James, Apostles",
+      "season": "Easter",
+      "churchYear": "CY2028",
+      "series": "C",
+      "psalm": "Psalm 36:5-10",
+      "ot": "Isaiah 30:18-21",
+      "epistle": "Ephesians 2:19-22",
+      "gospel": "John 14:1-14",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2028-05-07": {
       "sundayName": "Fourth Sunday of Easter",
       "season": "Easter",
@@ -2295,6 +2612,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 17:20-26",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2028-05-31": {
+      "sundayName": "The Visitation",
+      "season": "Easter",
+      "churchYear": "CY2028",
+      "series": "C",
+      "psalm": "Psalm 138",
+      "ot": "Isaiah 11:1-5",
+      "epistle": "Romans 12:9-16",
+      "gospel": "Luke 1:39-45 (46-56)",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2028-06-04": {
       "sundayName": "The Day of Pentecost",
       "season": "Pentecost",
@@ -2315,7 +2643,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Proverbs 8:1-4, 22-31",
       "epistle": "Acts 2:14a, 22-36",
       "gospel": "John 8:48-59",
-      "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+      "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx",
+      "alternates": [
+        {
+          "name": "St. Barnabas, Apostle",
+          "psalm": "Psalm 112",
+          "ot": "Isaiah 42:5-12",
+          "epistle": "Acts 11:19-30; 13:1-3",
+          "gospel": "Mark 6:7-13"
+        }
+      ]
     },
     "2028-06-18": {
       "sundayName": "2nd Sunday after Pentecost (prop6)",
@@ -2327,6 +2664,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Galatians 2:15-21; 3:10-14",
       "gospel": "Luke 7:36-8:3",
       "source": "yaag.org"
+    },
+    "2028-06-24": {
+      "sundayName": "The Nativity of St. John the Baptist",
+      "season": "Pentecost",
+      "churchYear": "CY2028",
+      "series": "C",
+      "psalm": "Psalm 85:(1-6) 7-13",
+      "ot": "Isaiah 40:1-5",
+      "epistle": "Acts 13:13-26",
+      "gospel": "Luke 1:57-80",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2028-06-25": {
       "sundayName": "3rd Sunday after Pentecost (prop7)",
@@ -2382,6 +2730,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Colossians 1:1-14",
       "gospel": "Luke 10:25-37",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+    },
+    "2028-07-22": {
+      "sundayName": "St. Mary Magdalene",
+      "season": "Pentecost",
+      "churchYear": "CY2028",
+      "series": "C",
+      "psalm": "Psalm 73:23-28",
+      "ot": "Proverbs 31:10-31",
+      "epistle": "Acts 13:26-31",
+      "gospel": "John 20:1-2, 10-18",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2028-07-23": {
       "sundayName": "7th Sunday after Pentecost (prop11)",
@@ -2625,6 +2984,28 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 18:1-8",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2028-10-23": {
+      "sundayName": "St. James of Jerusalem, Brother of Jesus and Martyr",
+      "season": "Pentecost",
+      "churchYear": "CY2028",
+      "series": "C",
+      "psalm": "Psalm 133",
+      "ot": "Acts 15:12-22a",
+      "epistle": "James 1:1-12",
+      "gospel": "Matthew 13:54-58",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
+    "2028-10-28": {
+      "sundayName": "St. Simon and St. Jude, Apostles",
+      "season": "Pentecost",
+      "churchYear": "CY2028",
+      "series": "C",
+      "psalm": "Psalm 43",
+      "ot": "Jeremiah 26:1-16",
+      "epistle": "1 Peter 1:3-9",
+      "gospel": "John 15:(12-16) 17-21",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2028-10-29": {
       "sundayName": "Reformation Day (observed)",
       "season": "Pentecost",
@@ -2731,6 +3112,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 23:27-43",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2028-11-30": {
+      "sundayName": "St. Andrew, Apostle",
+      "season": "Pentecost",
+      "churchYear": "CY2028",
+      "series": "C",
+      "psalm": "Psalm 139:1-12",
+      "ot": "Ezekiel 3:16-21",
+      "epistle": "Romans 10:8b-18",
+      "gospel": "John 1:35-42a",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2028-12-03": {
       "sundayName": "First Sunday in Advent",
       "season": "Advent",
@@ -2763,6 +3155,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "James 5:7-11",
       "gospel": "Matthew 11:2-15",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+    },
+    "2028-12-21": {
+      "sundayName": "St. Thomas, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2029",
+      "series": "A",
+      "psalm": "Psalm 136:1-4, 23-26",
+      "ot": "Judges 6:36-40",
+      "epistle": "Ephesians 4:7, 11-16",
+      "gospel": "John 20:24-29",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2028-12-24": {
       "sundayName": "Fourth Sunday in Advent",
@@ -2932,6 +3335,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 19:27-30",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2029-01-26": {
+      "sundayName": "St. Titus, Pastor and Confessor",
+      "season": "Epiphany",
+      "churchYear": "CY2029",
+      "series": "A",
+      "psalm": "Psalm 71:1-8",
+      "ot": "Acts 20:28-35",
+      "epistle": "Titus 1:1-9",
+      "gospel": "Luke 10:1-9",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2029-01-28": {
       "sundayName": "Fourth Sunday after the Epiphany",
       "season": "Epiphany",
@@ -2998,6 +3412,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 4:1-11",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2029-02-24": {
+      "sundayName": "St. Matthias, Apostle",
+      "season": "Lent",
+      "churchYear": "CY2029",
+      "series": "A",
+      "psalm": "Psalm 134",
+      "ot": "Isaiah 66:1-2",
+      "epistle": "Acts 1:15-26",
+      "gospel": "Matthew 11:25-30",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2029-02-25": {
       "sundayName": "Second Sunday in Lent",
       "season": "Lent",
@@ -3042,6 +3467,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 11:1-45 (46-53)",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2029-03-19": {
+      "sundayName": "St. Joseph, Guardian of Jesus",
+      "season": "Lent",
+      "churchYear": "CY2029",
+      "series": "A",
+      "psalm": "Psalm 127",
+      "ot": "2 Samuel 7:4-16",
+      "epistle": "Romans 4:13-18",
+      "gospel": "Matthew 2:13-15, 19-23",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2029-03-25": {
       "sundayName": "Palm Sunday (Sunday of the Passion)",
       "season": "Lent",
@@ -3051,7 +3487,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Isaiah 50:4-9a",
       "epistle": "Philippians 2:5-11",
       "gospel": "Matthew 26:1-27:66",
-      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx",
+      "alternates": [
+        {
+          "name": "The Annunciation of Our Lord",
+          "psalm": "Psalm 45:7-17",
+          "ot": "Isaiah 7:10-14",
+          "epistle": "Hebrews 10:4-10",
+          "gospel": "Luke 1:26-38"
+        }
+      ]
     },
     "2029-03-29": {
       "sundayName": "Holy (Maundy) Thursday",
@@ -3150,6 +3595,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 14:1-14",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2029-05-01": {
+      "sundayName": "St. Philip and St. James, Apostles",
+      "season": "Easter",
+      "churchYear": "CY2029",
+      "series": "A",
+      "psalm": "Psalm 36:5-10",
+      "ot": "Isaiah 30:18-21",
+      "epistle": "Ephesians 2:19-22",
+      "gospel": "John 14:1-14",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2029-05-06": {
       "sundayName": "Sixth Sunday of Easter",
       "season": "Easter",
@@ -3205,6 +3661,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 28:16-20",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2029-05-31": {
+      "sundayName": "The Visitation",
+      "season": "Trinity",
+      "churchYear": "CY2029",
+      "series": "A",
+      "psalm": "Psalm 138",
+      "ot": "Isaiah 11:1-5",
+      "epistle": "Romans 12:9-16",
+      "gospel": "Luke 1:39-45 (46-56)",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2029-06-03": {
       "sundayName": "2nd Sunday after Pentecost (prop4)",
       "season": "Pentecost",
@@ -3227,6 +3694,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 9:9-13",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2029-06-11": {
+      "sundayName": "St. Barnabas, Apostle",
+      "season": "Pentecost",
+      "churchYear": "CY2029",
+      "series": "A",
+      "psalm": "Psalm 112",
+      "ot": "Isaiah 42:5-12",
+      "epistle": "Acts 11:19-30; 13:1-3",
+      "gospel": "Mark 6:7-13",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2029-06-17": {
       "sundayName": "4th Sunday after Pentecost (prop6)",
       "season": "Pentecost",
@@ -3247,7 +3725,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Jeremiah 20:7-13",
       "epistle": "Romans 6:12-23",
       "gospel": "Matthew 10:5a, 21-33",
-      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx",
+      "alternates": [
+        {
+          "name": "The Nativity of St. John the Baptist",
+          "psalm": "Psalm 85:(1-6) 7-13",
+          "ot": "Isaiah 40:1-5",
+          "epistle": "Acts 13:13-26",
+          "gospel": "Luke 1:57-80"
+        }
+      ]
     },
     "2029-06-29": {
       "sundayName": "St. Peter and St. Paul, Apostles",
@@ -3302,7 +3789,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Isaiah 44:6-8",
       "epistle": "Romans 8:18-27",
       "gospel": "Matthew 13:24-30, 36-43",
-      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx",
+      "alternates": [
+        {
+          "name": "St. Mary Magdalene",
+          "psalm": "Psalm 73:23-28",
+          "ot": "Proverbs 31:10-31",
+          "epistle": "Acts 13:26-31",
+          "gospel": "John 20:1-2, 10-18"
+        }
+      ]
     },
     "2029-07-25": {
       "sundayName": "St. James the Elder, Apostle",
@@ -3535,6 +4031,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 22:15-22",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2029-10-23": {
+      "sundayName": "St. James of Jerusalem, Brother of Jesus and Martyr",
+      "season": "Pentecost",
+      "churchYear": "CY2029",
+      "series": "A",
+      "psalm": "Psalm 133",
+      "ot": "Acts 15:12-22a",
+      "epistle": "James 1:1-12",
+      "gospel": "Matthew 13:54-58",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2029-10-28": {
       "sundayName": "Reformation Day (observed)",
       "season": "Pentecost",
@@ -3552,6 +4059,13 @@ export const LCMS_CALENDAR_JSON = `{
           "ot": "Leviticus 19:1-2, 15-18",
           "epistle": "1 Thessalonians 2:1-13",
           "gospel": "Matthew 22:34-46"
+        },
+        {
+          "name": "St. Simon and St. Jude, Apostles",
+          "psalm": "Psalm 43",
+          "ot": "Jeremiah 26:1-16",
+          "epistle": "1 Peter 1:3-9",
+          "gospel": "John 15:(12-16) 17-21"
         }
       ]
     },
@@ -3641,6 +4155,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 25:31-46",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2029-11-30": {
+      "sundayName": "St. Andrew, Apostle",
+      "season": "Pentecost",
+      "churchYear": "CY2029",
+      "series": "A",
+      "psalm": "Psalm 139:1-12",
+      "ot": "Ezekiel 3:16-21",
+      "epistle": "Romans 10:8b-18",
+      "gospel": "John 1:35-42a",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2029-12-02": {
       "sundayName": "First Sunday in Advent",
       "season": "Advent",
@@ -3673,6 +4198,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "1 Thessalonians 5:16-24",
       "gospel": "John 1:6-8, 19-28",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2029-12-21": {
+      "sundayName": "St. Thomas, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2030",
+      "series": "B",
+      "psalm": "Psalm 136:1-4, 23-26",
+      "ot": "Judges 6:36-40",
+      "epistle": "Ephesians 4:7, 11-16",
+      "gospel": "John 20:24-29",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2029-12-23": {
       "sundayName": "Fourth Sunday in Advent",
@@ -3844,6 +4380,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 19:27-30",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2030-01-26": {
+      "sundayName": "St. Titus, Pastor and Confessor",
+      "season": "Epiphany",
+      "churchYear": "CY2030",
+      "series": "B",
+      "psalm": "Psalm 71:1-8",
+      "ot": "Acts 20:28-35",
+      "epistle": "Titus 1:1-9",
+      "gospel": "Luke 10:1-9",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2030-01-27": {
       "sundayName": "Third Sunday after the Epiphany",
       "season": "Epiphany",
@@ -3908,7 +4455,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Isaiah 43:18-25",
       "epistle": "2 Corinthians 1:18-22",
       "gospel": "Mark 2:1-12",
-      "source": "yaag.org"
+      "source": "yaag.org",
+      "alternates": [
+        {
+          "name": "St. Matthias, Apostle",
+          "psalm": "Psalm 134",
+          "ot": "Isaiah 66:1-2",
+          "epistle": "Acts 1:15-26",
+          "gospel": "Matthew 11:25-30"
+        }
+      ]
     },
     "2030-03-03": {
       "sundayName": "The Transfiguration of Our Lord",
@@ -3954,6 +4510,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Mark 8:27-38",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2030-03-19": {
+      "sundayName": "St. Joseph, Guardian of Jesus",
+      "season": "Lent",
+      "churchYear": "CY2030",
+      "series": "B",
+      "psalm": "Psalm 127",
+      "ot": "2 Samuel 7:4-16",
+      "epistle": "Romans 4:13-18",
+      "gospel": "Matthew 2:13-15, 19-23",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2030-03-24": {
       "sundayName": "Third Sunday in Lent",
       "season": "Lent",
@@ -3964,6 +4531,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "1 Corinthians 1:18-31",
       "gospel": "John 2:13-22 (23-25)",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2030-03-25": {
+      "sundayName": "The Annunciation of Our Lord",
+      "season": "Lent",
+      "churchYear": "CY2030",
+      "series": "B",
+      "psalm": "Psalm 45:7-17",
+      "ot": "Isaiah 7:10-14",
+      "epistle": "Hebrews 10:4-10",
+      "gospel": "Luke 1:26-38",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2030-03-31": {
       "sundayName": "Fourth Sunday in Lent",
@@ -4062,6 +4640,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 20:19-31",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2030-05-01": {
+      "sundayName": "St. Philip and St. James, Apostles",
+      "season": "Easter",
+      "churchYear": "CY2030",
+      "series": "B",
+      "psalm": "Psalm 36:5-10",
+      "ot": "Isaiah 30:18-21",
+      "epistle": "Ephesians 2:19-22",
+      "gospel": "John 14:1-14",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2030-05-05": {
       "sundayName": "Third Sunday of Easter",
       "season": "Easter",
@@ -4117,6 +4706,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 24:44-53",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2030-05-31": {
+      "sundayName": "The Visitation",
+      "season": "Easter",
+      "churchYear": "CY2030",
+      "series": "B",
+      "psalm": "Psalm 138",
+      "ot": "Isaiah 11:1-5",
+      "epistle": "Romans 12:9-16",
+      "gospel": "Luke 1:39-45 (46-56)",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2030-06-02": {
       "sundayName": "Seventh Sunday of Easter",
       "season": "Easter",
@@ -4139,6 +4739,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 15:26-27; 16:4b-15",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2030-06-11": {
+      "sundayName": "St. Barnabas, Apostle",
+      "season": "Pentecost",
+      "churchYear": "CY2030",
+      "series": "B",
+      "psalm": "Psalm 112",
+      "ot": "Isaiah 42:5-12",
+      "epistle": "Acts 11:19-30; 13:1-3",
+      "gospel": "Mark 6:7-13",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2030-06-16": {
       "sundayName": "The Holy Trinity",
       "season": "Trinity",
@@ -4160,6 +4771,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "2 Corinthians 6:1-13",
       "gospel": "Mark 4:35-41",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2030-06-24": {
+      "sundayName": "The Nativity of St. John the Baptist",
+      "season": "Pentecost",
+      "churchYear": "CY2030",
+      "series": "B",
+      "psalm": "Psalm 85:(1-6) 7-13",
+      "ot": "Isaiah 40:1-5",
+      "epistle": "Acts 13:13-26",
+      "gospel": "Luke 1:57-80",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2030-06-29": {
       "sundayName": "St. Peter and St. Paul, Apostles",
@@ -4215,6 +4837,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Ephesians 2:11-22",
       "gospel": "Mark 6:30-44",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2030-07-22": {
+      "sundayName": "St. Mary Magdalene",
+      "season": "Pentecost",
+      "churchYear": "CY2030",
+      "series": "B",
+      "psalm": "Psalm 73:23-28",
+      "ot": "Proverbs 31:10-31",
+      "epistle": "Acts 13:26-31",
+      "gospel": "John 20:1-2, 10-18",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2030-07-25": {
       "sundayName": "St. James the Elder, Apostle",
@@ -4445,6 +5078,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Mark 10:23-31",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2030-10-23": {
+      "sundayName": "St. James of Jerusalem, Brother of Jesus and Martyr",
+      "season": "Pentecost",
+      "churchYear": "CY2030",
+      "series": "B",
+      "psalm": "Psalm 133",
+      "ot": "Acts 15:12-22a",
+      "epistle": "James 1:1-12",
+      "gospel": "Matthew 13:54-58",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2030-10-27": {
       "sundayName": "Reformation Day (observed)",
       "season": "Pentecost",
@@ -4464,6 +5108,17 @@ export const LCMS_CALENDAR_JSON = `{
           "gospel": "Mark 10:46-52"
         }
       ]
+    },
+    "2030-10-28": {
+      "sundayName": "St. Simon and St. Jude, Apostles",
+      "season": "Pentecost",
+      "churchYear": "CY2030",
+      "series": "B",
+      "psalm": "Psalm 43",
+      "ot": "Jeremiah 26:1-16",
+      "epistle": "1 Peter 1:3-9",
+      "gospel": "John 15:(12-16) 17-21",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2030-10-31": {
       "sundayName": "Reformation Day",
@@ -4551,6 +5206,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 17:11-19",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2030-11-30": {
+      "sundayName": "St. Andrew, Apostle",
+      "season": "Pentecost",
+      "churchYear": "CY2030",
+      "series": "B",
+      "psalm": "Psalm 139:1-12",
+      "ot": "Ezekiel 3:16-21",
+      "epistle": "Romans 10:8b-18",
+      "gospel": "John 1:35-42a",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2030-12-01": {
       "sundayName": "First Sunday in Advent",
       "season": "Advent",
@@ -4583,6 +5249,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Philippians 4:4-7",
       "gospel": "Luke 7:18-28 (29-35)",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+    },
+    "2030-12-21": {
+      "sundayName": "St. Thomas, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2031",
+      "series": "C",
+      "psalm": "Psalm 136:1-4, 23-26",
+      "ot": "Judges 6:36-40",
+      "epistle": "Ephesians 4:7, 11-16",
+      "gospel": "John 20:24-29",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2030-12-22": {
       "sundayName": "Fourth Sunday in Advent",
@@ -4774,7 +5451,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Nehemiah 8:1-3, 5-6, 8-10",
       "epistle": "1 Corinthians 12:12-31a",
       "gospel": "Luke 4:16-30",
-      "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+      "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx",
+      "alternates": [
+        {
+          "name": "St. Titus, Pastor and Confessor",
+          "psalm": "Psalm 71:1-8",
+          "ot": "Acts 20:28-35",
+          "epistle": "Titus 1:1-9",
+          "gospel": "Luke 10:1-9"
+        }
+      ]
     },
     "2031-02-02": {
       "sundayName": "The Purification of Mary and the Presentation of Our Lord",
@@ -4829,6 +5515,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 9:28-36",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2031-02-24": {
+      "sundayName": "St. Matthias, Apostle",
+      "season": "Epiphany",
+      "churchYear": "CY2031",
+      "series": "C",
+      "psalm": "Psalm 134",
+      "ot": "Isaiah 66:1-2",
+      "epistle": "Acts 1:15-26",
+      "gospel": "Matthew 11:25-30",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2031-02-26": {
       "sundayName": "Ash Wednesday",
       "season": "Lent",
@@ -4873,6 +5570,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 13:1-9",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2031-03-19": {
+      "sundayName": "St. Joseph, Guardian of Jesus",
+      "season": "Lent",
+      "churchYear": "CY2031",
+      "series": "C",
+      "psalm": "Psalm 127",
+      "ot": "2 Samuel 7:4-16",
+      "epistle": "Romans 4:13-18",
+      "gospel": "Matthew 2:13-15, 19-23",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2031-03-23": {
       "sundayName": "Fourth Sunday in Lent",
       "season": "Lent",
@@ -4883,6 +5591,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "2 Corinthians 5:16-21",
       "gospel": "Luke 15:1-3, 11-32",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+    },
+    "2031-03-25": {
+      "sundayName": "The Annunciation of Our Lord",
+      "season": "Lent",
+      "churchYear": "CY2031",
+      "series": "C",
+      "psalm": "Psalm 45:7-17",
+      "ot": "Isaiah 7:10-14",
+      "epistle": "Hebrews 10:4-10",
+      "gospel": "Luke 1:26-38",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2031-03-30": {
       "sundayName": "Fifth Sunday in Lent",
@@ -4981,6 +5700,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 21:1-14 (15-19)",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2031-05-01": {
+      "sundayName": "St. Philip and St. James, Apostles",
+      "season": "Easter",
+      "churchYear": "CY2031",
+      "series": "C",
+      "psalm": "Psalm 36:5-10",
+      "ot": "Isaiah 30:18-21",
+      "epistle": "Ephesians 2:19-22",
+      "gospel": "John 14:1-14",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2031-05-04": {
       "sundayName": "Fourth Sunday of Easter",
       "season": "Easter",
@@ -5036,6 +5766,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 17:20-26",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2031-05-31": {
+      "sundayName": "The Visitation",
+      "season": "Easter",
+      "churchYear": "CY2031",
+      "series": "C",
+      "psalm": "Psalm 138",
+      "ot": "Isaiah 11:1-5",
+      "epistle": "Romans 12:9-16",
+      "gospel": "Luke 1:39-45 (46-56)",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2031-06-01": {
       "sundayName": "The Day of Pentecost",
       "season": "Pentecost",
@@ -5058,6 +5799,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 8:48-59",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2031-06-11": {
+      "sundayName": "St. Barnabas, Apostle",
+      "season": "Trinity",
+      "churchYear": "CY2031",
+      "series": "C",
+      "psalm": "Psalm 112",
+      "ot": "Isaiah 42:5-12",
+      "epistle": "Acts 11:19-30; 13:1-3",
+      "gospel": "Mark 6:7-13",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2031-06-15": {
       "sundayName": "2nd Sunday after Pentecost (prop6)",
       "season": "Pentecost",
@@ -5079,6 +5831,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Galatians 3:23-4:7",
       "gospel": "Luke 8:26-39",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+    },
+    "2031-06-24": {
+      "sundayName": "The Nativity of St. John the Baptist",
+      "season": "Pentecost",
+      "churchYear": "CY2031",
+      "series": "C",
+      "psalm": "Psalm 85:(1-6) 7-13",
+      "ot": "Isaiah 40:1-5",
+      "epistle": "Acts 13:13-26",
+      "gospel": "Luke 1:57-80",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2031-06-29": {
       "sundayName": "4th Sunday after Pentecost (prop8)",
@@ -5132,6 +5895,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Colossians 1:21-29",
       "gospel": "Luke 10:38-42",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+    },
+    "2031-07-22": {
+      "sundayName": "St. Mary Magdalene",
+      "season": "Pentecost",
+      "churchYear": "CY2031",
+      "series": "C",
+      "psalm": "Psalm 73:23-28",
+      "ot": "Proverbs 31:10-31",
+      "epistle": "Acts 13:26-31",
+      "gospel": "John 20:1-2, 10-18",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2031-07-25": {
       "sundayName": "St. James the Elder, Apostle",
@@ -5358,6 +6132,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 18:1-8",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2031-10-23": {
+      "sundayName": "St. James of Jerusalem, Brother of Jesus and Martyr",
+      "season": "Pentecost",
+      "churchYear": "CY2031",
+      "series": "C",
+      "psalm": "Psalm 133",
+      "ot": "Acts 15:12-22a",
+      "epistle": "James 1:1-12",
+      "gospel": "Matthew 13:54-58",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2031-10-26": {
       "sundayName": "Reformation Day (observed)",
       "season": "Pentecost",
@@ -5377,6 +6162,17 @@ export const LCMS_CALENDAR_JSON = `{
           "gospel": "Luke 18:9-17"
         }
       ]
+    },
+    "2031-10-28": {
+      "sundayName": "St. Simon and St. Jude, Apostles",
+      "season": "Pentecost",
+      "churchYear": "CY2031",
+      "series": "C",
+      "psalm": "Psalm 43",
+      "ot": "Jeremiah 26:1-16",
+      "epistle": "1 Peter 1:3-9",
+      "gospel": "John 15:(12-16) 17-21",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2031-10-31": {
       "sundayName": "Reformation Day",
@@ -5473,7 +6269,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Isaiah 2:1-5",
       "epistle": "Romans 13:(8-10) 11-14",
       "gospel": "Matthew 21:1-11",
-      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx",
+      "alternates": [
+        {
+          "name": "St. Andrew, Apostle",
+          "psalm": "Psalm 139:1-12",
+          "ot": "Ezekiel 3:16-21",
+          "epistle": "Romans 10:8b-18",
+          "gospel": "John 1:35-42a"
+        }
+      ]
     },
     "2031-12-07": {
       "sundayName": "Second Sunday in Advent",
@@ -5506,7 +6311,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Isaiah 7:10-17",
       "epistle": "Romans 1:1-7",
       "gospel": "Matthew 1:18-25",
-      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx",
+      "alternates": [
+        {
+          "name": "St. Thomas, Apostle",
+          "psalm": "Psalm 136:1-4, 23-26",
+          "ot": "Judges 6:36-40",
+          "epistle": "Ephesians 4:7, 11-16",
+          "gospel": "John 20:24-29"
+        }
+      ]
     },
     "2031-12-24": {
       "sundayName": "The Nativity of Our Lord (Christmas Eve)",
@@ -5683,6 +6497,17 @@ export const LCMS_CALENDAR_JSON = `{
         }
       ]
     },
+    "2032-01-26": {
+      "sundayName": "St. Titus, Pastor and Confessor",
+      "season": "Epiphany",
+      "churchYear": "CY2032",
+      "series": "A",
+      "psalm": "Psalm 71:1-8",
+      "ot": "Acts 20:28-35",
+      "epistle": "Titus 1:1-9",
+      "gospel": "Luke 10:1-9",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2032-02-01": {
       "sundayName": "Fourth Sunday after the Epiphany",
       "season": "Epiphany",
@@ -5749,6 +6574,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 3:1-17",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2032-02-24": {
+      "sundayName": "St. Matthias, Apostle",
+      "season": "Lent",
+      "churchYear": "CY2032",
+      "series": "A",
+      "psalm": "Psalm 134",
+      "ot": "Isaiah 66:1-2",
+      "epistle": "Acts 1:15-26",
+      "gospel": "Matthew 11:25-30",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2032-02-29": {
       "sundayName": "Third Sunday in Lent",
       "season": "Lent",
@@ -5782,6 +6618,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 11:1-45 (46-53)",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2032-03-19": {
+      "sundayName": "St. Joseph, Guardian of Jesus",
+      "season": "Lent",
+      "churchYear": "CY2032",
+      "series": "A",
+      "psalm": "Psalm 127",
+      "ot": "2 Samuel 7:4-16",
+      "epistle": "Romans 4:13-18",
+      "gospel": "Matthew 2:13-15, 19-23",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2032-03-21": {
       "sundayName": "Palm Sunday (Sunday of the Passion)",
       "season": "Lent",
@@ -5802,7 +6649,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Exodus 24:3-11",
       "epistle": "Hebrews 9:11-22",
       "gospel": "Matthew 26:17-30",
-      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx",
+      "alternates": [
+        {
+          "name": "The Annunciation of Our Lord",
+          "psalm": "Psalm 45:7-17",
+          "ot": "Isaiah 7:10-14",
+          "epistle": "Hebrews 10:4-10",
+          "gospel": "Luke 1:26-38"
+        }
+      ]
     },
     "2032-03-26": {
       "sundayName": "Good Friday",
@@ -5888,6 +6744,17 @@ export const LCMS_CALENDAR_JSON = `{
         }
       ]
     },
+    "2032-05-01": {
+      "sundayName": "St. Philip and St. James, Apostles",
+      "season": "Easter",
+      "churchYear": "CY2032",
+      "series": "A",
+      "psalm": "Psalm 36:5-10",
+      "ot": "Isaiah 30:18-21",
+      "epistle": "Ephesians 2:19-22",
+      "gospel": "John 14:1-14",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2032-05-02": {
       "sundayName": "Sixth Sunday of Easter",
       "season": "Easter",
@@ -5954,6 +6821,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 7:15-29",
       "source": "yaag.org"
     },
+    "2032-05-31": {
+      "sundayName": "The Visitation",
+      "season": "Pentecost",
+      "churchYear": "CY2032",
+      "series": "A",
+      "psalm": "Psalm 138",
+      "ot": "Isaiah 11:1-5",
+      "epistle": "Romans 12:9-16",
+      "gospel": "Luke 1:39-45 (46-56)",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2032-06-06": {
       "sundayName": "3rd Sunday after Pentecost (prop5)",
       "season": "Pentecost",
@@ -5964,6 +6842,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Romans 4:13-25",
       "gospel": "Matthew 9:9-13",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+    },
+    "2032-06-11": {
+      "sundayName": "St. Barnabas, Apostle",
+      "season": "Pentecost",
+      "churchYear": "CY2032",
+      "series": "A",
+      "psalm": "Psalm 112",
+      "ot": "Isaiah 42:5-12",
+      "epistle": "Acts 11:19-30; 13:1-3",
+      "gospel": "Mark 6:7-13",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2032-06-13": {
       "sundayName": "4th Sunday after Pentecost (prop6)",
@@ -5986,6 +6875,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Romans 6:12-23",
       "gospel": "Matthew 10:5a, 21-33",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+    },
+    "2032-06-24": {
+      "sundayName": "The Nativity of St. John the Baptist",
+      "season": "Pentecost",
+      "churchYear": "CY2032",
+      "series": "A",
+      "psalm": "Psalm 85:(1-6) 7-13",
+      "ot": "Isaiah 40:1-5",
+      "epistle": "Acts 13:13-26",
+      "gospel": "Luke 1:57-80",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2032-06-27": {
       "sundayName": "6th Sunday after Pentecost (prop8)",
@@ -6041,6 +6941,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Romans 8:18-27",
       "gospel": "Matthew 13:24-30, 36-43",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+    },
+    "2032-07-22": {
+      "sundayName": "St. Mary Magdalene",
+      "season": "Pentecost",
+      "churchYear": "CY2032",
+      "series": "A",
+      "psalm": "Psalm 73:23-28",
+      "ot": "Proverbs 31:10-31",
+      "epistle": "Acts 13:26-31",
+      "gospel": "John 20:1-2, 10-18",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2032-07-25": {
       "sundayName": "10th Sunday after Pentecost (prop12)",
@@ -6267,6 +7178,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 10:1-9",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2032-10-23": {
+      "sundayName": "St. James of Jerusalem, Brother of Jesus and Martyr",
+      "season": "Pentecost",
+      "churchYear": "CY2032",
+      "series": "A",
+      "psalm": "Psalm 133",
+      "ot": "Acts 15:12-22a",
+      "epistle": "James 1:1-12",
+      "gospel": "Matthew 13:54-58",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2032-10-24": {
       "sundayName": "23rd Sunday after Pentecost (prop25)",
       "season": "Pentecost",
@@ -6277,6 +7199,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "1 Thessalonians 2:1-13",
       "gospel": "Matthew 22:34-46",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+    },
+    "2032-10-28": {
+      "sundayName": "St. Simon and St. Jude, Apostles",
+      "season": "Pentecost",
+      "churchYear": "CY2032",
+      "series": "A",
+      "psalm": "Psalm 43",
+      "ot": "Jeremiah 26:1-16",
+      "epistle": "1 Peter 1:3-9",
+      "gospel": "John 15:(12-16) 17-21",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2032-10-31": {
       "sundayName": "Reformation Day",
@@ -6373,6 +7306,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Mark 11:1-10",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2032-11-30": {
+      "sundayName": "St. Andrew, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2033",
+      "series": "B",
+      "psalm": "Psalm 139:1-12",
+      "ot": "Ezekiel 3:16-21",
+      "epistle": "Romans 10:8b-18",
+      "gospel": "John 1:35-42a",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2032-12-05": {
       "sundayName": "Second Sunday in Advent",
       "season": "Advent",
@@ -6405,6 +7349,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Romans 16:25-27",
       "gospel": "Luke 1:26-38",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2032-12-21": {
+      "sundayName": "St. Thomas, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2033",
+      "series": "B",
+      "psalm": "Psalm 136:1-4, 23-26",
+      "ot": "Judges 6:36-40",
+      "epistle": "Ephesians 4:7, 11-16",
+      "gospel": "John 20:24-29",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2032-12-24": {
       "sundayName": "The Nativity of Our Lord (Christmas Eve)",
@@ -6587,6 +7542,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 19:27-30",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2033-01-26": {
+      "sundayName": "St. Titus, Pastor and Confessor",
+      "season": "Epiphany",
+      "churchYear": "CY2033",
+      "series": "B",
+      "psalm": "Psalm 71:1-8",
+      "ot": "Acts 20:28-35",
+      "epistle": "Titus 1:1-9",
+      "gospel": "Luke 10:1-9",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2033-01-30": {
       "sundayName": "Fourth Sunday after the Epiphany",
       "season": "Epiphany",
@@ -6642,6 +7608,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Mark 2:1-12",
       "source": "yaag.org"
     },
+    "2033-02-24": {
+      "sundayName": "St. Matthias, Apostle",
+      "season": "Epiphany",
+      "churchYear": "CY2033",
+      "series": "B",
+      "psalm": "Psalm 134",
+      "ot": "Isaiah 66:1-2",
+      "epistle": "Acts 1:15-26",
+      "gospel": "Matthew 11:25-30",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2033-02-27": {
       "sundayName": "The Transfiguration of Our Lord",
       "season": "Epiphany",
@@ -6686,6 +7663,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Mark 8:27-38",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2033-03-19": {
+      "sundayName": "St. Joseph, Guardian of Jesus",
+      "season": "Lent",
+      "churchYear": "CY2033",
+      "series": "B",
+      "psalm": "Psalm 127",
+      "ot": "2 Samuel 7:4-16",
+      "epistle": "Romans 4:13-18",
+      "gospel": "Matthew 2:13-15, 19-23",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2033-03-20": {
       "sundayName": "Third Sunday in Lent",
       "season": "Lent",
@@ -6696,6 +7684,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "1 Corinthians 1:18-31",
       "gospel": "John 2:13-22 (23-25)",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2033-03-25": {
+      "sundayName": "The Annunciation of Our Lord",
+      "season": "Lent",
+      "churchYear": "CY2033",
+      "series": "B",
+      "psalm": "Psalm 45:7-17",
+      "ot": "Isaiah 7:10-14",
+      "epistle": "Hebrews 10:4-10",
+      "gospel": "Luke 1:26-38",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2033-03-27": {
       "sundayName": "Fourth Sunday in Lent",
@@ -6803,7 +7802,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Acts 3:11-21",
       "epistle": "1 John 3:1-7",
       "gospel": "Luke 24:36-49",
-      "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+      "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx",
+      "alternates": [
+        {
+          "name": "St. Philip and St. James, Apostles",
+          "psalm": "Psalm 36:5-10",
+          "ot": "Isaiah 30:18-21",
+          "epistle": "Ephesians 2:19-22",
+          "gospel": "John 14:1-14"
+        }
+      ]
     },
     "2033-05-08": {
       "sundayName": "Fourth Sunday of Easter",
@@ -6860,6 +7868,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 17:11b-19",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2033-05-31": {
+      "sundayName": "The Visitation",
+      "season": "Easter",
+      "churchYear": "CY2033",
+      "series": "B",
+      "psalm": "Psalm 138",
+      "ot": "Isaiah 11:1-5",
+      "epistle": "Romans 12:9-16",
+      "gospel": "Luke 1:39-45 (46-56)",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2033-06-05": {
       "sundayName": "The Day of Pentecost",
       "season": "Pentecost",
@@ -6870,6 +7889,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Acts 2:1-21",
       "gospel": "John 15:26-27; 16:4b-15",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2033-06-11": {
+      "sundayName": "St. Barnabas, Apostle",
+      "season": "Pentecost",
+      "churchYear": "CY2033",
+      "series": "B",
+      "psalm": "Psalm 112",
+      "ot": "Isaiah 42:5-12",
+      "epistle": "Acts 11:19-30; 13:1-3",
+      "gospel": "Mark 6:7-13",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2033-06-12": {
       "sundayName": "The Holy Trinity",
@@ -6892,6 +7922,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "2 Corinthians 6:1-13",
       "gospel": "Mark 4:35-41",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2033-06-24": {
+      "sundayName": "The Nativity of St. John the Baptist",
+      "season": "Pentecost",
+      "churchYear": "CY2033",
+      "series": "B",
+      "psalm": "Psalm 85:(1-6) 7-13",
+      "ot": "Isaiah 40:1-5",
+      "epistle": "Acts 13:13-26",
+      "gospel": "Luke 1:57-80",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2033-06-26": {
       "sundayName": "3rd Sunday after Pentecost (prop8)",
@@ -6947,6 +7988,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Ephesians 2:11-22",
       "gospel": "Mark 6:30-44",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2033-07-22": {
+      "sundayName": "St. Mary Magdalene",
+      "season": "Pentecost",
+      "churchYear": "CY2033",
+      "series": "B",
+      "psalm": "Psalm 73:23-28",
+      "ot": "Proverbs 31:10-31",
+      "epistle": "Acts 13:26-31",
+      "gospel": "John 20:1-2, 10-18",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2033-07-24": {
       "sundayName": "7th Sunday after Pentecost (prop12)",
@@ -7188,7 +8240,27 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Jeremiah 31:7-9",
       "epistle": "Hebrews 7:23-28",
       "gospel": "Mark 10:46-52",
-      "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+      "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx",
+      "alternates": [
+        {
+          "name": "St. James of Jerusalem, Brother of Jesus and Martyr",
+          "psalm": "Psalm 133",
+          "ot": "Acts 15:12-22a",
+          "epistle": "James 1:1-12",
+          "gospel": "Matthew 13:54-58"
+        }
+      ]
+    },
+    "2033-10-28": {
+      "sundayName": "St. Simon and St. Jude, Apostles",
+      "season": "Pentecost",
+      "churchYear": "CY2033",
+      "series": "B",
+      "psalm": "Psalm 43",
+      "ot": "Jeremiah 26:1-16",
+      "epistle": "1 Peter 1:3-9",
+      "gospel": "John 15:(12-16) 17-21",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2033-10-30": {
       "sundayName": "Reformation Day (observed)",
@@ -7296,6 +8368,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 19:28-40",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2033-11-30": {
+      "sundayName": "St. Andrew, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2034",
+      "series": "C",
+      "psalm": "Psalm 139:1-12",
+      "ot": "Ezekiel 3:16-21",
+      "epistle": "Romans 10:8b-18",
+      "gospel": "John 1:35-42a",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2033-12-04": {
       "sundayName": "Second Sunday in Advent",
       "season": "Advent",
@@ -7328,6 +8411,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Hebrews 10:5-10",
       "gospel": "Luke 1:39-45 (46-56)",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+    },
+    "2033-12-21": {
+      "sundayName": "St. Thomas, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2034",
+      "series": "C",
+      "psalm": "Psalm 136:1-4, 23-26",
+      "ot": "Judges 6:36-40",
+      "epistle": "Ephesians 4:7, 11-16",
+      "gospel": "John 20:24-29",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2033-12-24": {
       "sundayName": "The Nativity of Our Lord (Christmas Eve)",
@@ -7497,6 +8591,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 19:27-30",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2034-01-26": {
+      "sundayName": "St. Titus, Pastor and Confessor",
+      "season": "Epiphany",
+      "churchYear": "CY2034",
+      "series": "C",
+      "psalm": "Psalm 71:1-8",
+      "ot": "Acts 20:28-35",
+      "epistle": "Titus 1:1-9",
+      "gospel": "Luke 10:1-9",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2034-01-29": {
       "sundayName": "Fourth Sunday after the Epiphany",
       "season": "Epiphany",
@@ -7563,6 +8668,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 6:(1-6) 16-21",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2034-02-24": {
+      "sundayName": "St. Matthias, Apostle",
+      "season": "Lent",
+      "churchYear": "CY2034",
+      "series": "C",
+      "psalm": "Psalm 134",
+      "ot": "Isaiah 66:1-2",
+      "epistle": "Acts 1:15-26",
+      "gospel": "Matthew 11:25-30",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2034-02-26": {
       "sundayName": "First Sunday in Lent",
       "season": "Lent",
@@ -7605,7 +8721,27 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Isaiah 12:1-6",
       "epistle": "2 Corinthians 5:16-21",
       "gospel": "Luke 15:1-3, 11-32",
-      "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+      "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx",
+      "alternates": [
+        {
+          "name": "St. Joseph, Guardian of Jesus",
+          "psalm": "Psalm 127",
+          "ot": "2 Samuel 7:4-16",
+          "epistle": "Romans 4:13-18",
+          "gospel": "Matthew 2:13-15, 19-23"
+        }
+      ]
+    },
+    "2034-03-25": {
+      "sundayName": "The Annunciation of Our Lord",
+      "season": "Lent",
+      "churchYear": "CY2034",
+      "series": "C",
+      "psalm": "Psalm 45:7-17",
+      "ot": "Isaiah 7:10-14",
+      "epistle": "Hebrews 10:4-10",
+      "gospel": "Luke 1:26-38",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2034-03-26": {
       "sundayName": "Fifth Sunday in Lent",
@@ -7715,6 +8851,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 10:22-33",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2034-05-01": {
+      "sundayName": "St. Philip and St. James, Apostles",
+      "season": "Easter",
+      "churchYear": "CY2034",
+      "series": "C",
+      "psalm": "Psalm 36:5-10",
+      "ot": "Isaiah 30:18-21",
+      "epistle": "Ephesians 2:19-22",
+      "gospel": "John 14:1-14",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2034-05-07": {
       "sundayName": "Fifth Sunday of Easter",
       "season": "Easter",
@@ -7770,6 +8917,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 14:23-31",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2034-05-31": {
+      "sundayName": "The Visitation",
+      "season": "Pentecost",
+      "churchYear": "CY2034",
+      "series": "C",
+      "psalm": "Psalm 138",
+      "ot": "Isaiah 11:1-5",
+      "epistle": "Romans 12:9-16",
+      "gospel": "Luke 1:39-45 (46-56)",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2034-06-04": {
       "sundayName": "The Holy Trinity",
       "season": "Trinity",
@@ -7790,7 +8948,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "1 Kings 17:17-24",
       "epistle": "Galatians 1:11-24",
       "gospel": "Luke 7:11-17",
-      "source": "yaag.org"
+      "source": "yaag.org",
+      "alternates": [
+        {
+          "name": "St. Barnabas, Apostle",
+          "psalm": "Psalm 112",
+          "ot": "Isaiah 42:5-12",
+          "epistle": "Acts 11:19-30; 13:1-3",
+          "gospel": "Mark 6:7-13"
+        }
+      ]
     },
     "2034-06-18": {
       "sundayName": "3rd Sunday after Pentecost (prop6)",
@@ -7802,6 +8969,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Galatians 2:15-21; 3:10-14",
       "gospel": "Luke 7:36-8:3",
       "source": "yaag.org"
+    },
+    "2034-06-24": {
+      "sundayName": "The Nativity of St. John the Baptist",
+      "season": "Pentecost",
+      "churchYear": "CY2034",
+      "series": "C",
+      "psalm": "Psalm 85:(1-6) 7-13",
+      "ot": "Isaiah 40:1-5",
+      "epistle": "Acts 13:13-26",
+      "gospel": "Luke 1:57-80",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2034-06-25": {
       "sundayName": "4th Sunday after Pentecost (prop7)",
@@ -7857,6 +9035,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Colossians 1:1-14",
       "gospel": "Luke 10:25-37",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+    },
+    "2034-07-22": {
+      "sundayName": "St. Mary Magdalene",
+      "season": "Pentecost",
+      "churchYear": "CY2034",
+      "series": "C",
+      "psalm": "Psalm 73:23-28",
+      "ot": "Proverbs 31:10-31",
+      "epistle": "Acts 13:26-31",
+      "gospel": "John 20:1-2, 10-18",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2034-07-23": {
       "sundayName": "8th Sunday after Pentecost (prop11)",
@@ -8100,6 +9289,28 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 18:1-8",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2034-10-23": {
+      "sundayName": "St. James of Jerusalem, Brother of Jesus and Martyr",
+      "season": "Pentecost",
+      "churchYear": "CY2034",
+      "series": "C",
+      "psalm": "Psalm 133",
+      "ot": "Acts 15:12-22a",
+      "epistle": "James 1:1-12",
+      "gospel": "Matthew 13:54-58",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
+    "2034-10-28": {
+      "sundayName": "St. Simon and St. Jude, Apostles",
+      "season": "Pentecost",
+      "churchYear": "CY2034",
+      "series": "C",
+      "psalm": "Psalm 43",
+      "ot": "Jeremiah 26:1-16",
+      "epistle": "1 Peter 1:3-9",
+      "gospel": "John 15:(12-16) 17-21",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2034-10-29": {
       "sundayName": "Reformation Day (observed)",
       "season": "Pentecost",
@@ -8206,6 +9417,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 23:27-43",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2034-11-30": {
+      "sundayName": "St. Andrew, Apostle",
+      "season": "Pentecost",
+      "churchYear": "CY2034",
+      "series": "C",
+      "psalm": "Psalm 139:1-12",
+      "ot": "Ezekiel 3:16-21",
+      "epistle": "Romans 10:8b-18",
+      "gospel": "John 1:35-42a",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2034-12-03": {
       "sundayName": "First Sunday in Advent",
       "season": "Advent",
@@ -8238,6 +9460,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "James 5:7-11",
       "gospel": "Matthew 11:2-15",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+    },
+    "2034-12-21": {
+      "sundayName": "St. Thomas, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2035",
+      "series": "A",
+      "psalm": "Psalm 136:1-4, 23-26",
+      "ot": "Judges 6:36-40",
+      "epistle": "Ephesians 4:7, 11-16",
+      "gospel": "John 20:24-29",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2034-12-24": {
       "sundayName": "Fourth Sunday in Advent",
@@ -8407,6 +9640,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 19:27-30",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2035-01-26": {
+      "sundayName": "St. Titus, Pastor and Confessor",
+      "season": "Epiphany",
+      "churchYear": "CY2035",
+      "series": "A",
+      "psalm": "Psalm 71:1-8",
+      "ot": "Acts 20:28-35",
+      "epistle": "Titus 1:1-9",
+      "gospel": "Luke 10:1-9",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2035-01-28": {
       "sundayName": "Fourth Sunday after the Epiphany",
       "season": "Epiphany",
@@ -8473,6 +9717,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 3:1-17",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2035-02-24": {
+      "sundayName": "St. Matthias, Apostle",
+      "season": "Lent",
+      "churchYear": "CY2035",
+      "series": "A",
+      "psalm": "Psalm 134",
+      "ot": "Isaiah 66:1-2",
+      "epistle": "Acts 1:15-26",
+      "gospel": "Matthew 11:25-30",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2035-02-25": {
       "sundayName": "Third Sunday in Lent",
       "season": "Lent",
@@ -8517,6 +9772,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 26:1-27:66",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2035-03-19": {
+      "sundayName": "St. Joseph, Guardian of Jesus",
+      "season": "Lent",
+      "churchYear": "CY2035",
+      "series": "A",
+      "psalm": "Psalm 127",
+      "ot": "2 Samuel 7:4-16",
+      "epistle": "Romans 4:13-18",
+      "gospel": "Matthew 2:13-15, 19-23",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2035-03-22": {
       "sundayName": "Holy (Maundy) Thursday",
       "season": "Lent",
@@ -8556,6 +9822,13 @@ export const LCMS_CALENDAR_JSON = `{
           "ot": "Exodus 14:10-15:1",
           "epistle": "1 Corinthians 15:1-11",
           "gospel": "John 20:1-18"
+        },
+        {
+          "name": "The Annunciation of Our Lord",
+          "psalm": "Psalm 45:7-17",
+          "ot": "Isaiah 7:10-14",
+          "epistle": "Hebrews 10:4-10",
+          "gospel": "Luke 1:26-38"
         }
       ]
     },
@@ -8625,6 +9898,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 14:15-21",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2035-05-01": {
+      "sundayName": "St. Philip and St. James, Apostles",
+      "season": "Easter",
+      "churchYear": "CY2035",
+      "series": "A",
+      "psalm": "Psalm 36:5-10",
+      "ot": "Isaiah 30:18-21",
+      "epistle": "Ephesians 2:19-22",
+      "gospel": "John 14:1-14",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2035-05-03": {
       "sundayName": "The Ascension of Our Lord",
       "season": "Easter",
@@ -8680,6 +9964,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 6:24-34",
       "source": "yaag.org"
     },
+    "2035-05-31": {
+      "sundayName": "The Visitation",
+      "season": "Pentecost",
+      "churchYear": "CY2035",
+      "series": "A",
+      "psalm": "Psalm 138",
+      "ot": "Isaiah 11:1-5",
+      "epistle": "Romans 12:9-16",
+      "gospel": "Luke 1:39-45 (46-56)",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2035-06-03": {
       "sundayName": "3rd Sunday after Pentecost (prop4)",
       "season": "Pentecost",
@@ -8702,6 +9997,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 9:9-13",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2035-06-11": {
+      "sundayName": "St. Barnabas, Apostle",
+      "season": "Pentecost",
+      "churchYear": "CY2035",
+      "series": "A",
+      "psalm": "Psalm 112",
+      "ot": "Isaiah 42:5-12",
+      "epistle": "Acts 11:19-30; 13:1-3",
+      "gospel": "Mark 6:7-13",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2035-06-17": {
       "sundayName": "5th Sunday after Pentecost (prop6)",
       "season": "Pentecost",
@@ -8722,7 +10028,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Jeremiah 20:7-13",
       "epistle": "Romans 6:12-23",
       "gospel": "Matthew 10:5a, 21-33",
-      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx",
+      "alternates": [
+        {
+          "name": "The Nativity of St. John the Baptist",
+          "psalm": "Psalm 85:(1-6) 7-13",
+          "ot": "Isaiah 40:1-5",
+          "epistle": "Acts 13:13-26",
+          "gospel": "Luke 1:57-80"
+        }
+      ]
     },
     "2035-06-29": {
       "sundayName": "St. Peter and St. Paul, Apostles",
@@ -8777,7 +10092,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Isaiah 44:6-8",
       "epistle": "Romans 8:18-27",
       "gospel": "Matthew 13:24-30, 36-43",
-      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+      "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx",
+      "alternates": [
+        {
+          "name": "St. Mary Magdalene",
+          "psalm": "Psalm 73:23-28",
+          "ot": "Proverbs 31:10-31",
+          "epistle": "Acts 13:26-31",
+          "gospel": "John 20:1-2, 10-18"
+        }
+      ]
     },
     "2035-07-25": {
       "sundayName": "St. James the Elder, Apostle",
@@ -9010,6 +10334,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 22:15-22",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2035-10-23": {
+      "sundayName": "St. James of Jerusalem, Brother of Jesus and Martyr",
+      "season": "Pentecost",
+      "churchYear": "CY2035",
+      "series": "A",
+      "psalm": "Psalm 133",
+      "ot": "Acts 15:12-22a",
+      "epistle": "James 1:1-12",
+      "gospel": "Matthew 13:54-58",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2035-10-28": {
       "sundayName": "Reformation Day (observed)",
       "season": "Pentecost",
@@ -9027,6 +10362,13 @@ export const LCMS_CALENDAR_JSON = `{
           "ot": "Leviticus 19:1-2, 15-18",
           "epistle": "1 Thessalonians 2:1-13",
           "gospel": "Matthew 22:34-46"
+        },
+        {
+          "name": "St. Simon and St. Jude, Apostles",
+          "psalm": "Psalm 43",
+          "ot": "Jeremiah 26:1-16",
+          "epistle": "1 Peter 1:3-9",
+          "gospel": "John 15:(12-16) 17-21"
         }
       ]
     },
@@ -9116,6 +10458,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 25:31-46",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2035-11-30": {
+      "sundayName": "St. Andrew, Apostle",
+      "season": "Pentecost",
+      "churchYear": "CY2035",
+      "series": "A",
+      "psalm": "Psalm 139:1-12",
+      "ot": "Ezekiel 3:16-21",
+      "epistle": "Romans 10:8b-18",
+      "gospel": "John 1:35-42a",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2035-12-02": {
       "sundayName": "First Sunday in Advent",
       "season": "Advent",
@@ -9148,6 +10501,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "1 Thessalonians 5:16-24",
       "gospel": "John 1:6-8, 19-28",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2035-12-21": {
+      "sundayName": "St. Thomas, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2036",
+      "series": "B",
+      "psalm": "Psalm 136:1-4, 23-26",
+      "ot": "Judges 6:36-40",
+      "epistle": "Ephesians 4:7, 11-16",
+      "gospel": "John 20:24-29",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2035-12-23": {
       "sundayName": "Fourth Sunday in Advent",
@@ -9319,6 +10683,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 19:27-30",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2036-01-26": {
+      "sundayName": "St. Titus, Pastor and Confessor",
+      "season": "Epiphany",
+      "churchYear": "CY2036",
+      "series": "B",
+      "psalm": "Psalm 71:1-8",
+      "ot": "Acts 20:28-35",
+      "epistle": "Titus 1:1-9",
+      "gospel": "Luke 10:1-9",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2036-01-27": {
       "sundayName": "Third Sunday after the Epiphany",
       "season": "Epiphany",
@@ -9383,7 +10758,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "2 Kings 2:1-12",
       "epistle": "2 Corinthians 3:12-13 (14-18); 4:1-6",
       "gospel": "Mark 9:2-9",
-      "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+      "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx",
+      "alternates": [
+        {
+          "name": "St. Matthias, Apostle",
+          "psalm": "Psalm 134",
+          "ot": "Isaiah 66:1-2",
+          "epistle": "Acts 1:15-26",
+          "gospel": "Matthew 11:25-30"
+        }
+      ]
     },
     "2036-02-27": {
       "sundayName": "Ash Wednesday",
@@ -9429,6 +10813,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 2:13-22 (23-25)",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2036-03-19": {
+      "sundayName": "St. Joseph, Guardian of Jesus",
+      "season": "Lent",
+      "churchYear": "CY2036",
+      "series": "B",
+      "psalm": "Psalm 127",
+      "ot": "2 Samuel 7:4-16",
+      "epistle": "Romans 4:13-18",
+      "gospel": "Matthew 2:13-15, 19-23",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2036-03-23": {
       "sundayName": "Fourth Sunday in Lent",
       "season": "Lent",
@@ -9439,6 +10834,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Ephesians 2:1-10",
       "gospel": "John 3:14-21",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2036-03-25": {
+      "sundayName": "The Annunciation of Our Lord",
+      "season": "Lent",
+      "churchYear": "CY2036",
+      "series": "B",
+      "psalm": "Psalm 45:7-17",
+      "ot": "Isaiah 7:10-14",
+      "epistle": "Hebrews 10:4-10",
+      "gospel": "Luke 1:26-38",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2036-03-30": {
       "sundayName": "Fifth Sunday in Lent",
@@ -9537,6 +10943,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 24:36-49",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2036-05-01": {
+      "sundayName": "St. Philip and St. James, Apostles",
+      "season": "Easter",
+      "churchYear": "CY2036",
+      "series": "B",
+      "psalm": "Psalm 36:5-10",
+      "ot": "Isaiah 30:18-21",
+      "epistle": "Ephesians 2:19-22",
+      "gospel": "John 14:1-14",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2036-05-04": {
       "sundayName": "Fourth Sunday of Easter",
       "season": "Easter",
@@ -9592,6 +11009,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 17:11b-19",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2036-05-31": {
+      "sundayName": "The Visitation",
+      "season": "Easter",
+      "churchYear": "CY2036",
+      "series": "B",
+      "psalm": "Psalm 138",
+      "ot": "Isaiah 11:1-5",
+      "epistle": "Romans 12:9-16",
+      "gospel": "Luke 1:39-45 (46-56)",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2036-06-01": {
       "sundayName": "The Day of Pentecost",
       "season": "Pentecost",
@@ -9614,6 +11042,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 3:1-17",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2036-06-11": {
+      "sundayName": "St. Barnabas, Apostle",
+      "season": "Trinity",
+      "churchYear": "CY2036",
+      "series": "B",
+      "psalm": "Psalm 112",
+      "ot": "Isaiah 42:5-12",
+      "epistle": "Acts 11:19-30; 13:1-3",
+      "gospel": "Mark 6:7-13",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2036-06-15": {
       "sundayName": "2nd Sunday after Pentecost (prop6)",
       "season": "Pentecost",
@@ -9635,6 +11074,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "2 Corinthians 6:1-13",
       "gospel": "Mark 4:35-41",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2036-06-24": {
+      "sundayName": "The Nativity of St. John the Baptist",
+      "season": "Pentecost",
+      "churchYear": "CY2036",
+      "series": "B",
+      "psalm": "Psalm 85:(1-6) 7-13",
+      "ot": "Isaiah 40:1-5",
+      "epistle": "Acts 13:13-26",
+      "gospel": "Luke 1:57-80",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2036-06-29": {
       "sundayName": "4th Sunday after Pentecost (prop8)",
@@ -9688,6 +11138,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Ephesians 2:11-22",
       "gospel": "Mark 6:30-44",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
+    },
+    "2036-07-22": {
+      "sundayName": "St. Mary Magdalene",
+      "season": "Pentecost",
+      "churchYear": "CY2036",
+      "series": "B",
+      "psalm": "Psalm 73:23-28",
+      "ot": "Proverbs 31:10-31",
+      "epistle": "Acts 13:26-31",
+      "gospel": "John 20:1-2, 10-18",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2036-07-25": {
       "sundayName": "St. James the Elder, Apostle",
@@ -9914,6 +11375,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Mark 10:23-31",
       "source": "LCMS readings: LCMS-2026-2027-Church-Year-Calendar-Three-Year-Series-B.docx"
     },
+    "2036-10-23": {
+      "sundayName": "St. James of Jerusalem, Brother of Jesus and Martyr",
+      "season": "Pentecost",
+      "churchYear": "CY2036",
+      "series": "B",
+      "psalm": "Psalm 133",
+      "ot": "Acts 15:12-22a",
+      "epistle": "James 1:1-12",
+      "gospel": "Matthew 13:54-58",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2036-10-26": {
       "sundayName": "Reformation Day (observed)",
       "season": "Pentecost",
@@ -9933,6 +11405,17 @@ export const LCMS_CALENDAR_JSON = `{
           "gospel": "Mark 10:46-52"
         }
       ]
+    },
+    "2036-10-28": {
+      "sundayName": "St. Simon and St. Jude, Apostles",
+      "season": "Pentecost",
+      "churchYear": "CY2036",
+      "series": "B",
+      "psalm": "Psalm 43",
+      "ot": "Jeremiah 26:1-16",
+      "epistle": "1 Peter 1:3-9",
+      "gospel": "John 15:(12-16) 17-21",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2036-10-31": {
       "sundayName": "Reformation Day",
@@ -10029,7 +11512,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Jeremiah 33:14-16",
       "epistle": "1 Thessalonians 3:9-13",
       "gospel": "Luke 19:28-40",
-      "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+      "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx",
+      "alternates": [
+        {
+          "name": "St. Andrew, Apostle",
+          "psalm": "Psalm 139:1-12",
+          "ot": "Ezekiel 3:16-21",
+          "epistle": "Romans 10:8b-18",
+          "gospel": "John 1:35-42a"
+        }
+      ]
     },
     "2036-12-07": {
       "sundayName": "Second Sunday in Advent",
@@ -10062,7 +11554,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Micah 5:2-5a",
       "epistle": "Hebrews 10:5-10",
       "gospel": "Luke 1:39-45 (46-56)",
-      "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+      "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx",
+      "alternates": [
+        {
+          "name": "St. Thomas, Apostle",
+          "psalm": "Psalm 136:1-4, 23-26",
+          "ot": "Judges 6:36-40",
+          "epistle": "Ephesians 4:7, 11-16",
+          "gospel": "John 20:24-29"
+        }
+      ]
     },
     "2036-12-24": {
       "sundayName": "The Nativity of Our Lord (Christmas Eve)",
@@ -10239,6 +11740,17 @@ export const LCMS_CALENDAR_JSON = `{
         }
       ]
     },
+    "2037-01-26": {
+      "sundayName": "St. Titus, Pastor and Confessor",
+      "season": "Epiphany",
+      "churchYear": "CY2037",
+      "series": "C",
+      "psalm": "Psalm 71:1-8",
+      "ot": "Acts 20:28-35",
+      "epistle": "Titus 1:1-9",
+      "gospel": "Luke 10:1-9",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2037-02-01": {
       "sundayName": "Fourth Sunday after the Epiphany",
       "season": "Epiphany",
@@ -10305,6 +11817,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 4:1-13",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2037-02-24": {
+      "sundayName": "St. Matthias, Apostle",
+      "season": "Lent",
+      "churchYear": "CY2037",
+      "series": "C",
+      "psalm": "Psalm 134",
+      "ot": "Isaiah 66:1-2",
+      "epistle": "Acts 1:15-26",
+      "gospel": "Matthew 11:25-30",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2037-03-01": {
       "sundayName": "Second Sunday in Lent",
       "season": "Lent",
@@ -10338,6 +11861,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Luke 15:1-3, 11-32",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2037-03-19": {
+      "sundayName": "St. Joseph, Guardian of Jesus",
+      "season": "Lent",
+      "churchYear": "CY2037",
+      "series": "C",
+      "psalm": "Psalm 127",
+      "ot": "2 Samuel 7:4-16",
+      "epistle": "Romans 4:13-18",
+      "gospel": "Matthew 2:13-15, 19-23",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2037-03-22": {
       "sundayName": "Fifth Sunday in Lent",
       "season": "Lent",
@@ -10348,6 +11882,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Philippians 3:(4b-7) 8-14",
       "gospel": "Luke 20:9-20",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+    },
+    "2037-03-25": {
+      "sundayName": "The Annunciation of Our Lord",
+      "season": "Lent",
+      "churchYear": "CY2037",
+      "series": "C",
+      "psalm": "Psalm 45:7-17",
+      "ot": "Isaiah 7:10-14",
+      "epistle": "Hebrews 10:4-10",
+      "gospel": "Luke 1:26-38",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2037-03-29": {
       "sundayName": "Palm Sunday (Sunday of the Passion)",
@@ -10446,6 +11991,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "John 10:22-33",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
     },
+    "2037-05-01": {
+      "sundayName": "St. Philip and St. James, Apostles",
+      "season": "Easter",
+      "churchYear": "CY2037",
+      "series": "C",
+      "psalm": "Psalm 36:5-10",
+      "ot": "Isaiah 30:18-21",
+      "epistle": "Ephesians 2:19-22",
+      "gospel": "John 14:1-14",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2037-05-03": {
       "sundayName": "Fifth Sunday of Easter",
       "season": "Easter",
@@ -10510,7 +12066,16 @@ export const LCMS_CALENDAR_JSON = `{
       "ot": "Proverbs 8:1-4, 22-31",
       "epistle": "Acts 2:14a, 22-36",
       "gospel": "John 8:48-59",
-      "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+      "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx",
+      "alternates": [
+        {
+          "name": "The Visitation",
+          "psalm": "Psalm 138",
+          "ot": "Isaiah 11:1-5",
+          "epistle": "Romans 12:9-16",
+          "gospel": "Luke 1:39-45 (46-56)"
+        }
+      ]
     },
     "2037-06-07": {
       "sundayName": "2nd Sunday after Pentecost (prop5)",
@@ -10522,6 +12087,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Galatians 1:11-24",
       "gospel": "Luke 7:11-17",
       "source": "yaag.org"
+    },
+    "2037-06-11": {
+      "sundayName": "St. Barnabas, Apostle",
+      "season": "Pentecost",
+      "churchYear": "CY2037",
+      "series": "C",
+      "psalm": "Psalm 112",
+      "ot": "Isaiah 42:5-12",
+      "epistle": "Acts 11:19-30; 13:1-3",
+      "gospel": "Mark 6:7-13",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2037-06-14": {
       "sundayName": "3rd Sunday after Pentecost (prop6)",
@@ -10544,6 +12120,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Galatians 3:23-4:7",
       "gospel": "Luke 8:26-39",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+    },
+    "2037-06-24": {
+      "sundayName": "The Nativity of St. John the Baptist",
+      "season": "Pentecost",
+      "churchYear": "CY2037",
+      "series": "C",
+      "psalm": "Psalm 85:(1-6) 7-13",
+      "ot": "Isaiah 40:1-5",
+      "epistle": "Acts 13:13-26",
+      "gospel": "Luke 1:57-80",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2037-06-28": {
       "sundayName": "5th Sunday after Pentecost (prop8)",
@@ -10599,6 +12186,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Colossians 1:21-29",
       "gospel": "Luke 10:38-42",
       "source": "LCMS readings: LCMS-2024-2025-Church-Year-Calendar-Three-Year-Series-C.docx"
+    },
+    "2037-07-22": {
+      "sundayName": "St. Mary Magdalene",
+      "season": "Pentecost",
+      "churchYear": "CY2037",
+      "series": "C",
+      "psalm": "Psalm 73:23-28",
+      "ot": "Proverbs 31:10-31",
+      "epistle": "Acts 13:26-31",
+      "gospel": "John 20:1-2, 10-18",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2037-07-25": {
       "sundayName": "St. James the Elder, Apostle",
@@ -10829,6 +12427,17 @@ export const LCMS_CALENDAR_JSON = `{
         }
       ]
     },
+    "2037-10-23": {
+      "sundayName": "St. James of Jerusalem, Brother of Jesus and Martyr",
+      "season": "Pentecost",
+      "churchYear": "CY2037",
+      "series": "C",
+      "psalm": "Psalm 133",
+      "ot": "Acts 15:12-22a",
+      "epistle": "James 1:1-12",
+      "gospel": "Matthew 13:54-58",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2037-10-25": {
       "sundayName": "Reformation Day (observed)",
       "season": "Pentecost",
@@ -10848,6 +12457,17 @@ export const LCMS_CALENDAR_JSON = `{
           "gospel": "Luke 18:9-17"
         }
       ]
+    },
+    "2037-10-28": {
+      "sundayName": "St. Simon and St. Jude, Apostles",
+      "season": "Pentecost",
+      "churchYear": "CY2037",
+      "series": "C",
+      "psalm": "Psalm 43",
+      "ot": "Jeremiah 26:1-16",
+      "epistle": "1 Peter 1:3-9",
+      "gospel": "John 15:(12-16) 17-21",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2037-10-31": {
       "sundayName": "Reformation Day",
@@ -10935,6 +12555,17 @@ export const LCMS_CALENDAR_JSON = `{
       "gospel": "Matthew 21:1-11",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
     },
+    "2037-11-30": {
+      "sundayName": "St. Andrew, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2038",
+      "series": "A",
+      "psalm": "Psalm 139:1-12",
+      "ot": "Ezekiel 3:16-21",
+      "epistle": "Romans 10:8b-18",
+      "gospel": "John 1:35-42a",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
+    },
     "2037-12-06": {
       "sundayName": "Second Sunday in Advent",
       "season": "Advent",
@@ -10967,6 +12598,17 @@ export const LCMS_CALENDAR_JSON = `{
       "epistle": "Romans 1:1-7",
       "gospel": "Matthew 1:18-25",
       "source": "LCMS readings: LCMS-2025-2026-Church-Year-Calendar-Three-Year-Series-A.docx"
+    },
+    "2037-12-21": {
+      "sundayName": "St. Thomas, Apostle",
+      "season": "Advent",
+      "churchYear": "CY2038",
+      "series": "A",
+      "psalm": "Psalm 136:1-4, 23-26",
+      "ot": "Judges 6:36-40",
+      "epistle": "Ephesians 4:7, 11-16",
+      "gospel": "John 20:24-29",
+      "source": "LCMS readings: Lutheran Service Book propers (feasts and festivals)"
     },
     "2037-12-24": {
       "sundayName": "The Nativity of Our Lord (Christmas Eve)",
