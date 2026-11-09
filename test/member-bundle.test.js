@@ -382,7 +382,7 @@ describe('app-ext.js is lazy for every role', () => {
       const ctx = staffCtx();
       ctx.applyRoleUI('admin', '', null);
       ctx.showTab(tab);
-      await tick();
+      await until(() => typeof ctx.initReports === 'function');
       expect(names(ctx)).toEqual(['/admin/app-ext.js']);
       expect(typeof ctx.initReports).toBe('function');
     });
