@@ -2158,16 +2158,16 @@ export const HTML_TABS_2 = String.raw`
 <div class="modal-overlay" id="add-to-hh-modal" onclick="if(event.target===this)closeModal('add-to-hh-modal')">
   <div class="modal">
     <h2>Add Person to Household</h2>
-    <input type="text" id="add-hh-search" placeholder="Search by name…" style="width:100%;margin-bottom:10px;" oninput="searchAddToHh(this.value)">
+    <input type="text" id="add-hh-search" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" data-np-autofill-type="ignore" data-np-ignore placeholder="Search by name…" style="width:100%;margin-bottom:10px;" oninput="searchAddToHh(this.value)">
     <div id="add-hh-results" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;min-height:60px;"></div>
     <div style="margin-top:12px;">
       <button id="add-hh-new-toggle" class="btn-secondary" style="font-size:.82rem;width:100%;" onclick="toggleAddHhNew(this)">+ Create new person instead</button>
       <div id="add-hh-new" style="display:none;margin-top:10px;padding:12px;background:var(--linen);border-radius:8px;">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-          <div class="field" style="margin:0;"><label style="font-size:11px;">First Name</label><input type="text" id="anh-first" name="anh-first" style="width:100%;box-sizing:border-box;"></div>
-          <div class="field" style="margin:0;"><label style="font-size:11px;">Last Name</label><input type="text" id="anh-last" name="anh-last" style="width:100%;box-sizing:border-box;"></div>
+          <div class="field" style="margin:0;"><label style="font-size:11px;">First Name</label><input type="text" id="anh-first" name="anh-x-first" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" data-np-autofill-type="ignore" data-np-ignore style="width:100%;box-sizing:border-box;"></div>
+          <div class="field" style="margin:0;"><label style="font-size:11px;">Last Name</label><input type="text" id="anh-last" name="anh-x-last" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" data-np-autofill-type="ignore" data-np-ignore style="width:100%;box-sizing:border-box;"></div>
         </div>
-        <div class="field" style="margin:0 0 10px;"><label style="font-size:11px;">Member Type</label><select id="anh-type" name="anh-type" style="width:100%;"></select></div>
+        <div class="field" style="margin:0 0 10px;"><label style="font-size:11px;">Member Type</label><select id="anh-type" name="anh-type" autocomplete="off" style="width:100%;"></select></div>
         <div id="anh-address-note" style="font-size:.76rem;color:var(--warm-gray);margin-bottom:10px;"></div>
         <button class="btn-primary" style="font-size:.82rem;" onclick="createAndAddToHh()">Create &amp; Add to Household</button>
       </div>
