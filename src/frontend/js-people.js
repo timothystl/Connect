@@ -2037,6 +2037,9 @@ function searchAddToHh(q) {
           +'<button class="btn-primary" style="font-size:.78rem;padding:4px 10px;white-space:nowrap;" onclick="confirmAddToHh('+p.id+')">Add</button>'
           +'</div>';
       }).join('');
+    }).catch(function(err) {
+      if (err && err.message === 'Unauthorized') return;
+      el.innerHTML = '<p style="color:var(--danger);text-align:center;padding:16px;font-size:.88rem;">Search failed: '+esc((err && err.message) || 'unknown error')+'</p>';
     });
   }, 300);
 }
