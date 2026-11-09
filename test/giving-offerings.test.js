@@ -312,13 +312,20 @@ describe('deposits pane figures', () => {
 });
 
 describe('offerings work queue', () => {
+  // The queue counts only the last 90 days, so fixed calendar dates age out as the year goes on.
+  // Dates here sit a couple of weeks back, but never before Jan 1 (fees are year-to-date).
+  const recentDay = (offset) => {
+    const now = new Date();
+    const base = Math.max(Date.now() - 14 * 86400000, Date.UTC(now.getUTCFullYear(), 0, 1));
+    return new Date(base + offset * 86400000).toISOString().slice(0, 10);
+  };
   it('counts open batches, undeposited money, unreconciled slips and fees', async () => {
     const db = makeTestDb();
     const year = new Date().getFullYear();
-    const open = seedBatch(db, { date: `${year}-08-09`, description: 'Open, uncounted', amounts: [120000] });
-    const closed = seedBatch(db, { date: `${year}-08-02`, description: 'Closed, banked', amounts: [200000] });
+    const open = seedBatch(db, { date: recentDay(7), description: 'Open, uncounted', amounts: [120000] });
+    const closed = seedBatch(db, { date: recentDay(0), description: 'Closed, banked', amounts: [200000] });
     db._raw.prepare('UPDATE giving_batches SET closed=1 WHERE id=?').run(closed);
-    const dep = await (await call(db, { method: 'POST', seg: 'giving/deposits', body: { deposit_date: `${year}-08-03`, batch_id: closed, amount_cents: 200000 } })).json();
+    const dep = await (await call(db, { method: 'POST', seg: 'giving/deposits', body: { deposit_date: recentDay(1), batch_id: closed, amount_cents: 200000 } })).json();
     await call(db, { method: 'PATCH', seg: `giving/deposits/${dep.id}`, body: { bank_cents: 198000 } });
 
     const q = await (await call(db, { seg: 'giving/offerings-summary' })).json();
@@ -388,12 +395,12 @@ describe('offerings work queue', () => {
     // has reconciled yet.
     const db = makeTestDb();
     const year = new Date().getFullYear();
-    const b = seedBatch(db, { date: `${year}-08-09`, description: 'Banked, unreconciled', amounts: [200000] });
-    const dep = await (await call(db, { method: 'POST', seg: 'giving/deposits', body: { deposit_date: `${year}-08-10`, batch_id: b, amount_cents: 200000 } })).json();
+    const b = seedBatch(db, { date: recentDay(0), description: 'Banked, unreconciled', amounts: [200000] });
+    const dep = await (await call(db, { method: 'POST', seg: 'giving/deposits', body: { deposit_date: recentDay(1), batch_id: b, amount_cents: 200000 } })).json();
     const q = await (await call(db, { seg: 'giving/offerings-summary' })).json();
     expect(q.fees_ytd.cents).toBe(0);
     expect(q.unreconciled_deposits.count).toBe(1);
-    expect(q.unreconciled_deposits.earliest_date).toBe(`${year}-08-10`);
+    expect(q.unreconciled_deposits.earliest_date).toBe(recentDay(1));
     expect(dep.ok).toBe(true);
   });
 });
