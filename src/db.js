@@ -2,6 +2,41 @@
 import { defaultFundCategories } from './api-utils.js';
 
 export const DB_INIT = [
+
+  `CREATE TABLE IF NOT EXISTS giving_stax_intents (
+ id TEXT PRIMARY KEY,
+ fingerprint TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('pending','complete')),
+ response TEXT,
+ status INTEGER,
+ created_at INTEGER NOT NULL
+)`,
+  `CREATE TABLE IF NOT EXISTS giving_stax_reversal_events (
+ event_id TEXT PRIMARY KEY,
+ parent_id TEXT NOT NULL,
+ kind TEXT NOT NULL CHECK(kind IN ('refund','void')),
+ amount_cents INTEGER NOT NULL CHECK(amount_cents>0)
+)`,
+  `CREATE TABLE IF NOT EXISTS member_login_challenges (
+  email_hash TEXT PRIMARY KEY,
+  digest TEXT NOT NULL,
+  tries INTEGER NOT NULL DEFAULT 0,
+  consumed INTEGER NOT NULL DEFAULT 0,
+  expires_at INTEGER NOT NULL
+)`,
+  `CREATE TABLE IF NOT EXISTS member_login_limits (
+  key TEXT PRIMARY KEY,
+  used INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+)`,
+  `CREATE TABLE IF NOT EXISTS member_sso_consumed (
+  nonce TEXT PRIMARY KEY,
+  expires_at INTEGER NOT NULL
+)`,
+
+  `CREATE INDEX IF NOT EXISTS idx_member_login_challenges_expiry ON member_login_challenges(expires_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_member_login_limits_expiry ON member_login_limits(expires_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_member_sso_consumed_expiry ON member_sso_consumed(expires_at)`,
   `CREATE TABLE IF NOT EXISTS serve_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -2516,3 +2551,4 @@ async function _doInitDb(db) {
      ON CONFLICT(key) DO UPDATE SET value=excluded.value`
   ).bind(fingerprint).run().catch(() => {});
 }
+

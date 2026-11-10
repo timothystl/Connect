@@ -64,11 +64,14 @@ async function peopleForEmail(db, email) {
   return rows;
 }
 
-async function countAgainst(kv, key, limit) {
-  const used = Number.parseInt((await kv.get(key)) || '0', 10) || 0;
-  if (used >= limit) return false;
-  await kv.put(key, String(used + 1), { expirationTtl: 3600 });
-  return true;
+async function countAgainst(db, key, limit) {
+  const now = Math.floor(Date.now() / 1000);
+  const row = await db.prepare(`INSERT INTO member_login_limits(key,used,expires_at) VALUES (?,1,?)
+    ON CONFLICT(key) DO UPDATE SET
+      used=CASE WHEN expires_at<=? THEN 1 ELSE used+1 END,
+      expires_at=CASE WHEN expires_at<=? THEN excluded.expires_at ELSE expires_at END
+    WHERE expires_at<=? OR used<? RETURNING used`).bind(key,now+3600,now,now,now,limit).first();
+  return !!row;
 }
 
 function codeEmailHtml({ churchName, firstName, code, signInUrl }) {
@@ -84,15 +87,25 @@ function codeEmailHtml({ churchName, firstName, code, signInUrl }) {
 </div>`;
 }
 
+async function pruneLoginState(db) {
+  const now=Math.floor(Date.now()/1000);
+  // Bound each cleanup and retain only hashes/nonces; no mailbox is stored here.
+  for(const [table,key] of [['member_login_challenges','email_hash'],['member_login_limits','key'],['member_sso_consumed','nonce']]) {
+    await db.prepare(`DELETE FROM ${table} WHERE ${key} IN
+      (SELECT ${key} FROM ${table} WHERE expires_at<=? LIMIT 100)`).bind(now).run();
+  }
+}
+
 async function requestCode(env, body) {
-  const kv = env.KV;
-  if (!kv) return json({ error: 'not_configured' }, 503);
+  const db = env.DB;
+  if (!db) return json({ error: 'not_configured' }, 503);
   const email = normalizeEmail(body.email);
   if (!validEmail(email)) return json({ error: 'invalid_email' }, 400);
+  await pruneLoginState(db);
   const emailHash = await sha256Hex(email);
   const clientHash = await sha256Hex(String(body.client || 'unknown').slice(0, 200));
-  const okEmail = await countAgainst(kv, `mp:rl:email:${emailHash}`, MAX_REQUESTS_PER_EMAIL_HOUR);
-  const okClient = await countAgainst(kv, `mp:rl:client:${clientHash}`, MAX_REQUESTS_PER_CLIENT_HOUR);
+  const okEmail = await countAgainst(db, `mp:rl:email:${emailHash}`, MAX_REQUESTS_PER_EMAIL_HOUR);
+  const okClient = await countAgainst(db, `mp:rl:client:${clientHash}`, MAX_REQUESTS_PER_CLIENT_HOUR);
   if (!okEmail || !okClient) return json({ error: 'too_many_requests' }, 429);
 
   const people = await peopleForEmail(env.DB, email);
@@ -104,7 +117,10 @@ async function requestCode(env, body) {
   const origin = allowed.includes(String(body.origin || '')) ? body.origin : allowed[0];
 
   const code = newCode();
-  await kv.put(`mp:code:${emailHash}`, JSON.stringify({ h: await codeDigest(env, email, code), tries: 0 }), { expirationTtl: CODE_TTL_SECONDS });
+  await db.prepare(`INSERT INTO member_login_challenges(email_hash,digest,tries,consumed,expires_at)
+    VALUES (?,?,0,0,?) ON CONFLICT(email_hash) DO UPDATE SET digest=excluded.digest,
+    tries=0,consumed=0,expires_at=excluded.expires_at`).bind(emailHash,await codeDigest(env,email,code),
+      Math.floor(Date.now()/1000)+CODE_TTL_SECONDS).run();
 
   const signInUrl = `${origin}/signin?${new URLSearchParams({ email, code }).toString()}`;
   const sent = await sendBrevoTransactionalEmail(env, {
@@ -120,24 +136,22 @@ async function requestCode(env, body) {
 }
 
 async function verifyCode(env, body) {
-  const kv = env.KV;
-  if (!kv) return json({ error: 'not_configured' }, 503);
+  const db = env.DB;
+  if (!db) return json({ error: 'not_configured' }, 503);
   const email = normalizeEmail(body.email);
   const code = String(body.code || '').replace(/\s+/g, '');
   if (!validEmail(email) || !/^\d{6}$/.test(code)) return json({ ok: false, reason: 'wrong' });
-  const key = `mp:code:${await sha256Hex(email)}`;
-  let record = null;
-  try { record = JSON.parse((await kv.get(key)) ?? 'null'); } catch { record = null; }
-  if (!record?.h) return json({ ok: false, reason: 'expired' });
-  if ((record.tries || 0) >= MAX_CODE_TRIES) { await kv.delete(key); return json({ ok: false, reason: 'expired' }); }
-  const match = await timingSafeEqual(await codeDigest(env, email, code), record.h);
-  if (!match) {
-    const tries = (record.tries || 0) + 1;
-    if (tries >= MAX_CODE_TRIES) await kv.delete(key);
-    else await kv.put(key, JSON.stringify({ ...record, tries }), { expirationTtl: CODE_TTL_SECONDS });
-    return json({ ok: false, reason: tries >= MAX_CODE_TRIES ? 'expired' : 'wrong' });
+  const digest = await codeDigest(env,email,code);
+  // One statement on D1's primary serializes guesses and successful consumption.
+  // Neither wrong guesses nor reads extend the issuance deadline.
+  const record = await db.prepare(`UPDATE member_login_challenges SET tries=tries+1,
+    consumed=CASE WHEN digest=? THEN 1 ELSE 0 END
+    WHERE email_hash=? AND expires_at>? AND tries<? AND consumed=0
+    RETURNING digest,tries`).bind(digest,await sha256Hex(email),Math.floor(Date.now()/1000),MAX_CODE_TRIES).first();
+  if (!record) return json({ ok:false,reason:'expired' });
+  if (!(await timingSafeEqual(digest,record.digest))) {
+    return json({ ok:false,reason:record.tries>=MAX_CODE_TRIES?'expired':'wrong' });
   }
-  await kv.delete(key); // a code works once
   const people = await peopleForEmail(env.DB, email);
   if (!people.length) return json({ ok: false, reason: 'expired' });
   return json({ ok: true, first_name: people[0].first_name, full_name: `${people[0].first_name} ${people[0].last_name}`.trim() });
@@ -394,17 +408,17 @@ async function ssoSignature(key, payload) {
 export async function acceptMemberSsoLink(env, token) {
   const key = env.MEMBER_PORTAL_CONTRACT_API_KEY || '';
   const [payload, signature, extra] = String(token || '').split('.');
-  if (!key || !env.KV || !payload || !signature || extra !== undefined) return null;
+  if (!key || !env.DB || !payload || !signature || extra !== undefined) return null;
   if (!(await timingSafeEqual(signature, await ssoSignature(key, payload)))) return null;
   let claims;
   try { claims = JSON.parse(new TextDecoder().decode(fromB64url(payload))); } catch { return null; }
   const email = normalizeEmail(claims?.e);
   const now = Math.floor(Date.now() / 1000);
-  if (!validEmail(email) || typeof claims.exp !== 'number' || claims.exp < now || claims.exp > now + SSO_LINK_SECONDS + 30) return null;
+  if (!validEmail(email) || typeof claims.exp !== 'number' || claims.exp <= now || claims.exp > now + SSO_LINK_SECONDS + 30) return null;
   if (typeof claims.n !== 'string' || !/^[A-Za-z0-9_-]{16,64}$/.test(claims.n)) return null;
-  const spent = `mp:sso:${claims.n}`;
-  if (await env.KV.get(spent)) return null;
-  await env.KV.put(spent, '1', { expirationTtl: 300 });
+  const claimed = await env.DB.prepare(`INSERT INTO member_sso_consumed(nonce,expires_at)
+    VALUES (?,?) ON CONFLICT(nonce) DO NOTHING RETURNING nonce`).bind(claims.n,claims.exp).first();
+  if (!claimed) return null;
   return email;
 }
 
@@ -448,3 +462,4 @@ export async function handleMemberSso(req, env, url) {
   const cookie = await authCookieHeader(env, 'member', account.username, isPhoneUserAgent(req));
   return new Response(null, { status: 302, headers: { Location: `${url.origin}/`, 'Set-Cookie': cookie, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
 }
+

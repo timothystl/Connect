@@ -18,6 +18,7 @@ function makeDb() {
     prepare(sql) {
       const q = forNodeSqlite(sql);
       const mk = (args) => ({
+        _sql:q,_args:args,
         async run() {
           const r = sqlite.prepare(q).run(...args);
           return { meta: { last_row_id: Number(r.lastInsertRowid), changes: r.changes } };
@@ -28,9 +29,9 @@ function makeDb() {
       return { bind: (...args) => mk(args), ...mk([]) };
     },
     async batch(stmts) {
-      const out = [];
-      for (const s of stmts) out.push(await s.run());
-      return out;
+      sqlite.exec('BEGIN');
+      try { const out=stmts.map(s=>{const r=sqlite.prepare(s._sql).run(...s._args);return {meta:{last_row_id:Number(r.lastInsertRowid),changes:r.changes}};});sqlite.exec('COMMIT');return out; }
+      catch(e){sqlite.exec('ROLLBACK');throw e;}
     },
     _raw: sqlite,
   };
@@ -359,6 +360,7 @@ describe('Stax Giving mockup — webhook', () => {
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/checkout', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '25.00' }],
         payer_first_name: 'Demo', payer_last_name: 'Mode', payer_email: 'demo@example.com',
       }),
@@ -421,11 +423,12 @@ describe('Stax Giving mockup — public checkout API (demo mode)', () => {
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/checkout', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '25.00' }],
         payer_first_name: 'Jamie', payer_last_name: 'Vogel', payer_email: 'jamie@example.com',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.demo).toBe(true);
@@ -442,7 +445,7 @@ describe('Stax Giving mockup — public checkout API (demo mode)', () => {
       method: 'POST',
       body: JSON.stringify({ gifts: [{ fund_id: fundId, amount: '10.00' }], payer_first_name: 'X' }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
     expect(res.status).toBe(400);
   });
 
@@ -457,11 +460,12 @@ describe('Stax Giving mockup — public checkout API (demo mode)', () => {
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/checkout', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '10.00' }],
         payer_first_name: 'Test', payer_last_name: 'Case', payer_email: 'notanemail',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe('Enter a valid email address.');
@@ -474,11 +478,12 @@ describe('Stax Giving mockup — public checkout API (demo mode)', () => {
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/checkout', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '10.00' }],
         payer_first_name: 'Test', payer_last_name: 'Case', payer_email: 'test.case+gift@example.co.uk',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
     expect(res.status).toBe(200);
   });
 
@@ -490,11 +495,12 @@ describe('Stax Giving mockup — public checkout API (demo mode)', () => {
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/checkout', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '10.00' }],
         payer_first_name: 'X', payer_last_name: 'Y', payer_email: 'x@example.com',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
     expect(res.status).toBe(400);
   });
 
@@ -507,17 +513,18 @@ describe('Stax Giving mockup — public checkout API (demo mode)', () => {
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/checkout', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundA, amount: '30.00' }, { fund_id: fundB, amount: '20.00' }],
         payer_first_name: 'Multi', payer_last_name: 'Fund', payer_email: 'multi@example.com',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.entryIds.length).toBe(2);
+    expect(body.testGiftIds.length).toBe(2);
     expect(body.totalCents).toBe(5000);
 
-    const rows = (await db.prepare('SELECT fund_id, amount, external_txn_id FROM giving_entries WHERE id IN (?,?) ORDER BY fund_id').bind(...body.entryIds).all()).results;
+    const rows = (await db.prepare('SELECT fund_id, amount_cents AS amount, external_txn_id FROM giving_test_gifts WHERE id IN (?,?) ORDER BY fund_id').bind(...body.testGiftIds).all()).results;
     expect(rows.map(r => r.amount).sort((a, b) => a - b)).toEqual([2000, 3000]);
     // Both rows carry the SAME base transaction id (fund-suffixed), never two independent ids —
     // that's what keeps a webhook redelivery for this one Stax charge idempotent for the group.
@@ -536,16 +543,17 @@ describe('Stax Giving mockup — public checkout API (demo mode)', () => {
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/checkout', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '100.00' }], cover_fees: true,
         payer_first_name: 'Fee', payer_last_name: 'Cover', payer_email: 'fee@example.com',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
     const body = await res.json();
     expect(res.status).toBe(200);
     // 10000 * 0.02 = 200 -> total 10200, per the module's documented flat estimated fee rate.
     expect(body.totalCents).toBe(10200);
-    const row = await db.prepare('SELECT amount FROM giving_entries WHERE id=?').bind(body.entryId).first();
+    const row = await db.prepare('SELECT amount_cents AS amount FROM giving_test_gifts WHERE id=?').bind(body.testGiftId).first();
     expect(row.amount).toBe(10200);
   });
 });
@@ -649,6 +657,7 @@ describe('Stax Giving mockup — checkout reuses a client-supplied stax_customer
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/checkout', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '15.00' }],
         payer_first_name: 'Reuse', payer_last_name: 'Customer', payer_email: 'reuse@example.com',
         payment_method_id: 'pm_1', stax_customer_id: 'cus_already_have_one',
@@ -681,16 +690,17 @@ describe('Stax Giving mockup — a "Gateway Unreachable" charge outcome is never
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/checkout', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '25.00' }],
         payer_first_name: 'Andrew', payer_last_name: 'Dinger', payer_email: 'revdinger@example.com',
         payment_method_id: 'pm_1',
       }),
     });
     const res = await handleStaxGivingMockupPublicApi(req, { ...env(), DB: db }, new URL(req.url), 'POST', 'checkout');
-    expect(res.status).toBe(402);
+    expect(res.status).toBe(409);
     const body = await res.json();
     expect(body.pending).toBe(true);
-    expect(body.error.toLowerCase()).toContain("don't submit this card again");
+    expect(body.error.toLowerCase()).toContain("do not submit another gift");
     expect(body.error).not.toBe('Gateway Unreachable');
 
     // Never recorded as a gift — its outcome is genuinely unknown, not a completed charge.
@@ -712,13 +722,14 @@ describe('Stax Giving mockup — a "Gateway Unreachable" charge outcome is never
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/recurring', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '25.00' }], interval: 'weekly',
         payer_first_name: 'Andrew', payer_last_name: 'Dinger', payer_email: 'revdinger@example.com',
         payment_method_id: 'pm_1',
       }),
     });
     const res = await handleStaxGivingMockupPublicApi(req, { ...env(), DB: db }, new URL(req.url), 'POST', 'recurring');
-    expect(res.status).toBe(402);
+    expect(res.status).toBe(409);
     const body = await res.json();
     expect(body.pending).toBe(true);
     const scheduleCount = (await db.prepare('SELECT COUNT(*) AS c FROM giving_stax_recurring_schedules').first()).c;
@@ -742,6 +753,7 @@ describe('Stax Giving mockup — a "Gateway Unreachable" charge outcome is never
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/checkout', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '25.00' }],
         payer_first_name: 'Andrew', payer_last_name: 'Dinger', payer_email: 'revdinger@example.com',
         payment_method_id: 'pm_1',
@@ -1018,6 +1030,7 @@ describe('Stax Giving mockup — /recurring charges the first gift immediately',
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/recurring', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '25.00' }], interval: 'monthly',
         payer_first_name: 'Demo', payer_last_name: 'Donor', payer_email: 'demo@example.com',
       }),
@@ -1067,6 +1080,7 @@ describe('Stax Giving mockup — /recurring charges the first gift immediately',
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/recurring', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '25.00' }], interval: 'weekly',
         payer_first_name: 'Jamie', payer_last_name: 'Vogel', payer_email: 'jamie@example.com',
         payment_method_id: 'pm_1',
@@ -1106,6 +1120,7 @@ describe('Stax Giving mockup — /recurring charges the first gift immediately',
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/recurring', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '25.00' }], interval: 'monthly',
         payer_first_name: 'Fail', payer_last_name: 'Case', payer_email: 'fail@example.com',
         payment_method_id: 'pm_1',
@@ -1136,6 +1151,7 @@ describe('Stax Giving mockup — /recurring charges the first gift immediately',
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/recurring', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '25.00' }], interval: 'weekly',
         payer_first_name: 'Andrew', payer_last_name: 'Dinger', payer_email: 'revdinger@example.com',
         payment_method_id: 'pm_1',
@@ -1552,11 +1568,12 @@ describe('Stax Giving mockup — adjustable cover-the-fee percentage', () => {
     const req = new Request('https://connect.timothystl.org/api/mockup/stax-giving/checkout', {
       method: 'POST',
       body: JSON.stringify({
+        intent_id: crypto.randomUUID(),
         gifts: [{ fund_id: fundId, amount: '100.00' }], cover_fees: true,
         payer_first_name: 'Pat', payer_last_name: 'Fee', payer_email: 'pat-fee@example.com',
       }),
     });
-    const res = await handleStaxGivingMockupPublicApi(req, { STAX_LIVE: '1', DB: db }, new URL(req.url), 'POST', 'checkout');
+    const res = await handleStaxGivingMockupPublicApi(req, { DB: db }, new URL(req.url), 'POST', 'checkout');
     expect((await res.json()).totalCents).toBe(10290);
   });
 
@@ -1568,5 +1585,76 @@ describe('Stax Giving mockup — adjustable cover-the-fee percentage', () => {
     }
     expect((await callFee(db, 'PUT', { percent: 3 }, false)).status).toBe(403);
     expect(await (await callFee(db, 'GET')).json()).toEqual({ percent: 2 });
+  });
+});
+
+
+describe('source-audit payment boundaries',()=>{
+  const contact={payerFirstName:'Synthetic',payerLastName:'Donor',payerEmail:'audit@example.invalid'};
+  const live={STAX_LIVE:'1',STAX_SANDBOX_API_KEY:'synthetic-key',STAX_SANDBOX_WEB_PAYMENTS_TOKEN:'synthetic-token'};
+  const post=(db,env,path,body)=>{const req=new Request('https://connect.timothystl.org/api/mockup/stax-giving/'+path,{method:'POST',body:JSON.stringify(body)});return handleStaxGivingMockupPublicApi(req,{...env,DB:db},new URL(req.url),'POST',path);};
+  const payload=fund=>({intent_id:crypto.randomUUID(),gifts:[{fund_id:fund,amount:'10.00'}],payer_first_name:'Synthetic',payer_last_name:'Donor',payer_email:'audit@example.invalid',payment_method_id:'pm_synthetic',stax_customer_id:'cus_synthetic'});
+  it('rejects every incomplete live configuration for checkout and recurring without writes or calls',async()=>{
+    const db=makeDb();await initDb(db);const fund=insertFund(db,'Synthetic fund');global.fetch=vi.fn(()=>{throw Error('must not call provider');});
+    for(const keys of [{},{STAX_SANDBOX_API_KEY:'synthetic'},{STAX_SANDBOX_WEB_PAYMENTS_TOKEN:'synthetic'}]){
+      for(const path of ['checkout','recurring','stax-customer'])expect((await post(db,{STAX_LIVE:'1',...keys},path,payload(fund))).status).toBe(503);
+    }
+    expect(fetch).not.toHaveBeenCalled();expect(db._raw.prepare('SELECT count(*) n FROM giving_entries').get().n).toBe(0);
+    expect(db._raw.prepare('SELECT count(*) n FROM giving_stax_recurring_schedules').get().n).toBe(0);
+  });
+  it('rolls back all fund and unmatched writes if any allocation fails, then retries completely',async()=>{
+    const db=makeDb();await initDb(db);const a=insertFund(db,'A'),b=insertFund(db,'B');
+    db._raw.exec(`CREATE TRIGGER synthetic_failure BEFORE INSERT ON giving_entries WHEN NEW.fund_id=${b} BEGIN SELECT RAISE(ABORT,'synthetic interruption'); END`);
+    const gift={externalTxnId:'synthetic-split',splits:[{fundId:a,amountCents:600},{fundId:b,amountCents:400}],...contact};
+    await expect(recordStaxGift(db,gift)).rejects.toThrow('synthetic interruption');
+    expect(db._raw.prepare('SELECT count(*) n FROM giving_entries').get().n).toBe(0);
+    expect(db._raw.prepare('SELECT count(*) n FROM giving_stax_unmatched').get().n).toBe(0);
+    db._raw.exec('DROP TRIGGER synthetic_failure');await recordStaxGift(db,gift);await recordStaxGift(db,gift);
+    expect(db._raw.prepare('SELECT sum(amount) n FROM giving_entries').get().n).toBe(1000);
+    expect(db._raw.prepare('SELECT count(*) n FROM giving_stax_unmatched').get().n).toBe(2);
+  });
+  it('rolls back ledger entries when the unmatched-row insert fails',async()=>{
+    const db=makeDb();await initDb(db);const fund=insertFund(db,'Synthetic fund');
+    db._raw.exec("CREATE TRIGGER synthetic_failure BEFORE INSERT ON giving_stax_unmatched BEGIN SELECT RAISE(ABORT,'synthetic auxiliary failure'); END");
+    await expect(recordStaxGift(db,{externalTxnId:'synthetic-aux',fundId:fund,amountCents:1000,...contact})).rejects.toThrow();
+    expect(db._raw.prepare('SELECT count(*) n FROM giving_entries').get().n).toBe(0);
+  });
+  it('records the exact partial refund and atomically caps cumulative concurrent refunds',async()=>{
+    const {recordStaxReversal}=await import('../src/stax-giving-mockup.js');const db=makeDb();await initDb(db);const fund=insertFund(db,'Synthetic fund');
+    await recordStaxGift(db,{externalTxnId:'original',fundId:fund,amountCents:10000,...contact});
+    const reverse=(id,amount)=>recordStaxReversal(db,{kind:'refund',eventTxnId:id,parentTxnId:'original',amountCents:amount});
+    await reverse('partial',2000);await reverse('partial',2000);
+    expect(db._raw.prepare("SELECT amount FROM giving_entries WHERE external_txn_id='partial'").get().amount).toBe(-2000);
+    const results=await Promise.all([reverse('remaining-a',6000),reverse('remaining-b',6000)]);
+    expect(results.filter(r=>r.error)).toHaveLength(1);
+    await reverse('last',2000);expect((await reverse('over',1)).error).toBeTruthy();
+    expect(db._raw.prepare('SELECT sum(amount) n FROM giving_entries').get().n).toBe(0);
+  });
+  it('records multi-fund reversals once and rolls back the event marker on split failure',async()=>{
+    const {recordStaxReversal}=await import('../src/stax-giving-mockup.js');const db=makeDb();await initDb(db);const a=insertFund(db,'A'),b=insertFund(db,'B');
+    await recordStaxGift(db,{externalTxnId:'original',splits:[{fundId:a,amountCents:600},{fundId:b,amountCents:400}],...contact});
+    const reversal={kind:'void',eventTxnId:'void-event',parentTxnId:'original',amountCents:1000};
+    db._raw.exec(`CREATE TRIGGER synthetic_failure BEFORE INSERT ON giving_entries WHEN NEW.amount<0 AND NEW.fund_id=${b} BEGIN SELECT RAISE(ABORT,'synthetic interruption'); END`);
+    await expect(recordStaxReversal(db,reversal)).rejects.toThrow();expect(db._raw.prepare('SELECT count(*) n FROM giving_stax_reversal_events').get().n).toBe(0);
+    db._raw.exec('DROP TRIGGER synthetic_failure');await recordStaxReversal(db,reversal);expect((await recordStaxReversal(db,reversal)).alreadyRecorded).toBe(true);
+    expect(db._raw.prepare('SELECT sum(amount) n FROM giving_entries').get().n).toBe(0);
+  });
+  for(const path of ['checkout','recurring'])it(`${path} replays a completed intent and serializes concurrent submissions`,async()=>{
+    const db=makeDb();await initDb(db);const fund=insertFund(db,'Synthetic fund'),body=payload(fund);let chargeCount=0,scheduleCount=0,providerKey;
+    global.fetch=vi.fn(async(url,init)=>{
+      if(String(url).endsWith('/charge')){chargeCount++;providerKey=JSON.parse(init.body).idempotency_id;await new Promise(r=>setTimeout(r,10));return Response.json({id:'synthetic-charge',success:true});}
+      if(String(url).includes('/invoice/schedule/')){scheduleCount++;return Response.json({id:'synthetic-schedule'});}
+      throw Error('unexpected provider call');
+    });
+    const responses=await Promise.all([post(db,live,path,body),post(db,live,path,body)]);expect(responses.map(r=>r.status).sort()).toEqual([200,409]);
+    const first=await responses.find(r=>r.status===200).json();const replay=await (await post(db,{...live},path,body)).json();expect(replay).toEqual(first);
+    expect(chargeCount).toBe(1);expect(providerKey).toBe(body.intent_id);expect(scheduleCount).toBe(path==='recurring'?1:0);
+    expect((await post(db,live,path,{...body,gifts:[{fund_id:fund,amount:'20.00'}]})).status).toBe(409);
+  });
+  it('keeps ambiguous processor success locked across retries and new caller instances',async()=>{
+    const db=makeDb();await initDb(db);const fund=insertFund(db,'Synthetic fund'),body=payload(fund);let effects=0;
+    global.fetch=vi.fn(async()=>{effects++;throw Error('response lost after processor success');});
+    expect((await post(db,live,'checkout',body)).status).toBe(409);expect((await post(db,{...live},'checkout',body)).status).toBe(409);
+    expect(effects).toBe(1);expect(db._raw.prepare('SELECT state FROM giving_stax_intents').get().state).toBe('pending');
   });
 });

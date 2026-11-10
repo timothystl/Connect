@@ -1,0 +1,47 @@
+name: Verify giving security schema
+on:
+  push:
+    branches: [fix/security-auth-giving-20261110]
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [inspect, apply]
+        default: inspect
+        required: true
+      expected_sha:
+        description: Exact main revision to inspect or apply
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify dispatched revision
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Inspect schema and optionally apply only additive security tables
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SCHEMA_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'inspect' }}
+        run: node scripts/verify-giving-security-schema.mjs

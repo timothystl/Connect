@@ -1,18 +1,8 @@
 // ── Stax Giving MOCKUP ──────────────────────────────────────────────────────
-// See docs/STAX_GIVING_MOCKUP.md for the full walkthrough. This is a prototype, not a shipped
-// feature: it runs entirely alongside the existing Tithe.ly → give.timothystl.org path (which
-// this file never touches), uses Stax SANDBOX credentials only, and every page it serves is
-// visibly labeled "MOCKUP". No production data or production Stax merchant account is read or
-// written by anything in this file.
-//
-// Webhook rigor deliberately mirrors childcare-portal's supabase/functions/stax-webhook — the
-// one piece of this scope that's "copy a working pattern, not new design": authenticate the
-// webhook (shared secret in the registered URL, since Stax does not sign payloads), re-fetch the
-// transaction from Stax's Core API rather than trust the POST body, and stay idempotent on
-// Stax's transaction id (via the idx_giving_external_txn unique index — see migration 0053).
-//
-// Gifts land in the EXISTING giving_entries ledger (see migration 0053's header comment) so a
-// donor who gives through both Tithe.ly and this mockup reads as one giving history, not two.
+// The separate Stax form supports test and explicitly enabled live modes. Configuration
+// must be complete before live checkout; demo gifts can only enter the test store.
+// Provider webhooks are authenticated and re-fetched. Ledger allocations and reversal
+// events use atomic D1 batches; payment attempts are persisted before charging.
 import { json, html, timingSafeEqual, esc } from './auth.js';
 import { normalizePhone } from './api-utils.js';
 import { sendBrevoTransactionalEmail } from './api-emails.js';
@@ -228,18 +218,28 @@ export async function recordStaxGift(db, g) {
   if (!externalTxnId) return { error: 'external_txn_id required' };
   const splits = (Array.isArray(g.splits) ? g.splits : [{ fundId: g.fundId, amountCents: g.amountCents }])
     .map(s => ({ fundId: parseInt(s.fundId), amountCents: Math.round(Number(s.amountCents)) }));
-  if (!splits.length || splits.some(s => !Number.isInteger(s.fundId) || !Number.isFinite(s.amountCents) || s.amountCents <= 0)) {
+  if (!splits.length || splits.some(s => !Number.isInteger(s.fundId) || !Number.isSafeInteger(s.amountCents) || s.amountCents <= 0)) {
     return { error: 'each gift needs a fund_id and a positive amount' };
   }
   if (new Set(splits.map(s => s.fundId)).size !== splits.length) {
     return { error: 'the same fund cannot appear twice in one gift' };
   }
+  if (!g.test && externalTxnId.startsWith('demo-')) return { error: 'Demo gifts cannot enter the live ledger' };
   if (g.test) return recordTestGift(db, g, externalTxnId, splits);
 
-  const existing = await db.prepare(
-    `SELECT id, person_id FROM giving_entries WHERE processor='stax' AND (external_txn_id=? OR external_txn_id LIKE ?) LIMIT 1`
-  ).bind(externalTxnId, externalTxnId + '-f%').first();
-  if (existing) return { entryId: existing.id, entryIds: [existing.id], alreadyRecorded: true, matched: existing.person_id != null, personId: existing.person_id || null };
+  const rowIds = splits.map(split => splits.length===1 ? externalTxnId : `${externalTxnId}-f${split.fundId}`);
+  const existingRows = async () => (await db.prepare(`SELECT id,person_id,fund_id,amount,external_txn_id
+    FROM giving_entries WHERE processor='stax' AND (external_txn_id=? OR substr(external_txn_id,1,?)=?)`)
+    .bind(externalTxnId,externalTxnId.length+2,externalTxnId+'-f').all()).results || [];
+  const prior = await existingRows();
+  // Never silently accept conflicting or incomplete historic allocations as a completed event.
+  if (prior.some(row => !splits.some((split,i) => row.external_txn_id===rowIds[i]
+      && row.fund_id===split.fundId && row.amount===split.amountCents))) {
+    return { error:'Existing Stax allocations differ; office reconciliation required' };
+  }
+  const complete = rows => ({entryId:rows[0].id,entryIds:rows.map(x=>x.id),alreadyRecorded:true,
+    matched:rows[0].person_id!=null,personId:rows[0].person_id||null});
+  if (prior.length===splits.length) return complete(prior);
 
   // Prefer a known returning-donor link (giving_stax_customers) over a fresh email/phone
   // lookup — a donor may give from a new device/browser (so no local cookie) or use a
@@ -254,6 +254,10 @@ export async function recordStaxGift(db, g) {
     if (link) person = link;
   }
   if (!person) person = await matchPersonForPayer(db, { email: g.payerEmail, phone: g.payerPhone });
+
+  if (prior.some(row => row.person_id !== (person ? person.id : null))) {
+    return { error: 'Existing Stax donor attribution differs; office reconciliation required' };
+  }
 
   const contributionDate = g.contributionDate || todayIso();
   const monthKey = contributionDate.slice(0, 7);
@@ -275,13 +279,14 @@ export async function recordStaxGift(db, g) {
   const payerLastName = g.payerLastName || '';
   const payerFullName = g.payerName || [payerFirstName, payerLastName].filter(Boolean).join(' ');
 
-  const entryIds = [];
+  const statements = [];
   // Fee coverage (if any) is a property of the WHOLE gift, not any one fund — attributed to the
   // first split's ledger row only, so it is counted once, not once per fund.
   for (let i = 0; i < splits.length; i++) {
     const split = splits[i];
     const rowTxnId = splits.length === 1 ? externalTxnId : `${externalTxnId}-f${split.fundId}`;
-    const er = await db.prepare(
+    if (prior.some(row=>row.external_txn_id===rowTxnId)) continue;
+    statements.push(db.prepare(
       `INSERT INTO giving_entries
          (batch_id, person_id, fund_id, amount, method, notes, contribution_date,
           fee_cents, source, processor, external_txn_id, reconcile_status)
@@ -291,23 +296,32 @@ export async function recordStaxGift(db, g) {
       g.method || 'card', g.note || '', contributionDate,
       i === 0 ? Math.max(0, Math.round(Number(g.feeCents) || 0)) : 0,
       'stax_mockup', 'stax', rowTxnId, 'recorded'
-    ).run();
-    const entryId = er.meta?.last_row_id;
-    entryIds.push(entryId);
+    ));
 
     if (!person) {
-      await db.prepare(
+      statements.push(db.prepare(
         `INSERT INTO giving_stax_unmatched
            (giving_entry_id, payer_name, payer_first_name, payer_last_name, payer_email, payer_phone,
             payer_address_line1, payer_city, payer_state, payer_zip, card_brand, card_last4, stax_customer_id, status)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'open')`
+         SELECT id,?,?,?,?,?,?,?,?,?,?,?,?,'open' FROM giving_entries WHERE processor='stax' AND external_txn_id=?`
       ).bind(
-        entryId, payerFullName, payerFirstName, payerLastName, g.payerEmail || '', g.payerPhone || '',
+        payerFullName, payerFirstName, payerLastName, g.payerEmail || '', g.payerPhone || '',
         g.payerAddressLine1 || '', g.payerCity || '', g.payerState || '', g.payerZip || '',
-        g.cardBrand || '', g.cardLast4 || '', g.staxCustomerId || ''
-      ).run();
+        g.cardBrand || '', g.cardLast4 || '', g.staxCustomerId || '', rowTxnId
+      ));
     }
   }
+
+  try {
+    // D1 batch is a transaction: every split and unmatched row commits, or none do.
+    await db.batch(statements);
+  } catch (error) {
+    const raced = await existingRows();
+    if (raced.length===splits.length && raced.every(row=>splits.some((split,i)=>
+        row.external_txn_id===rowIds[i] && row.fund_id===split.fundId && row.amount===split.amountCents))) return complete(raced);
+    throw error;
+  }
+  const entryIds = (await existingRows()).map(row=>row.id);
 
   if (person && g.staxCustomerId) {
     await db.prepare(
@@ -398,46 +412,49 @@ async function sendGiftReceiptEmail(db, env, g) {
 // original charge's) so it can never collide with — or be mistaken for a re-run of — the
 // original gift under the same idempotency index.
 //
-// This is a deliberately simplified mockup of childcare-portal's stax_record_reversal, which
-// does the equivalent bookkeeping as one atomic Postgres RPC against a richer ledger. A
-// production build of this feature should give giving_entries reversals the same care (a single
-// transaction, explicit handling of a partial refund, etc.) rather than this straight-line
-// insert. A multi-fund original (see recordStaxGift's splits) is only handled for a FULL
-// refund/void of every split — a partial refund against a multi-fund gift has no obvious single
-// right answer (which fund absorbs it?) and is refused rather than guessed at.
-async function recordStaxReversal(db, { kind, eventTxnId, parentTxnId, amountCents }) {
-  const existing = await db.prepare(
-    `SELECT id FROM giving_entries WHERE processor='stax' AND external_txn_id=?`
-  ).bind(eventTxnId).first();
-  if (existing) return { entryId: existing.id, alreadyRecorded: true };
-
-  const originals = (await db.prepare(
-    `SELECT id, person_id, fund_id, batch_id, amount FROM giving_entries
-      WHERE processor='stax' AND (external_txn_id=? OR external_txn_id LIKE ?)`
-  ).bind(parentTxnId, parentTxnId + '-f%').all()).results || [];
-  if (!originals.length) return { error: 'Original gift not found for this ' + kind };
-
-  const originalTotal = originals.reduce((sum, o) => sum + o.amount, 0);
-  if (originals.length > 1 && Math.abs(originalTotal) !== Math.abs(amountCents)) {
-    return { error: `Partial ${kind} of a multi-fund gift (#${originals.map(o => o.id).join(', #')}) needs manual handling — not supported in this mockup.` };
-  }
-
-  const entryIds = [];
+// Single-fund partial refunds use the verified amount and cumulative remaining balance.
+// Partial multi-fund refunds require an office allocation decision; do not guess a policy.
+// Event identity, all negative rows and cumulative checks commit in one D1 batch.
+export async function recordStaxReversal(db, { kind, eventTxnId, parentTxnId, amountCents }) {
+  if (!['refund','void'].includes(kind) || !eventTxnId || eventTxnId===parentTxnId
+      || !Number.isSafeInteger(amountCents) || amountCents<=0) return {error:'Invalid reversal'};
+  const event = await db.prepare('SELECT * FROM giving_stax_reversal_events WHERE event_id=?').bind(eventTxnId).first();
+  if (event) return event.parent_id===parentTxnId && event.amount_cents===amountCents && event.kind===kind
+    ? {alreadyRecorded:true} : {error:'Conflicting reversal event'};
+  const originals = (await db.prepare(`SELECT id,person_id,fund_id,batch_id,amount FROM giving_entries
+    WHERE processor='stax' AND (external_txn_id=? OR substr(external_txn_id,1,?)=?)`)
+    .bind(parentTxnId,parentTxnId.length+2,parentTxnId+'-f').all()).results || [];
+  if (!originals.length || originals.some(o=>o.amount<=0)) return {error:'Original gift unavailable or already adjusted; office reconciliation required'};
+  const total=originals.reduce((n,o)=>n+o.amount,0);
+  if (amountCents>total) return {error:'Reversal exceeds the original gift'};
+  if (originals.length>1 && amountCents!==total) return {error:'Partial multi-fund reversal requires office allocation'};
+  const prior=(await db.prepare(`SELECT id,amount,external_txn_id FROM giving_entries WHERE processor='stax'
+    AND (external_txn_id=? OR substr(external_txn_id,1,?)=?)`).bind(eventTxnId,eventTxnId.length+2,eventTxnId+'-f').all()).results||[];
+  // Legacy events without a transaction record require complete matching rows; never add
+  // another refund over an ambiguous historical event.
+  if (prior.length) return prior.length===originals.length && prior.reduce((n,o)=>n+o.amount,0)===-amountCents
+    ? {alreadyRecorded:true,entryIds:prior.map(o=>o.id)} : {error:'Incomplete historical reversal; office reconciliation required'};
+  const notes=originals.flatMap(o=>[`Stax refund of gift #${o.id} (mockup)`,`Stax void of gift #${o.id} (mockup)`]);
+  const marks=notes.map(()=>'?').join(',');
+  const statements=[db.prepare(`INSERT INTO giving_stax_reversal_events(event_id,parent_id,kind,amount_cents)
+    VALUES (?,?,?,CASE WHEN ? <= (SELECT COALESCE(SUM(amount),0) FROM giving_entries WHERE id IN (${originals.map(()=>'?').join(',')})) + (SELECT COALESCE(SUM(amount),0) FROM giving_entries
+      WHERE processor='stax' AND amount<0 AND notes IN (${marks})) THEN ? ELSE -1 END)`)
+    .bind(eventTxnId,parentTxnId,kind,amountCents,...originals.map(o=>o.id),...notes,amountCents)];
   for (const original of originals) {
-    const rowTxnId = originals.length === 1 ? eventTxnId : `${eventTxnId}-f${original.fund_id}`;
-    const er = await db.prepare(
-      `INSERT INTO giving_entries
-         (batch_id, person_id, fund_id, amount, method, notes, contribution_date,
-          source, processor, external_txn_id, reconcile_status)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`
-    ).bind(
-      original.batch_id, original.person_id, original.fund_id, -Math.abs(original.amount),
-      kind, `Stax ${kind} of gift #${original.id} (mockup)`, todayIso(),
-      'stax_mockup', 'stax', rowTxnId, 'recorded'
-    ).run();
-    entryIds.push(er.meta?.last_row_id);
+    statements.push(db.prepare(`INSERT INTO giving_entries
+      (batch_id,person_id,fund_id,amount,method,notes,contribution_date,source,processor,external_txn_id,reconcile_status)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(original.batch_id,original.person_id,original.fund_id,
+      -(originals.length===1?amountCents:original.amount),kind,`Stax ${kind} of gift #${original.id} (mockup)`,
+      todayIso(),'stax_mockup','stax',originals.length===1?eventTxnId:`${eventTxnId}-f${original.fund_id}`,'recorded'));
   }
-  return { entryId: entryIds[0], entryIds, alreadyRecorded: false, reversalOf: originals.map(o => o.id) };
+  try { await db.batch(statements); }
+  catch(error) {
+    const raced=await db.prepare('SELECT * FROM giving_stax_reversal_events WHERE event_id=?').bind(eventTxnId).first();
+    if(raced && raced.parent_id===parentTxnId && raced.amount_cents===amountCents && raced.kind===kind) return {alreadyRecorded:true};
+    if(String(error.message).includes('CHECK constraint failed')) return {error:'Cumulative reversal exceeds the remaining gift'};
+    throw error;
+  }
+  return {alreadyRecorded:false,reversalOf:originals.map(o=>o.id)};
 }
 
 // ── Verified webhook (sandbox) ──────────────────────────────────────────────
@@ -493,6 +510,8 @@ export async function handleStaxGivingWebhook(req, env, url) {
       splits = Array.isArray(parsed) && parsed.length ? parsed.map(s => ({ fundId: s.f, amountCents: s.a })) : null;
     } catch { splits = null; }
     if (!splits) splits = [{ fundId: meta.fund_id, amountCents }];
+    if (splits.some(s=>!Number.isSafeInteger(Number(s.amountCents)) || Number(s.amountCents)<=0)
+        || splits.reduce((n,s)=>n+Number(s.amountCents),0)!==amountCents) return json({error:'Verified allocation total mismatch'},409);
     const result = await recordStaxGift(db, {
       test: staxTestMode(env),
       externalTxnId: eventTransactionId,
@@ -643,7 +662,56 @@ function requireContact(contact) {
 }
 
 // ── Public API: funds list, checkout, recurring signup ──────────────────────
+// A client-generated random bearer identifies one donor intent across retries. D1 binds
+// it to the normalized gift before any processor call. Pending/ambiguous attempts are
+// never automatically retried, including after a Worker restart.
+async function intentFingerprint(body,path,env) {
+  const contact=contactFieldsFrom(body);
+  const data={path,live:!staxTestMode(env),contact,gifts:(body.gifts||[]).map(g=>({fund_id:String(g.fund_id),amount:String(g.amount)})),
+    cover_fees:!!body.cover_fees,interval:body.interval||'',memo:String(body.memo||'').trim().slice(0,500)};
+  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(data)));
+  return [...new Uint8Array(bytes)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
 export async function handleStaxGivingMockupPublicApi(req, env, url, method, path) {
+  if(method!=='POST' || !['checkout','recurring'].includes(path) || !staxMockupConfigured(env)) {
+    return handleStaxGivingAttempt(req,env,url,method,path);
+  }
+  const j=(body,status=200)=>json(body,status,corsHeadersFor(req));
+  let body;try{body=await req.clone().json();}catch{return j({error:'Invalid JSON',retry_safe:true},400);}
+  const id=String(body.intent_id||'');
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    return j({error:'Refresh this giving page before submitting your gift.',retry_safe:true},400);
+  }
+  if(!Array.isArray(body.gifts)) return j({error:'Choose a gift.',retry_safe:true},400);
+  const fingerprint=await intentFingerprint(body,path,env);
+  const claim=await env.DB.prepare(`INSERT INTO giving_stax_intents(id,fingerprint,state,created_at)
+    VALUES (?,?,'pending',?) ON CONFLICT(id) DO NOTHING RETURNING id`).bind(id,fingerprint,Date.now()).first();
+  if(!claim) {
+    const saved=await env.DB.prepare('SELECT fingerprint,state,response,status FROM giving_stax_intents WHERE id=?').bind(id).first();
+    if(!saved || saved.fingerprint!==fingerprint) return j({error:'This payment attempt belongs to different gift details. Contact the office before starting another.',pending:true},409);
+    if(saved.state==='complete') return j(JSON.parse(saved.response),saved.status);
+    return j({error:'This payment is still being checked. Do not start another gift; contact the church office.',pending:true},409);
+  }
+  const attempt={id,chargeStarted:false};
+  try {
+    const response=await handleStaxGivingAttempt(req,{...env,_staxIntent:attempt},url,method,path);
+    const result=await response.clone().json();
+    if(!response.ok && attempt.chargeStarted && !(response.status===402 && result.pending===false)) {
+      return j({error:'The payment outcome needs confirmation. Do not submit another gift; contact the church office.',pending:true},409);
+    }
+    const replay={...result,...(!response.ok?{retry_safe:true}:{})};
+    await env.DB.prepare(`UPDATE giving_stax_intents SET state='complete',response=?,status=? WHERE id=?`)
+      .bind(JSON.stringify(replay),response.status,id).run();
+    return j(replay,response.status);
+  } catch {
+    // The pending claim is deliberately retained. A timeout may mean the processor
+    // succeeded; neither a new request nor a restarted Worker may charge it again.
+    return j({error:'The payment outcome needs confirmation. Do not submit another gift; contact the church office.',pending:true},409);
+  }
+}
+
+async function handleStaxGivingAttempt(req, env, url, method, path) {
   const db = env.DB;
   const cors = corsHeadersFor(req);
   const j = (data, status = 200) => json(data, status, cors);
@@ -676,6 +744,11 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
   // and skip Stax's own address/AVS requirement (see getOrCreateStaxCustomerId's own comment).
   // The same customerId then rides through to /checkout or /recurring's stax_customer_id so only
   // ONE Stax customer is created per gift, not two.
+  if (method === 'POST' && ['stax-customer','checkout','recurring'].includes(path)
+      && !staxTestMode(env) && !staxMockupConfigured(env)) {
+    return j({ error: 'Online giving is temporarily unavailable. Please contact the church office.' }, 503);
+  }
+
   if (path === 'stax-customer' && method === 'POST') {
     if (!staxMockupConfigured(env)) return j({ customerId: null });
     let b; try { b = await req.json(); } catch { return j({ error: 'Invalid JSON' }, 400); }
@@ -706,7 +779,7 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
       // rest of the mockup (matching, review queue, statements) is fully clickable without live
       // sandbox keys. A synthetic transaction id keeps it distinguishable in the ledger.
       const result = await recordStaxGift(db, {
-      test: staxTestMode(env),
+      test: true,
         externalTxnId: `demo-${crypto.randomUUID()}`,
         splits, method: 'card', note: memo, ...contact,
       });
@@ -728,7 +801,8 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
       staxCustomerId = result.customerId;
     }
 
-    const idempotencyId = crypto.randomUUID();
+    const idempotencyId = env._staxIntent.id;
+    env._staxIntent.chargeStarted = true;
     const charge = await staxRequest(apiKey, '/charge', {
       method: 'POST',
       body: JSON.stringify({
@@ -809,7 +883,7 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
           `INSERT INTO giving_stax_recurring_schedules
              (person_id, fund_id, amount_cents, interval, stax_customer_id, stax_schedule_id, status, payer_name, payer_email, schedule_group, stax_error, test)
            VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?)`
-        ).bind(split.fundId, split.amountCents, interval, '', '', 'pending_manual_setup', payerName, contact.payerEmail, scheduleGroup, 'Demo mode — STAX_SANDBOX_API_KEY/STAX_SANDBOX_WEB_PAYMENTS_TOKEN not configured, no Stax call attempted', staxTestMode(env) ? 1 : 0).run();
+        ).bind(split.fundId, split.amountCents, interval, '', '', 'pending_manual_setup', payerName, contact.payerEmail, scheduleGroup, 'Demo mode — STAX_SANDBOX_API_KEY/STAX_SANDBOX_WEB_PAYMENTS_TOKEN not configured, no Stax call attempted', 1).run();
         ids.push(r.meta?.last_row_id);
       }
       return j({ ok: true, demo: true, ids, id: ids[0] });
@@ -837,7 +911,8 @@ export async function handleStaxGivingMockupPublicApi(req, env, url, method, pat
     // way /checkout does means a recurring signup is never worse than a one-time gift: there's
     // always a real charge, ledger entry, and receipt for what the donor just did, independent
     // of whether Stax's own recurring-schedule API call (further down) succeeds.
-    const idempotencyId = crypto.randomUUID();
+    const idempotencyId = env._staxIntent.id;
+    env._staxIntent.chargeStarted = true;
     const charge = await staxRequest(apiKey, '/charge', {
       method: 'POST',
       body: JSON.stringify({
@@ -1158,3 +1233,4 @@ export function renderStaxGivingMockupFundsAdminHtml() {
 </script>
 </body></html>`);
 }
+
