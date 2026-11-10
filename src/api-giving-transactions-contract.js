@@ -118,7 +118,7 @@ export async function respondWithGivingTransactionsV1(url, db) {
   const rows = (await db.prepare(
     `SELECT ge.id, COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date) AS gift_date,
             ge.batch_id, gb.batch_date, gb.description AS batch_description, gb.closed AS batch_closed,
-            ge.person_id, TRIM(COALESCE(p.first_name,'')||' '||COALESCE(p.last_name,'')) AS person_name,
+            ge.breeze_id, p.breeze_id AS person_breeze_id, f.breeze_id AS fund_breeze_id, ge.person_id, TRIM(COALESCE(p.first_name,'')||' '||COALESCE(p.last_name,'')) AS person_name,
             COALESCE(p.last_name,'')||' '||COALESCE(p.first_name,'') AS person_sort,
             COALESCE(p.envelope_number,'') AS envelope_number,
             ge.fund_id, f.name AS fund_name, ge.method, ge.check_number, ge.notes, ge.amount,
@@ -146,7 +146,7 @@ export async function respondWithGivingTransactionsV1(url, db) {
        ${FROM} WHERE ${sql} GROUP BY ge.method ORDER BY total_cents DESC`
   ).bind(...binds).all()).results || [];
   const byGiver = (await db.prepare(
-    `SELECT ge.person_id, TRIM(COALESCE(p.first_name,'')||' '||COALESCE(p.last_name,'')) AS person_name,
+    `SELECT ge.breeze_id, p.breeze_id AS person_breeze_id, f.breeze_id AS fund_breeze_id, ge.person_id, TRIM(COALESCE(p.first_name,'')||' '||COALESCE(p.last_name,'')) AS person_name,
             COALESCE(p.envelope_number,'') AS envelope_number, COUNT(*) AS gift_count,
             COALESCE(SUM(ge.amount),0) AS total_cents, MAX(COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date)) AS last_gift_date
        ${FROM} WHERE ${sql} GROUP BY ge.person_id ORDER BY ${GIVER_SORTS[f.giver_sort]} LIMIT 500`
@@ -166,7 +166,7 @@ export async function respondWithGivingTransactionsV1(url, db) {
     const gift = await db.prepare(
       `SELECT ge.id, COALESCE(NULLIF(ge.contribution_date,''), gb.batch_date) AS gift_date,
               ge.batch_id, gb.batch_date, gb.description AS batch_description, gb.closed AS batch_closed,
-              ge.person_id, TRIM(COALESCE(p.first_name,'')||' '||COALESCE(p.last_name,'')) AS person_name,
+              ge.breeze_id, p.breeze_id AS person_breeze_id, f.breeze_id AS fund_breeze_id, ge.person_id, TRIM(COALESCE(p.first_name,'')||' '||COALESCE(p.last_name,'')) AS person_name,
               COALESCE(p.envelope_number,'') AS envelope_number,
               ge.fund_id, f.name AS fund_name, ge.method, ge.check_number, ge.notes, ge.amount,
               ge.original_amount_cents, ge.refunded_cents, ge.voided_at, ge.void_reason,

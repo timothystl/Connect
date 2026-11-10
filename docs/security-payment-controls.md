@@ -12,7 +12,7 @@ Verified single-fund partial refunds reverse only the verified amount. A transac
 
 ## Release and verification
 
-Deploy the companion Website giving form before Connect. Older open forms without an intent fail closed and must be refreshed. Connect runtime initialization includes the same additive tables/indexes as migrations 0065–0067 and changes its schema fingerprint; check production schema state before release. No existing table is dropped or rewritten. Connect release version is 0.1.0-alpha.25.
+Deploy the companion Website giving form before Connect. Older open forms without an intent fail closed and must be refreshed. Connect runtime initialization includes the same additive tables/indexes as migrations 0066–0068 and changes its schema fingerprint; check production schema state before release. No existing table is dropped or rewritten. Connect release version is 0.1.0-alpha.26.
 
 Regression coverage exercises concurrent code/SSO consumption, fixed expiration, incomplete configuration, transaction rollback, cumulative refunds, simultaneous/replayed checkout and recurring requests, and a lost processor response. Browser-script tests cover double submission, reload/retry identity and unavailable session storage. Actual processor sandbox behavior, authenticated production user journeys and historical financial reconciliation remain separate operational checks; local mocks cannot establish those outcomes.
 

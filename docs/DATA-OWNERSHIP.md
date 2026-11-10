@@ -60,3 +60,13 @@ contact fields, demographics, household/membership, Giving, roles, or permission
 separate per consumer and explicitly carry `authorizationGranted: false`; correlation never grants
 access. The schema and examples do not create a lookup, matching flow, account link, shared login,
 database mapping, or production identity traffic.
+
+## Giving import interface
+
+Official Breeze and CSV imports run from Finance's Data & Imports → Giving imports, using the
+admin-only `giving-import-v1` contract. Connect remains the authoritative giving backend and owns
+people and permissions. The former immediate import endpoints return a relocation message.
+`giving_import_jobs`, `giving_import_history`, `giving_import_people` and `giving_import_guards`
+implement preview, atomic resumable application, provenance and donor backfill. Missing payments are
+not automatically deleted; protected gifts retain local corrections and deposit links. Deploy Connect
+before the companion Finance interface. No real contributions are imported as part of deployment.

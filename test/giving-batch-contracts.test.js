@@ -31,6 +31,7 @@ function makeTestDb() {
         async all() { return { results: sqlite.prepare(sql).all() }; },
       };
     },
+    async batch(stmts) { sqlite.exec('BEGIN'); try { const out=[]; for (const st of stmts) out.push(await st.run()); sqlite.exec('COMMIT'); return out; } catch(e) { sqlite.exec('ROLLBACK'); throw e; } },
     _raw: sqlite,
   };
 }
@@ -109,6 +110,23 @@ describe('Gift Entry batch contracts (giving-batch-*-v1)', () => {
     db._raw.prepare("INSERT INTO people (first_name, last_name, envelope_number) VALUES ('Walter','Krause','212'), ('Anna','Schreiber','')").run();
     return { db, general, missions };
   }
+
+  it('requires an active administrator and a verified identity for import previews', async () => {
+    const { db } = setup();
+    const path = '/api/contracts/giving-import-v1';
+    expect((await call(db, path)).status).toBe(403);
+    expect((await call(db, path, { email: 'carl@timothystl.org' })).status).toBe(403);
+    insertUser(db, { username: 'admin', email: 'admin@example.test', role: 'admin' });
+    const denied = new Request('https://connect.example'+path, { headers: { 'X-Contract-Key': 'right-secret', 'Cf-Access-Jwt-Assertion': 'forged' } });
+    expect((await handleContractsServiceApi(denied, env(db), path)).status).toBe(401);
+    // Schema creation only needs run() in this harness; supplying one models D1 prepare().run().
+    const originalPrepare = db.prepare.bind(db);
+    db.prepare = sql => { const statement = originalPrepare(sql); return { ...statement, run: () => statement.bind().run() }; };
+    const preview = await call(db, path, { email: 'admin@example.test', method: 'POST', body: { op: 'preview', source: 'csv', csv: 'Payment ID,Date,Amount,Fund(s)\n123,2026-01-01,12,10 General' } });
+    expect(preview.status).toBe(200);
+    expect((await preview.json()).total).toBe(1);
+    expect(db._raw.prepare('SELECT COUNT(*) AS n FROM giving_entries').get().n).toBe(0);
+  });
 
   it('creates a batch, adds a split gift and loose cash, and reports totals by fund and method', async () => {
     const { db, general, missions } = setup();
