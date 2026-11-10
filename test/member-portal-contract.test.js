@@ -390,3 +390,45 @@ describe('member sign-in link into Connect', () => {
     expect(db._raw.prepare(`SELECT COUNT(*) AS n FROM app_users WHERE LOWER(email)='v@example.com'`).get().n).toBe(0);
   });
 });
+
+
+describe('atomic member sign-in boundaries', () => {
+  it('counts every simultaneous wrong guess and never refreshes the deadline', async () => {
+    addPerson('Synthetic','Member','atomic@example.invalid');
+    await call(env,{op:'request_code',email:'atomic@example.invalid',client:'synthetic'});
+    const real=lastCode(), wrong=real==='000000'?'111111':'000000';
+    const before=db._raw.prepare('SELECT expires_at FROM member_login_challenges').get().expires_at;
+    const responses=await Promise.all(Array.from({length:20},()=>call({...env}, {op:'verify_code',email:'atomic@example.invalid',code:wrong}).then(r=>r.json())));
+    expect(responses.filter(r=>r.reason==='wrong')).toHaveLength(4);
+    expect(db._raw.prepare('SELECT tries,expires_at FROM member_login_challenges').get()).toMatchObject({tries:5,expires_at:before});
+    expect((await (await call(env,{op:'verify_code',email:'atomic@example.invalid',code:real})).json()).ok).toBe(false);
+  });
+  it('admits one of twenty simultaneous valid-code requests across caller instances', async () => {
+    addPerson('Synthetic','Member','atomic@example.invalid');
+    await call(env,{op:'request_code',email:'atomic@example.invalid',client:'synthetic'});
+    const code=lastCode();
+    const responses=await Promise.all(Array.from({length:20},()=>call({...env},{op:'verify_code',email:'atomic@example.invalid',code}).then(r=>r.json())));
+    expect(responses.filter(r=>r.ok)).toHaveLength(1);
+  });
+  it('expires at issuance plus fifteen minutes even after a late wrong guess', async () => {
+    addPerson('Synthetic','Member','atomic@example.invalid');
+    const initial=Date.now(); const clock=vi.spyOn(Date,'now').mockReturnValue(initial);
+    try {
+      await call(env,{op:'request_code',email:'atomic@example.invalid',client:'synthetic'});
+      const code=lastCode();clock.mockReturnValue(initial+14*60*1000);
+      await call(env,{op:'verify_code',email:'atomic@example.invalid',code:code==='000000'?'111111':'000000'});
+      clock.mockReturnValue(initial+15*60*1000);
+      expect(await (await call(env,{op:'verify_code',email:'atomic@example.invalid',code})).json()).toEqual({ok:false,reason:'expired'});
+    } finally {clock.mockRestore();}
+  });
+  it('limits simultaneous code requests atomically', async () => {
+    const responses=await Promise.all(Array.from({length:25},(_,i)=>call({...env},{op:'request_code',email:'unknown@example.invalid',client:'client-'+i})));
+    expect(responses.filter(r=>r.status===200)).toHaveLength(5);
+    expect(sent).toHaveLength(0);
+  });
+  it('spends an SSO link once under simultaneous consumers', async () => {
+    const token=await ssoToken('synthetic@example.invalid');
+    const results=await Promise.all(Array.from({length:20},()=>acceptMemberSsoLink({...env},token)));
+    expect(results.filter(Boolean)).toEqual(['synthetic@example.invalid']);
+  });
+});
