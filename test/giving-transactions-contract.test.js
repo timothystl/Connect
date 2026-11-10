@@ -32,7 +32,7 @@ function makeTestDb() {
         _sql: sql,
       };
     },
-    async batch(stmts) { for (const st of stmts) await st.run(); return []; },
+    async batch(stmts) { sqlite.exec('BEGIN'); try { const out=[]; for (const st of stmts) out.push(await st.run()); sqlite.exec('COMMIT'); return out; } catch(e) { sqlite.exec('ROLLBACK'); throw e; } },
     _raw: sqlite,
   };
 }

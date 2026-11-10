@@ -58,6 +58,8 @@ async function ingestBreezePhoto(env, breezeId, breezeUrl) {
 }
 
 export async function handleImportApi(req, env, url, method, seg, db, isAdmin, isFinance, isStaff, canEdit) {
+  if (['import/giving-csv', 'import/breeze-giving', 'import/breeze-giving-csv'].includes(seg)) return json({ error: 'Giving imports now run in Finance. Open Data & Imports, then Giving imports to preview and apply.', movedTo: 'https://finance.timothystl.org/?section=data&page=giving-imports' }, 409);
+
 
 // ── Attendance TSV Import ─────────────────────────────────────────
 if (seg === 'import/attendance-tsv' && method === 'POST') {
