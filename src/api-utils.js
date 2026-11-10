@@ -2119,7 +2119,7 @@ async function validateGoogle(addr, apiKey) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    return { ok: false, error: err.error?.message || ('Google error ' + res.status) };
+    return { ok: false, status: res.status, error: err.error?.message || ('Google error ' + res.status) };
   }
   const data = await res.json();
   const result = data.result || {};
@@ -2144,7 +2144,15 @@ async function validateGoogle(addr, apiKey) {
 
 async function validateAddressCore(addr, env) {
   const a = cleanAddr(addr);
-  if (env.GOOGLE_ADDRESS_API_KEY) return validateGoogle(a, env.GOOGLE_ADDRESS_API_KEY);
+  if (env.GOOGLE_ADDRESS_API_KEY) {
+    const g = await validateGoogle(a, env.GOOGLE_ADDRESS_API_KEY);
+    // A refused or broken key (API not enabled, key restricted, billing off, quota, outage) is a
+    // configuration problem, not an answer about this address. Fall back to the Census check so
+    // staff can still validate; a 400 means Google read the address and rejected it, so keep it.
+    if (g.ok || g.status === 400) return g;
+    console.error('Google address validation unavailable (' + g.status + '): ' + g.error);
+    return validateCensus(a);
+  }
   return validateCensus(a);
 }
 

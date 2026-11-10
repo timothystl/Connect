@@ -44,7 +44,12 @@ export function wrapDbForAttribution(db) {
           return target.prepare(...args);
         };
       }
-      return Reflect.get(target, prop, receiver);
+      // Every other method (batch, exec, dump, withSession…) runs against the real binding.
+      // Called through the Proxy, `this` would be the Proxy, and the Workers runtime rejects a
+      // D1 method invoked on anything but the native object — which broke every db.batch() in
+      // production (people search, person saves) while local mocks kept passing.
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
     },
   });
   return { db: wrapped, counter };

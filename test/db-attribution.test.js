@@ -33,6 +33,21 @@ describe('wrapDbForAttribution', () => {
     expect(await stmt.run()).toEqual({ meta: {} });
   });
 
+  it('runs batch() and other methods on the real binding, not the Proxy', async () => {
+    // The Workers runtime rejects a D1 method whose `this` is not the native binding. Called
+    // through the Proxy, db.batch() failed in production (people search, person saves) while
+    // plain-object mocks passed. A class with a private field reproduces that check here.
+    class NativeLikeDb {
+      #brand = true;
+      prepare() { return {}; }
+      async batch(stmts) { if (!this.#brand) throw new Error('Illegal invocation'); return stmts.map(() => ({ results: [] })); }
+      async exec() { if (!this.#brand) throw new Error('Illegal invocation'); return { count: 0 }; }
+    }
+    const { db } = wrapDbForAttribution(new NativeLikeDb());
+    await expect(db.batch([db.prepare('SELECT 1')])).resolves.toEqual([{ results: [] }]);
+    await expect(db.exec('SELECT 1')).resolves.toEqual({ count: 0 });
+  });
+
   it('passes through an undefined db without throwing, counter stays at zero', () => {
     const { db, counter } = wrapDbForAttribution(undefined);
     expect(db).toBeUndefined();

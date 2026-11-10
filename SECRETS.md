@@ -121,7 +121,7 @@ map across all repositories is [docs/CLOUDFLARE_TOKENS.md](docs/CLOUDFLARE_TOKEN
 These are not required for the app to function but unlock additional capabilities.
 
 ### `GOOGLE_ADDRESS_API_KEY`
-- **Purpose**: Google Address Validation API — first choice for address validation (used for both the single-person "Verify Address" button and bulk validation). No meaningful rate limit at church scale. Falls back to the free Census Bureau geocoder if absent (a Census result confirms a street match but not deliverability). USPS and Lob were retired 2026-09-29; this key is now the only paid/keyed address check, so confirm it is set.
+- **Purpose**: Google Address Validation API — first choice for address validation (used for both the single-person "Verify Address" button and bulk validation). No meaningful rate limit at church scale. Falls back to the free Census Bureau geocoder if absent, or if Google refuses the key (permission, quota, or outage errors — logged as "Google address validation unavailable"); a Census result confirms a street match but not deliverability. USPS and Lob were retired 2026-09-29; this key is now the only paid/keyed address check, so confirm it is set.
 - **Provision**: Google Cloud Console → create/select a project → enable billing → enable the "Address Validation API" → Credentials → Create API Key → restrict the key to the Address Validation API only. Free tier: 10,000 calls/month.
 - **Set**: `wrangler secret put GOOGLE_ADDRESS_API_KEY`.
 - **Risk if leaked**: Free-tier quota abuse; restrict the key server-side (API restriction) to limit blast radius.
