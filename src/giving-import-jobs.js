@@ -78,7 +78,13 @@ export async function applyImport(db, id, actor, expectedCursor) {
   const items = JSON.parse(job.payload);
   if (job.cursor !== expectedCursor) return readImport(db, id, false);
   if (job.cursor === items.length) return readImport(db, id, false);
-  const stop = Math.min(job.cursor + 10, items.length);
+  let stop = job.cursor, fundCount = 0;
+  while (stop < items.length && stop < job.cursor + 10) {
+    const next = items[stop].gift.funds.length;
+    if (stop > job.cursor && fundCount + next > 100) break;
+    fundCount += next;
+    stop++;
+  }
   const statements = [];
   const guard = (sql, args) => {
     const key = crypto.randomUUID();
@@ -94,7 +100,7 @@ export async function applyImport(db, id, actor, expectedCursor) {
     }
     guard(`SELECT CASE WHEN COUNT(*)=? THEN 1 ELSE 0 END FROM giving_entries ge WHERE ${match}`, [before.length, ...argsFor(g.id)]);
     for (const r of before) {
-      guard(`SELECT CASE WHEN COUNT(*)=1 THEN 1 ELSE 0 END FROM giving_entries ge WHERE id=? AND amount=? AND fund_id=? AND person_id IS ? AND contribution_date IS ? AND method IS ? AND batch_id=? AND COALESCE(voided_at,'')='' AND COALESCE(refunded_cents,0)=0 AND COALESCE(deposit_id,0)=0 AND NOT EXISTS(SELECT 1 FROM giving_entry_changes c WHERE c.entry_id=ge.id) AND NOT EXISTS(SELECT 1 FROM giving_deposit_lines dl WHERE dl.batch_id=ge.batch_id)`, [r.id, r.amount, r.fund_id, r.person_id, r.contribution_date, r.method, r.batch_id]);
+      guard(`SELECT CASE WHEN COUNT(*)=1 THEN 1 ELSE 0 END FROM giving_entries ge WHERE id=? AND amount=? AND fund_id=? AND person_id IS ? AND contribution_date IS ? AND method IS ? AND batch_id=? AND notes IS ? AND check_number IS ? AND fee_cents IS ? AND COALESCE(external_txn_id,'')='' AND COALESCE(reconcile_status,'')!='reconciled' AND COALESCE(voided_at,'')='' AND COALESCE(refunded_cents,0)=0 AND COALESCE(deposit_id,0)=0 AND NOT EXISTS(SELECT 1 FROM giving_entry_changes c WHERE c.entry_id=ge.id) AND NOT EXISTS(SELECT 1 FROM giving_deposit_lines dl WHERE dl.batch_id=ge.batch_id)`, [r.id, r.amount, r.fund_id, r.person_id, r.contribution_date, r.method, r.batch_id, r.notes, r.check_number, r.fee_cents]);
     }
     const batchDescription = `Breeze ${g.date}${g.batch ? ` #${g.batch}` : ''}`;
     const batchId = before[0]?.batch_id;
