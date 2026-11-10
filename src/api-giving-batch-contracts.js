@@ -179,15 +179,15 @@ export async function addBatchGift(db, body) {
   }
   const check = String(body.check_number || '').trim().slice(0, 40);
   const memo = String(body.notes || '').trim().slice(0, 300);
-  const ids = [];
+  const statements = [];
   for (const s of splits) {
-    const r = await db.prepare(
+    statements.push(db.prepare(
       `INSERT INTO giving_entries (batch_id,person_id,fund_id,amount,method,check_number,notes,contribution_date)
        VALUES (?,?,?,?,?,?,?,?)`
-    ).bind(batchId, personId, s.fund_id, s.cents, method, check, memo, date).run();
-    ids.push(r.meta?.last_row_id);
+    ).bind(batchId, personId, s.fund_id, s.cents, method, check, memo, date));
   }
-  return { ok: true, ids, batch_id: batchId };
+  const results = await db.batch(statements);
+  return { ok: true, ids: results.map(r => r.meta?.last_row_id), batch_id: batchId };
 }
 
 export async function applyGivingBatchWrite(db, body, email, env = {}) {
