@@ -1633,6 +1633,14 @@ export const HTML_TABS_2 = String.raw`
       <div id="fd-age-range"></div>
     </div>
     <div style="margin-top:20px;">
+      <h3 class="ppl-qv-section-lbl">Baptized</h3>
+      <div id="fd-baptized"></div>
+    </div>
+    <div style="margin-top:20px;">
+      <h3 class="ppl-qv-section-lbl">Confirmed</h3>
+      <div id="fd-confirmed"></div>
+    </div>
+    <div style="margin-top:20px;">
       <h3 class="ppl-qv-section-lbl">Missing information</h3>
       <div id="fd-missing"></div>
     </div>
