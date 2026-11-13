@@ -39,6 +39,8 @@ function loadPeople(resetPage) {
   if (peopleFilter.ageRange) params.set('age_range', peopleFilter.ageRange);
   if (peopleFilter.householdSize) params.set('household_size', peopleFilter.householdSize);
   if (peopleFilter.sacrament) params.set('sacrament', peopleFilter.sacrament);
+  if (peopleFilter.baptized) params.set('baptized', peopleFilter.baptized);
+  if (peopleFilter.confirmed) params.set('confirmed', peopleFilter.confirmed);
   params.set('limit', peopleFilter.limit);
   params.set('offset', peopleFilter.offset);
   params.set('sort', peopleFilter.sort || 'last_name');
@@ -130,7 +132,7 @@ function renderPeopleDesktop(people, failed) {
     return;
   }
   if (!people.length) {
-    var filtered = !!(peopleFilter.q || peopleFilter.tagIds.length || peopleFilter.missingFields.length || peopleFilter.gender || peopleFilter.ageRange || peopleFilter.householdSize || peopleFilter.sacrament);
+    var filtered = !!(peopleFilter.q || peopleFilter.tagIds.length || peopleFilter.missingFields.length || peopleFilter.gender || peopleFilter.ageRange || peopleFilter.householdSize || peopleFilter.sacrament || peopleFilter.baptized || peopleFilter.confirmed);
     c.innerHTML = '<div class="os-state"><div class="os-state-title">' + (_archiveView ? 'No archived people match.' : filtered ? 'No people match.' : 'No people yet.') + '</div>'
       + '<div class="os-state-msg">' + (filtered ? 'Try another search, or clear the filters.' : (_archiveView ? 'Archived and deceased people will appear here.' : 'Add the first person to start the directory.')) + '</div>'
       + (filtered ? '<button class="btn-secondary" onclick="clearPeopleSearchAndFilters()">Clear search and filters</button>' : '') + '</div>';

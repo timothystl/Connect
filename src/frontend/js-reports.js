@@ -197,6 +197,8 @@ function drillPeopleInsights(opts) {
   peopleFilter.ageRange = '';
   peopleFilter.householdSize = '';
   peopleFilter.sacrament = '';
+  peopleFilter.baptized = '';
+  peopleFilter.confirmed = '';
   peopleFilter.mt = (_peopleInsightsScope === 'member') ? 'member' : '';
   peopleFilter.offset = 0;
   if (opts.gender)        peopleFilter.gender = opts.gender;

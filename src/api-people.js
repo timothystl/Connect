@@ -374,6 +374,13 @@ if (seg === 'people' && method === 'GET') {
     confirmed_unknown: `(p.confirmed=0)`,
   };
   if (sacramentClauses[sacrament]) where += ' AND ' + sacramentClauses[sacrament];
+  // Independent Baptized / Confirmed filters from the People filter drawer.
+  // yes = 1, no = 2 (explicit No), unknown = 0 (nothing recorded).
+  const sacramentStatus = { yes: 1, no: 2, unknown: 0 };
+  for (const col of ['baptized', 'confirmed']) {
+    const v = url.searchParams.get(col) || '';
+    if (v in sacramentStatus) where += ` AND p.${col}=${sacramentStatus[v]}`;
+  }
   // Paged results.
   //
   // Perf: the search predicate is a leading-wildcard LIKE across 7 columns, which

@@ -568,3 +568,30 @@ describe('cold-start backfill: a date on file means yes', () => {
     expect(sqlite.prepare('SELECT baptized FROM people').get().baptized).toBe(SACRAMENT_NO);
   });
 });
+
+describe('GET /people filters by Baptized / Confirmed status', () => {
+  it('separates Yes, No and Not recorded for each sacrament independently', async () => {
+    const sqlite = realSchema();
+    const db = makeDb(sqlite);
+    const people = [
+      ['Both', 1, 1], ['BapOnly', 1, 2], ['ConfOnly', 0, 1], ['Unknown', 0, 0], ['NoNo', 2, 2],
+    ];
+    for (const [first, b, c] of people) {
+      const r = await callPeople(db, 'POST', 'people', { first_name: first, last_name: 'T', baptized: b, confirmed: c });
+      expect(r.status).toBe(200);
+    }
+    const names = async (qs) => {
+      const req = new Request('https://x/admin/api/people?' + qs);
+      const res = await handlePeopleApi(req, {}, new URL(req.url), 'GET', 'people', db,
+        true, true, true, true, true, 'admin');
+      return ((await res.json()).people || []).map(p => p.first_name).sort();
+    };
+    expect(await names('confirmed=yes')).toEqual(['Both', 'ConfOnly']);
+    expect(await names('confirmed=no')).toEqual(['BapOnly', 'NoNo']);
+    expect(await names('confirmed=unknown')).toEqual(['Unknown']);
+    expect(await names('baptized=yes')).toEqual(['BapOnly', 'Both']);
+    expect(await names('baptized=unknown')).toEqual(['ConfOnly', 'Unknown']);
+    expect(await names('baptized=yes&confirmed=yes')).toEqual(['Both']);
+    expect(await names('baptized=bogus')).toHaveLength(5);
+  });
+});
