@@ -1620,6 +1620,14 @@ export const HTML_TABS_2 = String.raw`
       <h3 class="ppl-qv-section-lbl">Member type</h3>
       <div id="fd-member-types"></div>
     </div>
+    <div style="margin-bottom:20px;">
+      <h3 class="ppl-qv-section-lbl">Baptized</h3>
+      <div id="fd-baptized"></div>
+    </div>
+    <div style="margin-bottom:20px;">
+      <h3 class="ppl-qv-section-lbl">Confirmed</h3>
+      <div id="fd-confirmed"></div>
+    </div>
     <div>
       <h3 class="ppl-qv-section-lbl">Tags</h3>
       <div id="fd-tags"></div>
@@ -1631,14 +1639,6 @@ export const HTML_TABS_2 = String.raw`
     <div style="margin-top:20px;">
       <h3 class="ppl-qv-section-lbl">Age Range</h3>
       <div id="fd-age-range"></div>
-    </div>
-    <div style="margin-top:20px;">
-      <h3 class="ppl-qv-section-lbl">Baptized</h3>
-      <div id="fd-baptized"></div>
-    </div>
-    <div style="margin-top:20px;">
-      <h3 class="ppl-qv-section-lbl">Confirmed</h3>
-      <div id="fd-confirmed"></div>
     </div>
     <div style="margin-top:20px;">
       <h3 class="ppl-qv-section-lbl">Missing information</h3>
