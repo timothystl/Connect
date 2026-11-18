@@ -846,6 +846,7 @@ function pvfBuildRegistry(p) {
     {id:'confirmed', label:'Confirmed', type:'select', options:sacramentOpts, blankVals:['0','']},
     {id:'confirmation_date', label:'Confirmation date', type:'date', sub:dateSub},
     {id:'anniversary_date', label:'Anniversary', type:'date', sub:dateSub},
+    {id:'death_date', label:'Date of death', type:'date'},
     {id:'envelope_number', label:'Envelope #', type:'text'},
     {id:'public_directory', label:'In the directory', checkLabel:'Include in the member directory and printed directory', type:'check'},
     {id:'dir_hide_address', label:'Hide address', checkLabel:'Hide address', type:'check'},
@@ -1407,6 +1408,9 @@ function pvfRenderInfo(p) {
   // server already strips the underlying data (memberSafeView); these cards would otherwise
   // render as empty shells with real headings.
   var churchIds = ['baptized','baptism_date','confirmed','confirmation_date','anniversary_date','envelope_number'];
+  // Date of death shows (and is editable) only for someone already marked deceased. "Mark
+  // deceased" stamps today's date, so this is where the real date gets corrected.
+  if (p.status === 'deceased' || p.deceased || p.death_date) churchIds = churchIds.concat(['death_date']);
   var demoCard = isMemberView ? '' : section('church', 'Church life', churchIds, rows(churchIds));
   var tagsCard = isMemberView ? '' : pvfCard('tags', 'Tags', { pad:true, body: pvfTagsBody(p) });
   var dirIds = ['public_directory','dir_hide_address','dir_hide_phone','dir_hide_email','dir_hide_dob','dir_hide_anniversary'];
@@ -2734,7 +2738,7 @@ function unarchivePerson(id) {
   }).catch(function(err) { if (err.message !== 'Unauthorized') alert('Error: ' + err.message); });
 }
 function markPersonDeceased(id) {
-  if (!confirm('Mark this person as deceased? Today will be set as their death date. They will be archived, removed from anniversary cards, and their giving history is preserved.')) return;
+  if (!confirm('Mark this person as deceased? Today will be set as their death date (you can correct it afterward under Church life \u2192 Edit). They will be archived, removed from anniversary cards, and their giving history is preserved.')) return;
   api('/admin/api/people/' + id + '/deceased', {method:'POST'}).then(function(r) {
     if (r.ok) { openPersonDetail(id); loadPeople(); }
     else alert('Error: ' + (r.error || 'unknown'));
