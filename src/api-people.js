@@ -4,6 +4,7 @@ import { brevoUpsertContact, brevoBulkSync, brevoGetListContacts, brevoContactSt
 import { disambiguateHHName, normalizePhone, randHex, escLite, authCardPage, archiveEnvelope,
          normalizeSacramentFlag, SACRAMENT_YES, SACRAMENT_NO, isPartialDate } from './api-utils.js';
 import { makeBreezeClient } from './breeze.js';
+import { buildMailingLabels, renderMailingLabelsPage, MAX_LABEL_IDS } from './mailing-labels.js';
 
 // ── Member-directory view (Connect) ───────────────────────────────────────────
 // Explicit allowlist (not a blacklist) for what a role='member' viewer sees of another
@@ -512,6 +513,32 @@ if (seg === 'people/bulk-member-type' && method === 'POST') {
     await db.prepare(`UPDATE people SET member_type=? WHERE id IN (${placeholders})`).bind(mt, ...chunk).run();
   }
   return json({ ok: true, updated: ids.length });
+}
+
+// Printable mailing labels (Avery 5160 layout) for the people chosen in Select mode.
+// GET people/mailing-labels?ids=1,2,3[&skip=N] — skip leaves the first N labels blank
+// for a partly used sheet. Staff only: members never see other people's addresses here.
+if (seg === 'people/mailing-labels' && method === 'GET') {
+  if (role === 'member' || !(isStaff || isAdmin || canEdit)) return json({ error: 'Insufficient permissions' }, 403);
+  const ids = [...new Set((url.searchParams.get('ids') || '').split(',').map(Number)
+    .filter(n => Number.isInteger(n) && n > 0))].slice(0, MAX_LABEL_IDS);
+  let rows = [];
+  const CHUNK = 80;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const ph = chunk.map(() => '?').join(',');
+    const r = await db.prepare(
+      `SELECT p.id, p.first_name, p.last_name, p.household_id, p.family_role, p.death_date, p.deceased, p.status,
+              p.address1, p.address2, p.city, p.state, p.zip,
+              h.address1 AS hh_address1, h.address2 AS hh_address2, h.city AS hh_city,
+              h.state AS hh_state, h.zip AS hh_zip
+       FROM people p LEFT JOIN households h ON h.id = p.household_id
+       WHERE p.id IN (${ph})`
+    ).bind(...chunk).all();
+    rows = rows.concat(r.results || []);
+  }
+  const html = renderMailingLabelsPage(buildMailingLabels(rows), url.searchParams.get('skip'));
+  return new Response(html, { headers: { 'Content-Type': 'text/html;charset=UTF-8', 'Cache-Control': 'no-store' } });
 }
 
 // Bulk apply tag changes across many people in a single request.
