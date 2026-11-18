@@ -35,6 +35,7 @@ export const HTML_TABS_1 = String.raw`<!-- ═══ HOME / DASHBOARD TAB ══
       <button class="btn-secondary" onclick="openBulkTagsPanel()">Tags</button>
       <button class="btn-secondary" onclick="openBulkCommPanel()">Communications</button>
       <button class="btn-secondary" onclick="openBulkSacramentPanel()">Sacraments</button>
+      <button class="btn-secondary" onclick="printMailingLabels()" title="Print mailing labels (Avery 5160) for the selected people, one per household">Print labels</button>
       <button class="btn-secondary" onclick="clearSelection()">Done</button>
     </div>
   </div>

@@ -379,6 +379,11 @@ function openBulkTagsPanel() {
   var panel = document.getElementById('p-bulk-tags-panel');
   if (panel) panel.style.display = '';
 }
+function printMailingLabels() {
+  if (!_selectedPeople.size) { alert('No people selected. Check the people you want labels for first.'); return; }
+  var ids = Array.from(_selectedPeople);
+  window.open('/admin/api/people/mailing-labels?ids=' + ids.join(','), '_blank');
+}
 function openBulkSacramentPanel() {
   if (!_selectedPeople.size) { alert('No people selected.'); return; }
   document.querySelectorAll('input[name="bulk-bap"]').forEach(function(r){ r.checked = (r.value === ''); });
