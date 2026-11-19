@@ -516,7 +516,7 @@ if (seg === 'people/bulk-member-type' && method === 'POST') {
 }
 
 // Printable mailing labels (Avery 5160 layout) for the people chosen in Select mode.
-// GET people/mailing-labels?ids=1,2,3[&skip=N] — skip leaves the first N labels blank
+// GET people/mailing-labels?ids=1,2,3[&skip=N][&copies=N|fill] — skip leaves the first N labels blank
 // for a partly used sheet. Staff only: members never see other people's addresses here.
 if (seg === 'people/mailing-labels' && method === 'GET') {
   if (role === 'member' || !(isStaff || isAdmin || canEdit)) return json({ error: 'Insufficient permissions' }, 403);
@@ -537,7 +537,8 @@ if (seg === 'people/mailing-labels' && method === 'GET') {
     ).bind(...chunk).all();
     rows = rows.concat(r.results || []);
   }
-  const html = renderMailingLabelsPage(buildMailingLabels(rows), url.searchParams.get('skip'));
+  const html = renderMailingLabelsPage(buildMailingLabels(rows), url.searchParams.get('skip'),
+    url.searchParams.get('copies') === 'fill' ? 'fill' : url.searchParams.get('copies'));
   return new Response(html, { headers: { 'Content-Type': 'text/html;charset=UTF-8', 'Cache-Control': 'no-store' } });
 }
 
