@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { handlePeopleApi } from '../src/api-people.js';
-import { buildMailingLabels, renderMailingLabelsPage } from '../src/mailing-labels.js';
+import { buildMailingLabels, renderMailingLabelsPage, expandLabelCopies } from '../src/mailing-labels.js';
 
 function realSchema() {
   const sqlite = new DatabaseSync(':memory:');
@@ -83,5 +83,27 @@ describe('GET people/mailing-labels', () => {
     expect(ok.text).toContain('Webster Groves, MO 63119');
     const denied = await getLabels(db, [1], 'member', false);
     expect(denied.status).toBe(403);
+  });
+});
+
+describe('label copies', () => {
+  const three = ['A', 'B', 'C'].map(n => ({ name: n, lines: ['1 St', 'X, MO 1'] }));
+  it('repeats the whole list N times, in order', () => {
+    expect(expandLabelCopies(three, 2).map(l => l.name).join('')).toBe('ABCABC');
+  });
+  it('fill repeats until the last sheet is full, counting skipped labels', () => {
+    expect(expandLabelCopies(three, 'fill').length).toBe(30);
+    expect(expandLabelCopies(three, 'fill', 5).length).toBe(25);
+    expect(expandLabelCopies(three, 'fill').slice(27).map(l => l.name).join('')).toBe('ABC');
+  });
+  it('clamps bad input and handles an empty list', () => {
+    expect(expandLabelCopies(three, '0').length).toBe(3);
+    expect(expandLabelCopies(three, '999').length).toBe(30);
+    expect(expandLabelCopies([], 'fill')).toEqual([]);
+  });
+  it('renders a full sheet with fill', () => {
+    const html = renderMailingLabelsPage({ labels: three, skipped: [] }, 0, 'fill');
+    expect((html.match(/<div class="nm">/g) || []).length).toBe(30);
+    expect(html).toContain('3 addresses');
   });
 });
