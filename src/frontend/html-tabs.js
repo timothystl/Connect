@@ -18,6 +18,7 @@ export const HTML_TABS_1 = String.raw`<!-- ═══ HOME / DASHBOARD TAB ══
       <button class="btn-secondary no-member" id="p-archive-btn" onclick="toggleArchiveView()" aria-pressed="false" title="Show archived and deceased people">Archived</button>
       <button class="btn-secondary no-member" id="p-select-btn" onclick="toggleSelectMode()" aria-pressed="false">Select</button>
       <button class="btn-secondary no-member" onclick="printDirectory()">Print directory</button>
+      <button class="btn-secondary no-member" onclick="printMailingLabels()" title="Mailing labels (Avery 5160) for everyone in the list below, or only the checked people when Select is on">Print labels</button>
     </div>
     <button class="btn-primary require-edit ppl-add-btn" onclick="openPersonEdit(null)"><svg viewBox="0 0 24 24" aria-hidden="true" class="btn-ic"><path d="M12 5v14"/><path d="M5 12h14"/></svg>Add person</button>
   </div>
@@ -35,7 +36,6 @@ export const HTML_TABS_1 = String.raw`<!-- ═══ HOME / DASHBOARD TAB ══
       <button class="btn-secondary" onclick="openBulkTagsPanel()">Tags</button>
       <button class="btn-secondary" onclick="openBulkCommPanel()">Communications</button>
       <button class="btn-secondary" onclick="openBulkSacramentPanel()">Sacraments</button>
-      <button class="btn-secondary" onclick="printMailingLabels()" title="Print mailing labels (Avery 5160) for the selected people, one per household">Print labels</button>
       <button class="btn-secondary" onclick="clearSelection()">Done</button>
     </div>
   </div>

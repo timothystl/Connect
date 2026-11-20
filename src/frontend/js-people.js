@@ -27,9 +27,9 @@ function debouncePeople() {
 // a fast narrow one ("smith") and repaint the list with the wrong results —
 // which reads to the user as the search being laggy or plain wrong.
 var _pLoadSeq = 0;
-function loadPeople(resetPage) {
-  if (resetPage) peopleFilter.offset = 0;
-  var mySeq = ++_pLoadSeq;
+// The current People filters (search, member type, tags, ...) as query params, without paging.
+// Shared by the list and by Print labels, so labels always match what the list shows.
+function peopleFilterParams() {
   var params = new URLSearchParams();
   if (peopleFilter.q) params.set('q', peopleFilter.q);
   if (peopleFilter.mt) params.set('member_type', peopleFilter.mt);
@@ -41,11 +41,17 @@ function loadPeople(resetPage) {
   if (peopleFilter.sacrament) params.set('sacrament', peopleFilter.sacrament);
   if (peopleFilter.baptized) params.set('baptized', peopleFilter.baptized);
   if (peopleFilter.confirmed) params.set('confirmed', peopleFilter.confirmed);
+  if (_archiveView) params.set('archived', '1');
+  return params;
+}
+function loadPeople(resetPage) {
+  if (resetPage) peopleFilter.offset = 0;
+  var mySeq = ++_pLoadSeq;
+  var params = peopleFilterParams();
   params.set('limit', peopleFilter.limit);
   params.set('offset', peopleFilter.offset);
   params.set('sort', peopleFilter.sort || 'last_name');
   params.set('dir', peopleFilter.dir || 'asc');
-  if (_archiveView) params.set('archived', '1');
   setStatus('p-status', 'Loading…');
   api('/admin/api/people?' + params).then(function(d) {
     if (mySeq !== _pLoadSeq) return; // a newer search has since been issued
@@ -379,10 +385,43 @@ function openBulkTagsPanel() {
   var panel = document.getElementById('p-bulk-tags-panel');
   if (panel) panel.style.display = '';
 }
+// Print labels: for the checked people when Select is on, otherwise for everyone the current
+// filters match (every page, not just the 25 shown). The tab is opened before the lookup so
+// the browser treats it as a click-opened window rather than blocking it as a pop-up.
+var MAILING_LABEL_MAX = 1000;
+function openMailingLabels(win, ids) {
+  var url = '/admin/api/people/mailing-labels?ids=' + ids.join(',');
+  if (win) win.location.href = url; else window.open(url, '_blank');
+}
 function printMailingLabels() {
-  if (!_selectedPeople.size) { alert('No people selected. Check the people you want labels for first.'); return; }
-  var ids = Array.from(_selectedPeople);
-  window.open('/admin/api/people/mailing-labels?ids=' + ids.join(','), '_blank');
+  if (_selectMode && _selectedPeople.size) {
+    openMailingLabels(null, Array.from(_selectedPeople));
+    return;
+  }
+  var total = _peopleTotal || 0;
+  if (!total) { alert('No one matches the current filters.'); return; }
+  if (total > MAILING_LABEL_MAX) { alert('That is ' + total + ' people. Narrow the list with Filters (for example, a tag) to ' + MAILING_LABEL_MAX + ' or fewer, then try again.'); return; }
+  if (total > 60 && !confirm('Print labels for all ' + total + ' people in this list?')) return;
+  var win = window.open('', '_blank');
+  if (win) { try { win.document.write('<p style="font-family:sans-serif;padding:24px;">Preparing labels…</p>'); } catch (e) {} }
+  var ids = [], PAGE = 200;
+  function next(offset) {
+    var params = peopleFilterParams();
+    params.set('limit', PAGE); params.set('offset', offset);
+    params.set('sort', 'last_name'); params.set('dir', 'asc');
+    return api('/admin/api/people?' + params).then(function(d) {
+      var batch = (d && d.people) || [];
+      batch.forEach(function(p) { ids.push(p.id); });
+      if (batch.length === PAGE && ids.length < MAILING_LABEL_MAX) return next(offset + PAGE);
+    });
+  }
+  next(0).then(function() {
+    if (!ids.length) { if (win) win.close(); alert('No one matches the current filters.'); return; }
+    openMailingLabels(win, ids.slice(0, MAILING_LABEL_MAX));
+  }).catch(function(err) {
+    if (win) win.close();
+    if (err.message !== 'Unauthorized') alert('Could not load the list for labels: ' + err.message);
+  });
 }
 function openBulkSacramentPanel() {
   if (!_selectedPeople.size) { alert('No people selected.'); return; }
