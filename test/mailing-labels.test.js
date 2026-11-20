@@ -107,3 +107,12 @@ describe('label copies', () => {
     expect(html).toContain('3 addresses');
   });
 });
+
+describe('label sheet pickers', () => {
+  it('do not call URL inside an inline handler (it resolves to document.URL there)', () => {
+    const html = renderMailingLabelsPage({ labels: [{ name: 'A', lines: ['1 St'] }], skipped: [] });
+    for (const m of html.matchAll(/on\w+="([^"]*)"/g)) expect(m[1]).not.toMatch(/\bURL\b/);
+    expect(html).toContain("setLabelOption('copies', this.value)");
+    expect(html).toContain('new window.URL(window.location.href)');
+  });
+});

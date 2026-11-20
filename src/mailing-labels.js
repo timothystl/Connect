@@ -148,10 +148,10 @@ html,body{margin:0;padding:0;background:#e9e4dd;font-family:Arial,Helvetica,sans
   <div class="row">
     <button onclick="window.print()">Print labels</button>
     <label>Start at label
-      <select onchange="var u=new URL(location.href);u.searchParams.set('skip',this.value);location.href=u.toString();">${skipOpts}</select>
+      <select onchange="setLabelOption('skip', this.value)">${skipOpts}</select>
     </label>
     <label>Copies of each
-      <select onchange="var u=new URL(location.href);u.searchParams.set('copies',this.value);location.href=u.toString();">${copyOpts}</select>
+      <select onchange="setLabelOption('copies', this.value)">${copyOpts}</select>
     </label>
     <span style="margin-left:auto;">${people} ${people === 1 ? 'address' : 'addresses'} &bull; ${labels.length} label${labels.length === 1 ? '' : 's'} &bull; ${pages} sheet${pages === 1 ? '' : 's'}</span>
   </div>
@@ -159,5 +159,14 @@ html,body{margin:0;padding:0;background:#e9e4dd;font-family:Arial,Helvetica,sans
   ${skippedHtml}
 </div>
 ${sheets.join('\n') || '<div class="sheet"></div>'}
+<script>
+// Not inline in onchange: inside an inline handler the bare name URL resolves to document.URL
+// (a string), so "new URL(...)" threw and the pickers silently did nothing.
+function setLabelOption(key, value) {
+  var u = new window.URL(window.location.href);
+  u.searchParams.set(key, value);
+  window.location.href = u.toString();
+}
+</script>
 </body></html>`;
 }
