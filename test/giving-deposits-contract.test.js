@@ -150,7 +150,7 @@ describe('Deposit tools for Finance (giving-deposit-v1 and the deposit write ops
     expect(before.unassigned.map((g) => g.id)).toEqual([4, 3, 2, 1]); // no batch has deposit lines yet
     expect(before.batches_to_add.map((b) => b.id)).toEqual([1]);
     await write(db, { op: 'deposit_batch', batch_id: 1, deposit_date: '2026-09-21' });
-    expect((await detail(db, dep.deposit_id)).unassigned.map((g) => g.id)).toEqual([4, 3]); // batch 1 is now deposited by its line
+    expect((await detail(db, dep.deposit_id, '&from=2026-09-01&to=2026-09-30')).unassigned.map((g) => g.id)).toEqual([4, 3]); // batch 1 is now deposited by its line
     await write(db, { op: 'assign_gifts', deposit_id: dep.deposit_id, entry_ids: [3, 4, 1] });
     expect(raw.prepare('SELECT id FROM giving_entries WHERE deposit_id=? ORDER BY id').all(dep.deposit_id).map((r) => r.id)).toEqual([1, 3, 4]);
     await write(db, { op: 'unassign_gifts', deposit_id: dep.deposit_id, entry_ids: [1] });
