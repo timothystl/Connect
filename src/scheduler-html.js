@@ -1245,7 +1245,7 @@ body.embedded #app-content { display:block!important; }
   </div>
   <div class="panel-body">
     <p style="font-size:.85rem;color:var(--warm-gray);margin-bottom:4px;">
-      Ask eligible volunteers to fill an open slot. Only people qualified for that role on that Sunday are emailed — no mass blasts.
+      Ask eligible volunteers to fill an open slot, including special services like Thanksgiving or Christmas Eve. Only people qualified for that role on that date are emailed — no mass blasts.
     </p>
     <p style="font-size:.82rem;color:var(--warm-gray);margin-bottom:16px;">
       Requires a Resend API key configured in Settings.
@@ -6263,6 +6263,28 @@ function getOpenSlots() {
         declined: confStatus === 'declined', needsChanges: confStatus === 'needs_changes' });
     });
   });
+
+  // Special services (Thanksgiving, Christmas Eve, Ash Wednesday...) set their own
+  // service times and roles. Each role listed for a service time with nobody assigned
+  // is an open slot. Specials carry no RSVP confirmations, and the 8am/10:45am
+  // service preference does not apply to their times, so eligibility is checked
+  // like a shared role (blackout dates and absences still apply).
+  currentSchedule.forEach(function(row) {
+    if (row.type !== 'special') return;
+    var dateStr = fmtDate(row.date);
+    var dateISO = row.date.toISOString().slice(0, 10);
+    (row.services || []).forEach(function(svc) {
+      (svc.roles || []).forEach(function(role) {
+        if ((svc.assignments || {})[role]) return;
+        var pool = people.filter(function(p) {
+          return p.roles && p.roles.indexOf(role) !== -1 && eligibleForRequest(p, 'shared', dateISO);
+        });
+        slots.push({ date: dateStr, dateISO: dateISO, ordinal: 0, svc: svc.time || 'Service', role: role, pool: pool,
+          specialName: row.name || 'Special Service', declined: false, needsChanges: false });
+      });
+    });
+  });
+  slots.sort(function(a, b) { return a.dateISO < b.dateISO ? -1 : a.dateISO > b.dateISO ? 1 : 0; });
   return slots;
 }
 
@@ -6305,13 +6327,13 @@ function _renderNotifyPanelBody(slots) {
   }
 
   // Build the week-picker dropdown from unique Sundays present in the open-slots list.
-  // (Special services are excluded from getOpenSlots, so we only deal with Sundays here.)
+  // Special services appear under their own date alongside the Sundays.
   var seenDates = {};
   var sundayOptions = [];
   slots.forEach(function(s){
     if (seenDates[s.dateISO]) return;
     seenDates[s.dateISO] = true;
-    sundayOptions.push({ iso: s.dateISO, label: s.date });
+    sundayOptions.push({ iso: s.dateISO, label: s.date + (s.specialName ? ' \\u2014 ' + s.specialName : '') });
   });
   sundayOptions.sort(function(a,b){ return a.iso < b.iso ? -1 : 1; });
   var optsHtml = '<option value="all">All weeks (' + slots.length + ' open)</option>';
@@ -6390,7 +6412,9 @@ function renderNotifySlots(weekFilter) {
           ? '<input type="checkbox" class="notify-slot-cb" data-slot-idx="' + cacheIdx + '" checked style="margin:0;">'
           : '<input type="checkbox" disabled style="margin:0;opacity:0.35;" title="No eligible volunteers with email">')
       + '</td>'
-      + '<td style="padding:7px 8px;vertical-align:top;white-space:nowrap;">' + esc(slot.date) + '</td>'
+      + '<td style="padding:7px 8px;vertical-align:top;white-space:nowrap;">' + esc(slot.date)
+      + (slot.specialName ? '<div style="font-size:0.74rem;color:var(--amber);font-weight:600;white-space:normal;">' + esc(slot.specialName) + '</div>' : '')
+      + '</td>'
       + '<td style="padding:7px 8px;vertical-align:top;white-space:nowrap;">' + esc(slot.svc) + '</td>'
       + '<td style="padding:7px 8px;vertical-align:top;font-weight:600;">' + esc(roleLabel(slot.role))
       + (slot.declined ? ' <span style="font-size:0.72rem;font-weight:400;color:var(--on-error-bg);background:var(--error-bg);border:1px solid var(--error-border);border-radius:4px;padding:1px 5px;">\u2717 Declined</span>' : '')
@@ -6439,7 +6463,7 @@ function buildVolunteerRequestHtml(person, slot, replyTo) {
     + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FDF3E2;border-radius:8px;margin-bottom:8px;"><tr><td style="padding:16px 20px;">'
     + '<div style="font-size:0.7rem;font-weight:700;color:#C07D1E;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Volunteer Needed</div>'
     + '<div style="font-family:\\'Lora\\',Georgia,serif;font-weight:700;font-size:1.1rem;color:#0A3C5C;">' + esc(roleLabel(slot.role)) + '</div>'
-    + '<div style="font-size:0.88rem;color:#3D3530;margin-top:2px;">' + esc(slot.date) + ' &nbsp;&middot;&nbsp; ' + esc(svcLabel) + ' Service</div>'
+    + '<div style="font-size:0.88rem;color:#3D3530;margin-top:2px;">' + esc(slot.date) + ' &nbsp;&middot;&nbsp; ' + (slot.specialName ? esc(slot.specialName) + ' &nbsp;&middot;&nbsp; ' : '') + esc(svcLabel) + ' Service</div>'
     + '</td></tr></table>'
     + '<a href="mailto:' + esc(replyTo || '') + '?subject=' + encodeURIComponent('Re: Volunteer needed \u2014 ' + roleLabel(slot.role) + ' on ' + slot.date) + '" style="display:block;text-align:center;background:#6B8F71;color:white;text-decoration:none;font-weight:700;font-size:0.92rem;padding:14px;border-radius:8px;margin:18px 0 8px;">I\u2019ll Serve</a>'
     + '<div style="text-align:center;font-size:0.78rem;color:#7A6E60;margin-bottom:20px;">Not able to help this time? No reply needed.</div>'
@@ -6497,12 +6521,12 @@ function sendVolunteerNotifications() {
     chain = chain.then(function() {
       var p = task.person, slot = task.slot;
       var svcLabel = slot.svc === 'both services' ? 'Both Services' : slot.svc;
-      var subject = 'Volunteer needed: ' + roleLabel(slot.role) + ' on ' + slot.date + ' \\u2014 Timothy Lutheran';
+      var subject = 'Volunteer needed: ' + roleLabel(slot.role) + ' on ' + slot.date + (slot.specialName ? ' (' + slot.specialName + ')' : '') + ' \\u2014 Timothy Lutheran';
       var textBody = [
         'Hello ' + p.name + ',',
         '',
         'We still need a volunteer for:',
-        '  ' + roleLabel(slot.role) + ' \\u2014 ' + slot.date + ' (' + svcLabel + ')',
+        '  ' + roleLabel(slot.role) + ' \\u2014 ' + slot.date + (slot.specialName ? ', ' + slot.specialName : '') + ' (' + svcLabel + ')',
         '',
         'If you\\'re available, please reply to this email to let us know.',
         'If this date doesn\\'t work, no worries \\u2014 thank you for all you do!',
