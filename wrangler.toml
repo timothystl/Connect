@@ -38,6 +38,7 @@ CONNECT_ACCESS_AUD         = "2157e4ebad435d0a4ffc568a20a073422d8b52b61f5164dd38
 
 [observability]
 enabled = true
+redact_query_string = true
 
 [observability.logs]
 enabled = true
